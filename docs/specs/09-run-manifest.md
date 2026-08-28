@@ -55,6 +55,7 @@ inputs:
     mineral:        {collection: EMITL2BMIN,  var: group_1_mineral_id}
     mineral_uncert: {collection: EMITL2BMIN,  var: group_1_band_depth_unc}
     mask:           {collection: EMITL2AMASK, var: mask}
+    frcov:          {collection: EMITL2BFRCOV, var: soil}   # already orthorectified
   band_aliases:
     view_zenith:  {role: geometry, band: 5}
     solar_zenith: {role: geometry, band: 4}
@@ -65,11 +66,15 @@ aux:
           temporal: nearest, max_age: P3D}
 
 granule_filter:
+  - {build_version: b0107_v02}          # REQUIRED - see 02 section 3
   - {max_cloud_fraction: 0.5, on_missing: fail}
   - {max_solar_zenith: 70}
+  - {month_in: [8, 9, 10, 11]}          # recurring seasonal window, not an interval
 
 pixel_mask:
+  - {ref: emit.masks:EdgeTrim, columns: 7}     # sensor-space; detector edges
   - {ref: emit.masks:L2AStandard, flags: [cloud, cirrus, water, spacecraft]}
+  - {ref: emit.masks:SoilFraction, min_soil: 0.65}
 
 scorer:
   ref: cleanest_nadir
@@ -149,6 +154,8 @@ Everything below fails in stage 1, loudly, while it is cheap:
 - every class referenced by a colour table exists in the **pinned reference matrix**, resolved by
   stable `id` and not positional index ([07 §6](07-output-mapping.md));
 - filter `on_missing` policy explicit;
+- **a vintage is pinned**, and the frozen index does not span multiple vintages unless explicitly
+  permitted ([02 §3](02-granule-index.md));
 - budget present and non-infinite.
 
 ---

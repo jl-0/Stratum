@@ -62,9 +62,35 @@ function re-reads cached geometry instead of rebuilding it.
 | `EMIT-AMD` | Precedent for deferred reduction and for the lumping/colour config. Cluster-specific; not reusable directly. |
 | `tetracorder-lite` | Upstream L2B producer. Its reference matrix defines the stable mineral `id` that lumping tables must key on. |
 
+## Not only EMIT
+
+Colorado School of Mines (with CMU and U. Wisconsin's Macrostrat) is independently building the
+same thing: tiling Tetracorder mineral maps into state- and country-wide mosaics, with a QGIS
+data stream, moving to AVIRIS-5, and aiming at cross-scale work from EMIT's 60 m down to UAV
+imagery at 6–10 cm. See [the tag-up notes](docs/notes/2026-08-28-mines-tagup.md).
+
+That makes "a framework, not an EMIT program" a present requirement rather than an aspiration.
+Multi-instrument support is a design constraint from the start — which is also why input roles and
+band aliases are resolved per collection rather than hard-coded.
+
 ## Open questions blocking design
 
 1. **Is `freq-N` in EMIT-AMD a frequency rank or a time period?** Decides how much of
    mode-through-time is new work. One question to James.
-2. **Mode over mineral ID directly, or over something continuous first?** For Phil.
-3. **AWS account, quota and Earthdata credential path.** The long pole.
+2. **Mode over mineral ID directly, or over something continuous first?** For Phil — who has since
+   leaned toward *not* reducing over binarized labels. See
+   [04 §5](docs/specs/04-cost-functions.md).
+3. **What does the vintage identifier look like in delivered metadata**, and is a reprocessed
+   granule distinguishable before download? Time-critical — see below.
+4. **AWS account, quota and Earthdata credential path.** The long pole.
+
+## Time-critical context
+
+Reprocessing of the entire EMIT catalog begins around **September 2026** and takes roughly
+**75 days**, regenerating every mineral map against Tetracorder 6 with updated reflectance. The
+mineral classes shift.
+
+For those ~10 weeks the archive is **mixed-vintage**, and any run that does not pin a vintage will
+silently blend two incompatible products into a plausible-looking result. Vintage pinning is
+therefore mandatory in the manifest, not advisory —
+[02 §3](docs/specs/02-granule-index.md), [09 §5](docs/specs/09-run-manifest.md).

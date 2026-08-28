@@ -65,32 +65,84 @@ the run report. Missing metadata is an explicit policy in the manifest
 (`on_missing: reject | keep | fail`), never the accidental result of a truth-test. Default is
 `fail` at plan time — loudly, while it is cheap to fix.
 
-### Temporal range lives here
+### Temporal range lives here — and it is not just start/end
 
 The "limit the temporal range" requirement is a `GranuleFilter`, not pipeline code. EMIT-AMD
 applies none at all and hands every observation ever acquired to the stacker. For a versioned
 annual product the range must be declared, pinned, and recorded.
 
+Two distinct capabilities, and only the first is obvious:
+
+| Filter | Expresses |
+|---|---|
+| `start` / `end` | An absolute interval — the mission window, or one delivery year |
+| `month_in: [8, 9, 10, 11]` | A **recurring seasonal** window |
+
+The seasonal form matters because the useful window recurs annually: taking August–November
+scenes over the Western US avoids peak vegetation without discarding whole years. A start/end
+range cannot express that, and building it out of many disjoint intervals is miserable.
+
+### Vintage pinning is mandatory
+
+Reprocessing of the entire catalog begins ~Sept 2026 and takes ~75 days, regenerating every
+mineral map against Tetracorder 6 with updated reflectance — **and the mineral classes shift**.
+For that window the archive is mixed-vintage, and an unpinned run will silently blend two
+incompatible products into a result that looks entirely plausible.
+
+`build_version` / collection version is therefore a **required** filter, not an optional one.
+Plan-time validation fails if a run's frozen index spans more than one vintage unless the manifest
+explicitly opts in. See [02 §3](02-granule-index.md) and
+[the tag-up notes](../notes/2026-08-28-mines-tagup.md#1-time-critical-the-reprocessing-window).
+
 ---
 
 ## 3. `PixelMask`
 
-Runs during regrid, so masked pixels never enter the observation stack.
+Runs during regrid, so masked pixels never enter the observation stack. Masks compose by
+conjunction: a pixel is eligible only if every mask in the chain admits it.
+
+### Two coordinate spaces
+
+Some masks are naturally expressed in **map geometry** (this location is water) and some in
+**sensor geometry** (this detector column is unreliable). The contract must admit both, because
+the second cannot be expressed after regridding has discarded the source column.
 
 ```python
 class PixelMask(Protocol):
-    required_roles: tuple[str, ...]          # e.g. ("mask",)
+    space: Literal["map", "sensor"] = "map"
+    required_roles: tuple[str, ...] = ()
 
     def valid(self, obs: ObsWindow, aux: AuxAccessor) -> BoolArray:
-        """(H, W) bool. True = this pixel may be used."""
+        """(H, W) bool. True = usable.
+        space="map"    -> obs is on the block grid, post-GLT.
+        space="sensor" -> obs is in raw (downtrack, crosstrack) geometry, pre-GLT.
+        """
 ```
 
-Masks compose by conjunction: a pixel is eligible only if every mask in the chain admits it.
+Sensor-space masks are applied to the raw array before the GLT is built. (They *could* be
+evaluated in map space by thresholding GLT band 1, which holds the source column — but that is a
+trick, and it fails for any mask needing raw values rather than raw indices. Applying them in raw
+space is honest and simpler.)
 
-AMD's flag semantics are a reasonable default and are expressible directly in config —
-`Cloud flag`, `Cirrus flag`, `Water flag`, `Spacecraft Flag`, with an optional `Dilated Cloud
-Flag`. Dana's additions (snow, high vegetation) enter as further entries in the chain, several of
-which will need aux data rather than the L2A mask product.
+### Built-in EMIT masks
+
+Instrument knowledge belongs in `stratum_emit`, not in user config. Per Phil at the Mines tag-up
+([notes](../notes/2026-08-28-mines-tagup.md#2-concrete-instrument-artifacts-to-mask)):
+
+| Mask | Space | Behaviour |
+|---|---|---|
+| `EdgeTrim` | sensor | Drop the outer **7 columns** each side (5 minimum). Every column is a different detector; the outermost are unreliable. |
+| `SlitDust` | sensor | Drop 2–3 columns at cross-track centre. Mostly cleaned up upstream; off by default. |
+| `L2AStandard` | map | Cloud, cirrus, water, spacecraft flags — AMD's `filter-clouds-1-4` semantics |
+| `SoilFraction` | map | Require soil fraction ≥ threshold from the `frcov` role. See §4. |
+
+**No along-track trimming.** EMIT is a push-broom collecting one continuous strip; granule
+boundaries in the along-track direction are a download convenience with no physical meaning, so
+top/bottom edges are sound. Trimming them would discard good data.
+
+AMD's flag semantics (`Cloud flag`, `Cirrus flag`, `Water flag`, `Spacecraft Flag`, optionally
+`Dilated Cloud Flag`) remain expressible directly in config. Dana's additions — snow, high
+vegetation — enter as further chain entries, several needing aux data rather than the L2A mask.
 
 ---
 
@@ -166,7 +218,38 @@ class CleanestNadir:
         s -= 0.5 * (aux.raster("slope") > 30)
         s[aux.raster("snow", date=obs.granule.datetime) > 0] = np.nan
         return s
+
+
+class PreferBareEarth:
+    """Prefer the observation that actually sees ground.
+
+    Thomas Monecke's decision-tree idea from the Mines tag-up: given several
+    observations of a pixel, most of which are vegetation, take the one that
+    isn't. Soil fraction comes from the already-orthorectified L2B FRCOV
+    product, so this costs nothing to regrid.
+    """
+    capability = "streaming"
+    required_roles = ("frcov",)
+
+    def __init__(self, min_soil=0.80, hard_floor=0.65):
+        self.min_soil, self.hard_floor = min_soil, hard_floor
+
+    def score(self, obs, aux):
+        soil = obs["soil_fraction"]
+        s = soil.copy()
+        s[soil < self.hard_floor] = np.nan     # unrecoverable; V002 used 0.65
+        return s
 ```
+
+The two thresholds are deliberate. `hard_floor=0.65` is V002's cutoff, chosen because grain-size
+retrieval "completely falls apart" below it; `min_soil=0.80` is the higher bar recommended for
+mosaicking. Keeping them separate lets the scorer *rank* between 0.65 and 0.80 rather than
+discarding that range outright — which is the "don't destroy information" principle applied at the
+smallest possible scale.
+
+> **Caveat to carry:** the current FRCOV is reportedly NPV-false-positive-prone — it reads some
+> bare soil as non-photosynthetic vegetation — so this scorer is conservative in a way that will
+> improve when FRCOV does.
 
 ### The score band is persisted
 
@@ -212,6 +295,36 @@ Parameters, following AMD's `stack:` block, which is the only working precedent:
 
 > **Open.** Whether AMD's `freq-N` is a frequency *rank* or a time *period* is unresolved, and it
 > decides how much of mode-through-time is genuinely new. See the README's open questions.
+
+### Reduce continuously where possible
+
+At the Mines tag-up Phil framed the whole problem as a Kalman filter — *"coming up with the
+appropriate loss function that one applies… to get the right solution out"* — and named the goal
+as *"a version of the world where we're not destroying all of that information,"* noting that
+Tetracorder's binarized output has already discarded some of it
+([notes](../notes/2026-08-28-mines-tagup.md#5-framing-worth-adopting)).
+
+That gives a direction on the open question of whether to take the mode over mineral IDs directly
+or over something continuous first: **prefer reducing the continuous quantities — band depth, fit,
+uncertainty — and classify at the end**, rather than voting over labels that have already thrown
+information away. Two consequences:
+
+- `ModeThroughTime` over labels stays as the baseline, because it is what AMD does and what we can
+  validate against. It should not be the only reducer we ship.
+- A `ConsensusDepth`-style reducer that aggregates band depths per candidate mineral and classifies
+  the aggregate is the more principled version, and the design should not make it awkward. This is
+  why `Reducer` receives the full snapshot stack rather than a single band.
+
+Both are the same contract; the difference is which bands the `Scorer` was asked to carry forward.
+That is the abstraction earning its keep.
+
+### Why this is pluggable at all
+
+The clearest statement of the reason came from Phil at the Mines tag-up: temporal stability is an
+open geological hypothesis, and the right assumption depends on the question being asked —
+*"if you're trying to make a base map, you probably don't care so much; if you're trying to look at
+sand dunes, you care a lot."* No single temporal algorithm is correct for both, which is precisely
+why the reducer is a plugin and not a setting.
 
 ### A no-op reducer reproduces V002
 

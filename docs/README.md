@@ -31,6 +31,12 @@ Interfaces and contracts. Numbered by dependency order, not by build order.
 | [0001 — Tech stack](decisions/ADR-0001-tech-stack.md) | Python, pixi, xarray, DuckDB, Step Functions, Terraform |
 | [0002 — Terraform/manifest boundary](decisions/ADR-0002-terraform-manifest-boundary.md) | Platform vs science configuration |
 
+## Meeting notes
+
+| Note | Why it matters |
+|---|---|
+| [2026-08-28 — Colorado School of Mines tag-up](notes/2026-08-28-mines-tagup.md) | The catalog reprocessing window, concrete detector-edge masks, FRCOV as an input, and a second potential consumer of the framework |
+
 ## Reference material
 
 [`refs/`](../refs/) — artifacts from the existing pipelines, kept verbatim.
@@ -38,6 +44,7 @@ Interfaces and contracts. Numbered by dependency order, not by build order.
 | File | Source | Why it's here |
 |---|---|---|
 | `amd-config.yml` | `/store/jamesmo/amd/repo/configs/config.yml` | The only readable record of `amd stack` parameters (`mincount`, `ignore`), the lumping `hashmap`, and the RGBA `colors` table |
+| `2026-08-28-mines-transcript.md` | Voice transcript, Mines tag-up | Source for the notes above. Attribution is unreliable — see the caveat in the notes |
 
 ## Conventions
 

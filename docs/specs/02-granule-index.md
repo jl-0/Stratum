@@ -68,6 +68,29 @@ WHERE collection = 'EMITL2BMIN'
 Predicate pushdown plus partition pruning replaces the linear scan. Building the index from
 CMR/STAC is a separate, periodic job — see §6.
 
+### Vintage is a required predicate, not an optional one
+
+Reprocessing of the **entire catalog** begins ~Sept 2026, takes ~**75 days**, and regenerates every
+mineral map against Tetracorder 6 with updated reflectance. The mineral classes shift. For roughly
+ten weeks the archive is **mixed-vintage**.
+
+An unpinned query over that window returns some granules at the old vintage and some at the new,
+blends two incompatible products, and produces a result that looks entirely plausible. Nothing in
+the data announces the problem.
+
+Requirements:
+
+- `build_version` (and collection version) are **indexed, first-class columns**, never hard-coded
+  as `convert_fids.py` does with `b0106_v01`;
+- the index records **when each row was last observed**, so a re-index after reprocessing is
+  detectable rather than silent;
+- **plan-time validation fails** if a run's frozen index spans more than one vintage, unless the
+  manifest explicitly opts in with a documented reason;
+- the run report states the vintage(s) selected, prominently.
+
+Open: what the version identifier actually looks like in delivered metadata, and whether a
+reprocessed granule is distinguishable from its predecessor *before* download. Confirm with Phil.
+
 ---
 
 ## 4. Null cloud fraction is a policy, not an accident
