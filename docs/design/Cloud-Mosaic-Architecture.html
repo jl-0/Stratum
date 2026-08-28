@@ -1,0 +1,1892 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Stratum</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap">
+<style>
+  :root{
+    /* House palette, inherited from the SE-Documentation primers */
+    --bg:#11100e;
+    --panel:#1b1a17;
+    --panel2:#232119;
+    --panel3:#2b2822;
+    --ink:#ece6da;
+    --muted:#a99f8c;
+    --faint:#7d7566;
+    --rule:#3a352b;
+    --accent:#d98f3a;      /* goethite / desert ochre */
+    --accent2:#7fb069;     /* vegetation green */
+    --hematite:#a8472f;
+    --sky:#5aa9d6;
+    --violet:#9b8bc4;
+    --link:#e0a85c;
+    --code-bg:#0c0b09;
+    --maxw:1180px;
+    --measure:70ch;
+    --sans:"IBM Plex Sans",-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    --mono:"IBM Plex Mono",ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  }
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{
+    margin:0;background:var(--bg);color:var(--ink);
+    font:16px/1.65 var(--sans);
+    -webkit-font-smoothing:antialiased;
+  }
+  a{color:var(--link);text-decoration:none}
+  a:hover{text-decoration:underline}
+  code,pre,.mono{font-family:var(--mono)}
+
+  /* ---- masthead ---- */
+  header.masthead{
+    background:
+      radial-gradient(1100px 420px at 78% -60%, rgba(217,143,58,.20), transparent 62%),
+      radial-gradient(900px 380px at 12% -30%, rgba(90,169,214,.13), transparent 60%),
+      linear-gradient(162deg,#1d1c19 0%,#121109 72%);
+    border-bottom:1px solid var(--rule);
+    padding:56px 28px 40px;
+  }
+  .masthead-inner{max-width:var(--maxw);margin:0 auto}
+  .eyebrow{
+    letter-spacing:.22em;text-transform:uppercase;font-size:12px;
+    color:var(--accent);font-weight:600;margin:0 0 14px;
+  }
+  h1{font-size:3rem;line-height:1.06;margin:0 0 6px;font-weight:700;letter-spacing:-.022em;text-wrap:balance}
+  .subtitle{font-size:1.28rem;color:var(--ink);font-weight:500;margin:0 0 16px;letter-spacing:-.01em}
+  .masthead p.lede{font-size:1.06rem;color:var(--muted);max-width:66ch;margin:0}
+  .meta-row{margin-top:24px;display:flex;flex-wrap:wrap;gap:9px}
+  .pill{
+    font-size:12.5px;background:var(--panel2);border:1px solid var(--rule);
+    color:var(--muted);padding:5px 12px;border-radius:100px;
+  }
+  .pill strong{color:var(--ink);font-weight:600}
+
+  /* ---- layout ---- */
+  .wrap{max-width:var(--maxw);margin:0 auto;display:grid;grid-template-columns:238px 1fr;gap:44px;padding:36px 28px 110px;align-items:start}
+  nav.toc{position:sticky;top:18px;align-self:start;max-height:calc(100vh - 36px);overflow:auto;font-size:13.5px}
+  nav.toc h2{font-size:11px;letter-spacing:.16em;text-transform:uppercase;color:var(--accent);margin:0 0 10px;font-weight:600}
+  nav.toc ol{list-style:none;margin:0;padding:0}
+  nav.toc li{margin:1px 0}
+  nav.toc a{display:block;color:var(--muted);padding:5px 10px;border-left:2px solid transparent;border-radius:0 6px 6px 0;line-height:1.35}
+  nav.toc a:hover{color:var(--ink);background:var(--panel);border-left-color:var(--accent);text-decoration:none}
+  nav.toc .num{color:var(--faint);font-family:var(--mono);font-size:11.5px;margin-right:7px}
+
+  main{min-width:0;display:flex;flex-direction:column;gap:46px}
+  section{scroll-margin-top:20px}
+  main > section > *{max-width:var(--measure)}
+  main > section > .full,
+  main > section > figure,
+  main > section > table,
+  main > section > .tablewrap,
+  main > section > .stage-flow,
+  main > section > .grid2,
+  main > section > .grid3,
+  main > section > pre{max-width:none}
+
+  h2{font-size:1.72rem;line-height:1.2;margin:0 0 4px;font-weight:650;letter-spacing:-.015em;text-wrap:balance}
+  h2 .h-num{font-family:var(--mono);font-size:.92rem;color:var(--accent);font-weight:500;display:block;margin-bottom:8px;letter-spacing:.04em}
+  h3{font-size:1.12rem;margin:26px 0 2px;font-weight:600;color:var(--ink);letter-spacing:-.005em;text-wrap:balance}
+  h4{font-size:.99rem;margin:18px 0 2px;font-weight:600;color:var(--accent);letter-spacing:.01em}
+  p{margin:12px 0}
+  ul,ol{margin:12px 0;padding-left:22px}
+  li{margin:6px 0}
+  li::marker{color:var(--faint)}
+  strong{color:#fff;font-weight:600}
+  .muted{color:var(--muted)}
+  hr.rule{border:0;border-top:1px solid var(--rule);margin:6px 0 0}
+
+  code{background:var(--code-bg);border:1px solid var(--rule);padding:1.5px 5px;border-radius:4px;font-size:.865em;color:#e8c48a}
+  pre{
+    background:var(--code-bg);border:1px solid var(--rule);border-radius:9px;
+    padding:16px 18px;overflow-x:auto;font-size:13px;line-height:1.62;margin:14px 0;
+  }
+  pre code{background:none;border:0;padding:0;color:var(--ink);font-size:13px}
+  pre .c{color:var(--faint);font-style:italic}
+  pre .k{color:var(--accent)}
+  pre .s{color:var(--accent2)}
+  pre .f{color:var(--sky)}
+  pre .n{color:var(--violet)}
+  .pre-label{
+    font-family:var(--mono);font-size:11px;letter-spacing:.1em;text-transform:uppercase;
+    color:var(--faint);margin:16px 0 -6px;display:block;
+  }
+
+  /* ---- tables ---- */
+  .tablewrap{overflow-x:auto;margin:16px 0;border:1px solid var(--rule);border-radius:9px;background:var(--panel)}
+  table{border-collapse:collapse;width:100%;font-size:14px;min-width:520px}
+  th,td{text-align:left;padding:10px 14px;border-bottom:1px solid var(--rule);vertical-align:top}
+  thead th{
+    background:var(--panel2);color:var(--accent);font-size:11px;letter-spacing:.11em;
+    text-transform:uppercase;font-weight:600;white-space:nowrap;
+  }
+  tbody tr:last-child td{border-bottom:0}
+  td.mono,th.mono{font-family:var(--mono);font-size:12.5px}
+  .num-col{font-variant-numeric:tabular-nums;text-align:right;white-space:nowrap}
+
+  /* ---- notes ---- */
+  .note{
+    border-left:3px solid var(--rule);background:var(--panel);
+    padding:14px 18px;border-radius:0 8px 8px 0;margin:18px 0;font-size:14.5px;
+  }
+  .note p:first-child{margin-top:0}
+  .note p:last-child{margin-bottom:0}
+  .note .tag{
+    font-family:var(--mono);font-size:10.5px;letter-spacing:.13em;text-transform:uppercase;
+    font-weight:600;display:block;margin-bottom:7px;
+  }
+  .note.key{border-left-color:var(--accent);background:linear-gradient(90deg,rgba(217,143,58,.09),rgba(217,143,58,.015))}
+  .note.key .tag{color:var(--accent)}
+  .note.warn{border-left-color:var(--hematite);background:linear-gradient(90deg,rgba(168,71,47,.11),rgba(168,71,47,.02))}
+  .note.warn .tag{color:#d47a5f}
+  .note.find{border-left-color:var(--sky);background:linear-gradient(90deg,rgba(90,169,214,.09),rgba(90,169,214,.015))}
+  .note.find .tag{color:var(--sky)}
+  .note.ok{border-left-color:var(--accent2);background:linear-gradient(90deg,rgba(127,176,105,.09),rgba(127,176,105,.015))}
+  .note.ok .tag{color:var(--accent2)}
+
+  /* ---- stage flow diagram ---- */
+  .stage-flow{display:flex;flex-direction:column;gap:10px;margin:22px 0}
+  .stage{
+    display:grid;grid-template-columns:52px 1fr;gap:0;
+    border:1px solid var(--rule);border-radius:10px;overflow:hidden;background:var(--panel);
+  }
+  .stage-idx{
+    background:var(--panel2);display:flex;align-items:center;justify-content:center;
+    font-family:var(--mono);font-size:15px;font-weight:600;color:var(--accent);
+    border-right:1px solid var(--rule);
+  }
+  .stage-body{padding:13px 17px;min-width:0}
+  .stage-hd{display:flex;flex-wrap:wrap;align-items:baseline;gap:10px;margin-bottom:5px}
+  .stage-name{font-weight:650;font-size:15.5px;letter-spacing:-.005em}
+  .stage-unit{
+    font-family:var(--mono);font-size:11px;color:var(--faint);
+    border:1px solid var(--rule);border-radius:4px;padding:1px 7px;background:var(--code-bg);
+  }
+  .stage-where{font-family:var(--mono);font-size:11px;padding:1px 7px;border-radius:4px;font-weight:500}
+  .w-lambda{color:var(--sky);background:rgba(90,169,214,.13);border:1px solid rgba(90,169,214,.3)}
+  .w-batch{color:var(--accent);background:rgba(217,143,58,.13);border:1px solid rgba(217,143,58,.3)}
+  .w-either{color:var(--violet);background:rgba(155,139,196,.13);border:1px solid rgba(155,139,196,.3)}
+  .stage-desc{font-size:13.8px;color:var(--muted);margin:0;line-height:1.55}
+  .stage-desc .cache{color:var(--accent2);font-weight:600}
+  .flow-arrow{
+    text-align:center;color:var(--faint);font-size:15px;line-height:1;margin:-4px 0;
+    font-family:var(--mono);
+  }
+
+  /* ---- comparison / lineage cards ---- */
+  .grid2{display:grid;grid-template-columns:repeat(auto-fit,minmax(288px,1fr));gap:14px;margin:18px 0}
+  .grid3{display:grid;grid-template-columns:repeat(auto-fit,minmax(215px,1fr));gap:14px;margin:18px 0}
+  .card{
+    background:var(--panel);border:1px solid var(--rule);border-radius:10px;padding:16px 18px;
+  }
+  .card h4{margin-top:0}
+  .card p{font-size:14px;color:var(--muted);margin:8px 0 0}
+  .card p:first-of-type{margin-top:6px}
+  .card .hd{
+    font-weight:650;font-size:15px;margin:0 0 3px;color:var(--ink);
+  }
+  .card .kicker{
+    font-family:var(--mono);font-size:10.5px;letter-spacing:.13em;text-transform:uppercase;
+    color:var(--faint);margin:0 0 9px;
+  }
+  .card.hl{border-color:rgba(217,143,58,.42);background:linear-gradient(165deg,rgba(217,143,58,.07),var(--panel) 55%)}
+
+  /* ---- hook taxonomy ladder ---- */
+  .hooks{display:flex;flex-direction:column;gap:2px;margin:20px 0;border:1px solid var(--rule);border-radius:10px;overflow:hidden}
+  .hook{display:grid;grid-template-columns:minmax(120px,150px) 1fr minmax(105px,135px);gap:0;background:var(--panel);border-bottom:1px solid var(--rule)}
+  .hook:last-child{border-bottom:0}
+  .hook-name{
+    padding:12px 15px;font-family:var(--mono);font-size:12.5px;font-weight:600;
+    border-right:1px solid var(--rule);background:var(--panel2);display:flex;align-items:center;
+  }
+  .hook-desc{padding:12px 16px;font-size:13.7px;color:var(--muted);line-height:1.5}
+  .hook-cost{
+    padding:12px 15px;font-family:var(--mono);font-size:11.5px;color:var(--faint);
+    border-left:1px solid var(--rule);display:flex;align-items:center;
+  }
+  .h1c{color:var(--accent2)} .h2c{color:var(--sky)} .h3c{color:var(--accent)} .h4c{color:var(--hematite)}
+
+  /* ---- footer ---- */
+  footer{border-top:1px solid var(--rule);padding:30px 28px 60px;background:var(--panel)}
+  .footer-inner{max-width:var(--maxw);margin:0 auto;font-size:13.5px;color:var(--faint)}
+  .footer-inner a{color:var(--muted)}
+
+  .kbd{font-family:var(--mono);font-size:12px;color:var(--accent2)}
+  .checklist{list-style:none;padding-left:0}
+  .checklist li{padding-left:26px;position:relative}
+  .checklist li::before{
+    content:"";position:absolute;left:0;top:.55em;width:11px;height:11px;
+    border:1.5px solid var(--rule);border-radius:3px;
+  }
+
+  :focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:3px}
+  @media (prefers-reduced-motion:reduce){html{scroll-behavior:auto}*{transition:none!important;animation:none!important}}
+  @media (max-width:900px){
+    .wrap{grid-template-columns:1fr;gap:22px;padding:26px 20px 80px}
+    nav.toc{position:static;max-height:none;border:1px solid var(--rule);border-radius:10px;padding:16px;background:var(--panel)}
+    h1{font-size:2.15rem}
+    header.masthead{padding:38px 20px 30px}
+    .hook{grid-template-columns:1fr}
+    .hook-name,.hook-cost{border-right:0;border-left:0;border-bottom:1px solid var(--rule)}
+  }
+</style>
+</head>
+<body>
+
+<header class="masthead">
+  <div class="masthead-inner">
+    <p class="eyebrow">EMIT Critical Minerals &middot; L3 Mosaic &middot; Architecture Proposal</p>
+    <h1>Stratum</h1>
+    <p class="subtitle">A cost-function-driven mosaic engine for the cloud</p>
+    <p class="lede">
+      Three times now, EMIT has written a mineral mosaic pipeline from scratch. Each one hard-codes a
+      different answer to the same question: <em>when several observations cover the same patch of
+      ground, which one wins?</em> This proposal factors that question out into a plugin contract,
+      puts the expensive geometry behind a cache, and runs the whole thing on AWS as a declarative,
+      budget-limited job. Science teams then iterate on a cost function instead of on a pipeline.
+    </p>
+    <div class="meta-row">
+      <span class="pill"><strong>Status</strong> &nbsp;Draft for discussion</span>
+      <span class="pill"><strong>Author</strong> &nbsp;Jeff Leach</span>
+      <span class="pill"><strong>Date</strong> &nbsp;26 Aug 2026</span>
+      <span class="pill"><strong>Supersedes nothing</strong> &nbsp;input to Phase&nbsp;0&ndash;2</span>
+      <span class="pill">&ldquo;Stratum&rdquo; is a working name</span>
+    </div>
+  </div>
+</header>
+
+<div class="wrap">
+
+<nav class="toc" aria-label="Table of contents">
+  <h2>Contents</h2>
+  <ol>
+    <li><a href="#thesis"><span class="num">00</span>Thesis</a></li>
+    <li><a href="#evidence"><span class="num">01</span>What the code actually does</a></li>
+    <li><a href="#abstraction"><span class="num">02</span>The core abstraction</a></li>
+    <li><a href="#hooks"><span class="num">03</span>Five hooks, not one</a></li>
+    <li><a href="#contract"><span class="num">04</span>The cost-function contract</a></li>
+    <li><a href="#blocks"><span class="num">05</span>Blocks: the scaling move</a></li>
+    <li><a href="#cache"><span class="num">06</span>Caching geometry</a></li>
+    <li><a href="#mapping"><span class="num">06a</span>Output mapping</a></li>
+    <li><a href="#aux"><span class="num">06b</span>Ancillary data</a></li>
+    <li><a href="#manifest"><span class="num">07</span>The run manifest</a></li>
+    <li><a href="#aws"><span class="num">08</span>AWS topology</a></li>
+    <li><a href="#packaging"><span class="num">09</span>Packaging &amp; Terraform</a></li>
+    <li><a href="#dataaccess"><span class="num">10</span>Data access reality</a></li>
+    <li><a href="#divergence"><span class="num">11</span>Where this diverges from the sketch</a></li>
+    <li><a href="#cost"><span class="num">12</span>Cost &amp; sizing</a></li>
+    <li><a href="#risks"><span class="num">13</span>Risks &amp; open questions</a></li>
+    <li><a href="#plan"><span class="num">14</span>How to build it</a></li>
+  </ol>
+</nav>
+
+<main>
+
+<!-- ============ 00 THESIS ============ -->
+<section id="thesis">
+  <h2><span class="h-num">00</span>Thesis</h2>
+  <hr class="rule">
+  <p>
+    Every mosaic EMIT has built decomposes into the same four operations, and only the third and
+    fourth are science:
+  </p>
+  <ol>
+    <li><strong>Select</strong> which granules are candidates &mdash; a query over an index.</li>
+    <li><strong>Regrid</strong> each granule onto a common grid &mdash; pure geometry, deterministic,
+        expensive, and <em>completely independent of the science</em>.</li>
+    <li><strong>Resolve</strong> which observation wins in each cell &mdash; the cost function.</li>
+    <li><strong>Reduce</strong> a stack of per-period snapshots into one product &mdash; the temporal
+        aggregator.</li>
+  </ol>
+  <p>
+    The three existing lineages differ almost entirely in steps 3 and 4, yet each reimplements 1 and 2
+    to get there. Worse, V002 <em>fuses</em> step 3 into step 2, which is why changing the selection
+    criterion means rebuilding all the geometry.
+  </p>
+  <div class="note key">
+    <span class="tag">The proposal in one sentence</span>
+    <p>
+      Build a small framework that owns steps 1, 2 and the execution plumbing; expose steps 3 and 4 as
+      versioned Python plugins; content-address the step-2 output so that iterating on a cost function
+      is minutes of compute rather than days; and drive the whole thing from one declarative manifest
+      that carries its own spatial, temporal and <em>budget</em> limits.
+    </p>
+  </div>
+  <p>
+    Everything below is downstream of that. The AWS choices matter less than the decomposition &mdash;
+    but they matter, and §08 argues for a specific one that is <em>not</em> &ldquo;the engine is a
+    Lambda.&rdquo;
+  </p>
+</section>
+
+<!-- ============ 01 EVIDENCE ============ -->
+<section id="evidence">
+  <h2><span class="h-num">01</span>What the code actually does</h2>
+  <hr class="rule">
+  <p>
+    Before generalizing, it is worth being exact about what the two working pipelines do, because
+    they disagree in a way the design documents do not capture &mdash; and the disagreement is the
+    most useful thing in this whole analysis.
+  </p>
+
+  <h3>V002 fuses selection into the regrid</h3>
+  <p>
+    <code>SpectralUtil</code>&rsquo;s <code>build_obs_nc</code> walks the candidate granules one at a
+    time, and keeps a running best-score array over the output grid. The entire selection mechanism is
+    an <em>argmin/argmax over a single scalar band</em>:
+  </p>
+  <span class="pre-label">SpectralUtil/spectral_util/mosaic/mosaic.py &mdash; the selection seam</span>
+<pre><code><span class="k">if</span> criteria_band <span class="k">is not</span> <span class="n">None</span>:
+    raw_ob = obs[:, :, criteria_band]
+    ob = raw_ob[np.abs(sub_glt[...,1])-1, np.abs(sub_glt[...,0])-1]
+    existing_crit = criteria[sub_glt_insert_idx[...,0], sub_glt_insert_idx[...,1]]
+    valid = np.logical_and(sub_glt[...,0] != meta.nodata_value,
+                           ob != local_meta.nodata_value)
+
+    <span class="k">if</span> criteria_mode == <span class="s">"min"</span>:
+        crit_mask = np.logical_and(ob &lt; existing_crit, valid)
+    <span class="k">elif</span> criteria_mode == <span class="s">"max"</span>:
+        crit_mask = np.logical_and(ob &gt; existing_crit, valid)
+    <span class="c"># first observation in a cell always wins</span>
+    crit_mask = np.logical_or(crit_mask,
+                              np.logical_and(valid, np.isnan(existing_crit)))
+    criteria[...] = ob[crit_mask]
+<span class="k">else</span>:
+    crit_mask = sub_glt[...,0] != <span class="n">0</span>   <span class="c"># no criteria: last writer wins</span></code></pre>
+  <p>
+    V002 passes <code>--criteria_band 5 --criteria_mode min</code>: OBS band 5 is view zenith, so the
+    winner is the most nadir look. The result is one GLT per tile encoding
+    <code>(GLT&nbsp;X,&nbsp;GLT&nbsp;Y,&nbsp;File&nbsp;Index)</code>, which is then applied to every
+    raster of interest.
+  </p>
+  <div class="note find">
+    <span class="tag">Property worth preserving</span>
+    <p>
+      This is a <strong>streaming reduction</strong>: memory is O(grid), not O(grid &times; N&nbsp;granules),
+      no matter how many observations there are. That is a real engineering virtue and the generic
+      design must keep it available &mdash; see the <code>streaming</code> capability in §04.
+    </p>
+  </div>
+
+  <h3>AMD defers selection entirely</h3>
+  <p>
+    EMIT-AMD does something structurally different, and the difference is easy to miss because it
+    calls the same CLI. In <code>pipeline.sh</code> the mosaic build is invoked
+    <strong>once per granule</strong>, with <em>no</em> <code>--criteria_band</code> at all:
+  </p>
+  <span class="pre-label">EMIT-AMD/pipeline.sh &mdash; one GLT per granule</span>
+<pre><code>build=<span class="s">"--n_cores 1 --x_resolution 0.0003 --y_resolution -0.0003 \
+       --target_extent_ul_lr ${lon[0]} ${lat[1]} ${lon[1]} ${lat[0]}"</span>
+
+<span class="k">for</span> ((i=0; i&lt; ${#obs[@]}; i++ )); <span class="k">do</span>
+    file=$(basename <span class="s">"${min[i]}"</span>)
+    $mosaic build-obs-nc $build <span class="s">"glt/$file.tif"</span> <span class="s">"${obs[i]}"</span>
+    $mosaic apply-glt <span class="s">"glt/$file.tif"</span> <span class="s">"${min[i]}"</span> <span class="s">"applied/min_$file.tif"</span>
+    $mosaic apply-glt <span class="s">"glt/$file.tif"</span> <span class="s">"${unc[i]}"</span> <span class="s">"applied/minunc_$file.tif"</span>
+    $mosaic apply-glt <span class="s">"glt/$file.tif"</span> <span class="s">"${msk[i]}"</span> <span class="s">"applied/mask_$file.tif"</span>
+<span class="k">done</span>
+
+amd run   -c config.yml -p <span class="s">"generated"</span>   <span class="c"># classify each observation</span>
+amd stack -c config.yml -p <span class="s">"generated"</span>   <span class="c"># integrate across all of them</span></code></pre>
+  <p>
+    Nothing is discarded. Every observation is orthorectified onto the shared tile grid and kept, and
+    <em>all</em> reconciliation happens afterwards, in classification space, across the full stack.
+    That is precisely why AMD can do temporal integration and V002 cannot: <strong>V002 throws the
+    observations away at regrid time.</strong>
+  </p>
+  <p>
+    Two details from the downstream chain are worth carrying forward. AMD&rsquo;s outputs are laid out
+    as <code>groups/{group}/{freq}/{kind}</code> &mdash; the <em>frequency</em> level confirms that a
+    temporal dimension already survives into the delivered layout, which is a useful precedent for
+    stage 5. And <code>gdal.sh</code> tiles the <code>colors</code> product but explicitly skips the
+    other <code>kind</code>:
+  </p>
+<pre><code><span class="c"># Skip counts for now, doesn't work</span>
+<span class="k">if</span> [[ <span class="s">"$kind"</span> == <span class="s">"counts"</span> ]]; <span class="k">then</span>
+    <span class="k">continue</span>
+<span class="k">fi</span></code></pre>
+  <p>
+    The cause is visible in the step that follows: the coastal mask is applied as
+    <code>gdal_rasterize -b 4 -burn 0</code> &mdash; band 4, burned to zero. That only works on a
+    4-band RGBA raster, so it cannot be applied to a single-band <code>counts</code> product, and
+    skipping it is the path of least resistance.
+  </p>
+
+  <h3>What the AMD config settles</h3>
+  <p>
+    James&rsquo;s <code>configs/config.yml</code> (now vendored at
+    <code>refs/config.yml</code> in this task folder) confirms the RGBA reading outright. Classes map
+    to four-channel colour, with alpha carrying nodata:
+  </p>
+<pre><code><span class="n">colors</span>:
+  <span class="c">#      R,   G,   B,   A</span>
+  -3: [<span class="n">128</span>, <span class="n">128</span>, <span class="n">128</span>,   <span class="n">0</span>]   <span class="c"># "fake NaN"  -> fully transparent</span>
+  -2: [<span class="n">128</span>, <span class="n">128</span>, <span class="n">128</span>, <span class="n">255</span>]   <span class="c"># Tetracorder NaN</span>
+   1: [<span class="n">220</span>,   <span class="n">5</span>,  <span class="n">12</span>, <span class="n">255</span>]   <span class="c"># pyrite</span>
+   2: [<span class="n">174</span>, <span class="n">118</span>, <span class="n">163</span>, <span class="n">255</span>]   <span class="c"># goethite</span></code></pre>
+  <p>
+    So AMD does ship <strong>rendered colour rather than class indices</strong>, and the colormap
+    exists &mdash; it just lives in a config on the cluster and never travels with the product. No
+    consumer can restyle, requantise or recount from what MMGIS receives.
+  </p>
+  <div class="note warn">
+    <span class="tag">Design consequence for stage 5</span>
+    <p>
+      <strong>Stratum must publish the data product and the rendered image as separate artifacts</strong>,
+      with the colour mapping a declared, versioned transform over the former (§06a). The image is what
+      MMGIS and QGIS consume, and it genuinely is the deliverable people look at &mdash; but if it is
+      the <em>only</em> output, the archive stops being analysis-ready and counts and agreement become
+      casualties of an RGBA assumption, exactly as they did here.
+    </p>
+  </div>
+
+  <h3>&hellip; and what it overturns</h3>
+  <p>
+    The same config contains the entire temporal surface of <code>amd stack</code>. It is two keys:
+  </p>
+<pre><code><span class="n">v5</span>:  <span class="n">stack</span>: {<span class="n">mincount</span>: <span class="n">3</span>}          <span class="c"># suppress weakly-supported pixels</span>
+<span class="n">v7</span>:  <span class="n">stack</span>: {<span class="n">ignore</span>: [<span class="n">0</span>, <span class="n">-4</span>]}     <span class="c"># classes excluded from the tally</span></code></pre>
+  <p>
+    There is no period, window, month or year key &mdash; in a config that otherwise parameterizes
+    subsetting, downloads, classification, masking, lumping and colour. Combined with the fact that
+    <em>no filename anywhere carries a date</em>, that points somewhere different from the assumption
+    this design started with.
+  </p>
+  <div class="note key">
+    <span class="tag">Reinterpretation &mdash; carries real consequences</span>
+    <p>
+      <code>freq-&lt;N&gt;</code> is most likely a <strong>frequency rank, not a time chunk</strong>:
+      <code>freq-0</code> the most frequent class, <code>freq-1</code> the runner-up, with
+      <code>counts</code> as the vote tally and <code>mincount</code> the support threshold. On that
+      reading <strong>AMD never bins time at all</strong> &mdash; it takes the mode over every
+      observation ever acquired, which is consistent with <code>amd query</code> being called with no
+      date arguments.
+    </p>
+    <p>
+      If so, AMD is a precedent for the <em>voting</em> half of what Critical Minerals needs and not
+      the <em>temporal</em> half, and mode-through-time is more new work than
+      <a href="Background.md">Background.md</a> implies. This is still an inference. It resolves with
+      one question to James: <em>&ldquo;is <code>freq-N</code> the Nth most frequent class, or the Nth
+      time period?&rdquo;</em> &mdash; and it should be asked before anyone sizes the temporal work.
+    </p>
+  </div>
+  <p>
+    Two things the config settles that are unambiguously good news. The <strong>lumping step is already
+    parameterized</strong>: <code>hashmap</code> maps Tetracorder mineral indices to display classes and
+    is versioned <code>v1</code>&hellip;<code>v7</code>, so the debate Phil expects fights over is a
+    YAML block rather than a code change. And <code>mincount</code> plus <code>ignore</code> are almost
+    exactly the parameters proposed for <code>ModeThroughTime</code> in §04, which suggests the shape of
+    that reducer is right even if its temporal axis is new.
+  </p>
+  <div class="note warn">
+    <span class="tag">Landmine in the lumping tables</span>
+    <p>
+      AMD&rsquo;s <code>hashmap</code> is keyed on <strong>positional index values</strong>
+      (<code>goethite: [3, 5, 6, 7, 8]</code>). The reference matrix that assigns those positions,
+      <code>tetrapy/data/v6.00a6.csv</code>, now carries both an <code>index</code> and a stable
+      <code>id</code> slug &mdash; the <code>id</code> column was added in <code>tetracorder-lite</code>
+      PR&nbsp;#20 precisely because positions shift when rows are added, removed or deduplicated.
+    </p>
+    <p>
+      A grouping table keyed on <code>index</code> therefore <strong>silently reassigns minerals to
+      different classes on a Tetracorder version bump</strong>, with no error. Stratum must resolve
+      lumping through the stable <code>id</code>, and the manifest must pin the reference-matrix
+      version. This affects the 5.27&nbsp;&rarr;&nbsp;6.00a mapping work too and is worth raising with
+      Phil independently of this design.
+    </p>
+  </div>
+  <p>
+    Two smaller cautions from the same chain. <code>gdal.sh</code> writes the full mosaic through
+    <code>gdal_translate</code> with no creation options and then modifies it in place, so the
+    intermediate is uncompressed and untiled &mdash; at 0.0003&deg; a CONUS-scale run implies a
+    multi-hundred-gigabyte scratch file, which suggests this has only ever been run at regional scale.
+    And despite the README stating that <code>gdal.sh</code> &ldquo;builds tiles for MMGIS,&rdquo; there
+    is no <code>gdal2tiles</code>, pyramid or XYZ step anywhere in the repo: the directory is merely
+    <em>named</em> <code>tiles/</code> and the chain stops at one COG per (group, freq).
+  </p>
+
+  <div class="note warn">
+    <span class="tag">Correction to a common assumption</span>
+    <p>
+      <code>spectral_util mosaic stack-glts</code> is <em>not</em> temporal aggregation. It is a
+      first-wins gap fill &mdash; <code>to_copy = (glt[...,2] == 0) &amp; (converted[...,2] &gt; 0)</code>
+      &mdash; which only writes into cells that are still nodata, in input order. <strong>Mode-through-time
+      does not exist in SpectralUtil today.</strong> The real temporal logic lives in <code>amd stack</code>,
+      which is a separate package that is not vendored in this monorepo and lives only in a shared
+      micromamba env on the cluster. We cannot currently read it. Getting that source from James is a
+      Phase&nbsp;0 blocker, not a nicety.
+    </p>
+  </div>
+
+  <h3>The two lineages, side by side</h3>
+  <div class="tablewrap">
+    <table>
+      <thead>
+        <tr><th>&nbsp;</th><th>V002 / L3 ASA</th><th>EMIT-AMD</th></tr>
+      </thead>
+      <tbody>
+        <tr><td><strong>GLTs per tile</strong></td><td>One, for all granules</td><td>One <em>per granule</em></td></tr>
+        <tr><td><strong>Selection</strong></td><td>Fused into regrid, streaming argmin</td><td>Deferred to a post-apply reduction</td></tr>
+        <tr><td><strong>Criterion</strong></td><td>min view zenith (OBS band 5)</td><td>None at regrid; classifier + <code>amd stack</code></td></tr>
+        <tr><td><strong>Memory</strong></td><td>O(grid)</td><td>O(grid &times; N observations)</td></tr>
+        <tr><td><strong>Temporal integration</strong></td><td>Impossible &mdash; data already collapsed</td><td>Yes &mdash; the whole point</td></tr>
+        <tr><td><strong>Grid</strong></td><td>0.00055&deg; (~60&nbsp;m), 5&deg; cells</td><td>0.0003&deg; (~30&nbsp;m), 1&deg; bins</td></tr>
+        <tr><td><strong>Temporal filter</strong></td><td><code>--max_cloud_fraction</code> + date range</td><td class="mono">none &mdash; takes every observation ever</td></tr>
+        <tr><td><strong>Unit of work</strong></td><td>Slurm job per 5&deg; cell</td><td>Slurm array task per 1&deg; bin, <span class="mono">32&nbsp;GB / 4&nbsp;cpu / 24&nbsp;h</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p>
+    Read that table as a <em>unification</em>, not a fork. Both are reductions over a stack of
+    observations. V002 uses a reducer that happens to be decomposable, so it can be fused into the
+    regrid loop for free. AMD uses a reducer that is not, so it must materialize the stack. One
+    framework can express both if the plugin declares which kind it is.
+  </p>
+</section>
+
+<!-- ============ 02 ABSTRACTION ============ -->
+<section id="abstraction">
+  <h2><span class="h-num">02</span>The core abstraction</h2>
+  <hr class="rule">
+  <p>
+    Five stages. The <span class="mono" style="color:var(--accent2)">cached</span> marker is the
+    load-bearing part: everything before the cost function is deterministic geometry and never needs
+    to run twice.
+  </p>
+
+  <div class="stage-flow full">
+    <div class="stage">
+      <div class="stage-idx">1</div>
+      <div class="stage-body">
+        <div class="stage-hd">
+          <span class="stage-name">Plan</span>
+          <span class="stage-unit">unit: run</span>
+          <span class="stage-where w-lambda">Lambda</span>
+        </div>
+        <p class="stage-desc">
+          Manifest &rarr; granule index query &rarr; <strong>frozen</strong> candidate set
+          &rarr; work list of (tile, epoch, block). Applies granule-level filters and enforces the
+          budget guardrail. Emits a manifest hash that identifies the run forever.
+        </p>
+      </div>
+    </div>
+    <div class="flow-arrow">&darr;</div>
+    <div class="stage">
+      <div class="stage-idx">2</div>
+      <div class="stage-body">
+        <div class="stage-hd">
+          <span class="stage-name">Regrid</span>
+          <span class="stage-unit">unit: granule &times; tile</span>
+          <span class="stage-where w-either">Lambda or Batch</span>
+        </div>
+        <p class="stage-desc">
+          KD-tree nearest-neighbour from granule <code>loc</code> to tile grid &rarr; GLT COG.
+          Pure geometry: depends only on the granule footprint and the grid definition.
+          <span class="cache">Content-addressed and cached indefinitely</span> &mdash; changing a cost
+          function never invalidates it.
+        </p>
+      </div>
+    </div>
+    <div class="flow-arrow">&darr;</div>
+    <div class="stage">
+      <div class="stage-idx">3</div>
+      <div class="stage-body">
+        <div class="stage-hd">
+          <span class="stage-name">Resolve</span>
+          <span class="stage-unit">unit: tile &times; epoch &times; block</span>
+          <span class="stage-where w-either">Lambda or Batch</span>
+        </div>
+        <p class="stage-desc">
+          Apply the GLTs for this block, run the <strong>Scorer</strong> plugin, collapse the
+          observation stack into one epoch snapshot plus a score band and a contributing-observation
+          count. This is where a science team&rsquo;s code runs.
+        </p>
+      </div>
+    </div>
+    <div class="flow-arrow">&darr;</div>
+    <div class="stage">
+      <div class="stage-idx">4</div>
+      <div class="stage-body">
+        <div class="stage-hd">
+          <span class="stage-name">Reduce</span>
+          <span class="stage-unit">unit: tile &times; block</span>
+          <span class="stage-where w-either">Lambda or Batch</span>
+        </div>
+        <p class="stage-desc">
+          Collapse the epoch snapshots through time via the <strong>Reducer</strong> plugin &mdash;
+          mode-through-time for Critical Minerals &mdash; emitting the value, a spread/agreement
+          measure, and the epoch count. A no-op reducer reproduces V002.
+        </p>
+      </div>
+    </div>
+    <div class="flow-arrow">&darr;</div>
+    <div class="stage">
+      <div class="stage-idx">5</div>
+      <div class="stage-body">
+        <div class="stage-hd">
+          <span class="stage-name">Publish</span>
+          <span class="stage-unit">unit: tile</span>
+          <span class="stage-where w-lambda">Lambda</span>
+        </div>
+        <p class="stage-desc">
+          Stitch blocks &rarr; COG / CF-NetCDF, write the STAC item and provenance record, register
+          MMGIS layers. Provenance carries the manifest hash, the plugin versions and the frozen
+          granule list.
+        </p>
+      </div>
+    </div>
+  </div>
+
+  <div class="note key">
+    <span class="tag">Why the split at stage 2/3 is the whole design</span>
+    <p>
+      Stage 2 is the expensive part (KD-tree over ~1.6M granule points against ~11M grid points) and
+      the part that never changes. Stage 3 is the cheap part and the part scientists want to change
+      hourly. V002 welds them together; AMD accidentally separates them. Separating them
+      <em>deliberately</em> is what turns &ldquo;try a different selection rule&rdquo; from a
+      full rebuild into a re-read of cached GLTs.
+    </p>
+  </div>
+</section>
+
+<!-- ============ 03 HOOKS ============ -->
+<section id="hooks">
+  <h2><span class="h-num">03</span>Five hooks, not one</h2>
+  <hr class="rule">
+  <p>
+    &ldquo;A generic cost function class&rdquo; is the right instinct, but collapsing every decision
+    into one hook would be a mistake: the decisions a mosaic makes have wildly different cost profiles
+    and run at different stages, and putting them behind one interface would force the cheapest to pay
+    the price of the most expensive. Keep them separate, and let the manifest compose them. The first
+    four decide <em>which observation wins</em>; the fifth decides <em>what the result looks like</em>.
+  </p>
+
+  <div class="hooks full">
+    <div class="hook">
+      <div class="hook-name h1c">GranuleFilter</div>
+      <div class="hook-desc">
+        Runs against the <em>index</em>, before any pixel is read. Date range, cloud fraction, solar
+        zenith, orbit, quality flags, footprint overlap. This is where the temporal range limits live.
+        Rejecting here is free; rejecting later is not.
+      </div>
+      <div class="hook-cost">per granule<br>~microseconds</div>
+    </div>
+    <div class="hook">
+      <div class="hook-name h2c">PixelMask</div>
+      <div class="hook-desc">
+        Per-pixel validity from co-registered mask products &mdash; cloud, cirrus, water, spacecraft
+        quality &mdash; plus Dana&rsquo;s additions (snow, high vegetation). Produces a boolean; does
+        not rank. Applied during regrid so masked pixels never enter the stack.
+      </div>
+      <div class="hook-cost">per granule&times;block<br>vectorized</div>
+    </div>
+    <div class="hook">
+      <div class="hook-name h3c">Scorer</div>
+      <div class="hook-desc">
+        <strong>The cost function proper.</strong> Ranks the observations that survive the mask and
+        picks a winner per cell within one epoch. Replaces <code>criteria_band</code>/<code>criteria_mode</code>.
+        Declares whether it is <code>streaming</code> or needs the whole <code>stack</code>.
+      </div>
+      <div class="hook-cost">per tile&times;epoch&times;block<br>vectorized</div>
+    </div>
+    <div class="hook">
+      <div class="hook-name h4c">Reducer</div>
+      <div class="hook-desc">
+        Collapses epoch snapshots through time. Mode-through-time, median, percentile, trend,
+        agreement/spread. Always needs the full epoch stack, but that stack is small &mdash; one
+        snapshot per epoch, not one per granule.
+      </div>
+      <div class="hook-cost">per tile&times;block<br>N = #epochs</div>
+    </div>
+    <div class="hook">
+      <div class="hook-name" style="color:var(--violet)">OutputMapper</div>
+      <div class="hook-desc">
+        Runs at <em>publish</em> time, not selection time. Turns finished bands into the rendered
+        image consumers actually look at &mdash; enum&rarr;colour, continuous ramps, confidence-driven
+        alpha. Declared in config for the ordinary cases, a callable for the elaborate ones.
+        Emits its legend as a sidecar.
+      </div>
+      <div class="hook-cost">per tile<br>presentation only</div>
+    </div>
+  </div>
+
+  <p>
+    Note what this taxonomy buys immediately: <strong>the &ldquo;limits on temporal range&rdquo;
+    requirement is a <code>GranuleFilter</code> in the manifest, not pipeline code.</strong>
+    EMIT-AMD applies no temporal filter: <code>pipeline.sh</code> invokes
+    <code>amd query -lat &hellip; -lon &hellip;</code> with no date arguments, so every observation ever
+    acquired over the bin is handed downstream. (Whether <code>amd query</code> <em>offers</em> a date
+    option is not knowable from this repo &mdash; only which flags are used. The design is deliberate
+    either way: AMD treats time-slicing as the stacker&rsquo;s job.) For a versioned annual product the
+    range still has to be declared, pinned and recorded, which is what putting it in the manifest
+    achieves.
+  </p>
+</section>
+
+<!-- ============ 04 CONTRACT ============ -->
+<section id="contract">
+  <h2><span class="h-num">04</span>The cost-function contract</h2>
+  <hr class="rule">
+  <p>
+    Two protocols, both vectorized over a block, both handed an accessor for pulling in whatever other
+    geo-tagged data they need. The <code>capability</code> attribute is what lets the planner choose an
+    execution mode.
+  </p>
+
+  <span class="pre-label">stratum/contracts.py</span>
+<pre><code><span class="k">class</span> <span class="f">Scorer</span>(Protocol):
+    <span class="s">"""Rank observations within one epoch; higher score wins."""</span>
+
+    <span class="c"># "streaming" -&gt; fused into regrid, O(block) memory, V002-style</span>
+    <span class="c"># "stack"     -&gt; needs every observation at once, O(block x N)</span>
+    capability: Literal[<span class="s">"streaming"</span>, <span class="s">"stack"</span>]
+
+    <span class="k">def</span> <span class="f">score</span>(self, obs: ObsWindow, aux: AuxAccessor) -&gt; FloatArray:
+        <span class="s">"""Return (H, W) float32. NaN marks a cell this observation
+        may not occupy. Called once per granule when streaming,
+        once with a stacked (N, H, W) ObsWindow otherwise."""</span>
+
+
+<span class="k">class</span> <span class="f">Reducer</span>(Protocol):
+    <span class="s">"""Collapse per-epoch snapshots into the delivered product."""</span>
+
+    outputs: tuple[BandSpec, ...]   <span class="c"># declared up front, drives the COG schema</span>
+
+    <span class="k">def</span> <span class="f">reduce</span>(self, snaps: SnapshotStack, aux: AuxAccessor) -&gt; dict[str, Array]:
+        ...</code></pre>
+
+  <h3>What a plugin actually sees</h3>
+  <p>
+    <code>ObsWindow</code> is the thing that makes a cost function readable. Bands are addressed by
+    <em>role name</em>, not index, so a scorer is portable across instruments &mdash; the manifest maps
+    roles to bands per collection:
+  </p>
+  <span class="pre-label">Reimplementing the V002 criterion as a plugin</span>
+<pre><code><span class="k">class</span> <span class="f">MinViewZenith</span>:
+    <span class="s">"""V002 parity: the most nadir look wins."""</span>
+    capability = <span class="s">"streaming"</span>
+
+    <span class="k">def</span> <span class="f">score</span>(self, obs, aux):
+        <span class="k">return</span> -obs[<span class="s">"view_zenith"</span>]        <span class="c"># negate: higher wins</span>
+
+
+<span class="k">class</span> <span class="f">CleanestNadir</span>:
+    <span class="s">"""Nadir-preferring, but penalise steep terrain and any pixel
+    that a snow index says was covered on the acquisition date."""</span>
+    capability = <span class="s">"streaming"</span>
+
+    <span class="k">def</span> <span class="f">score</span>(self, obs, aux):
+        s = -obs[<span class="s">"view_zenith"</span>] / <span class="n">90.0</span>
+        s -= <span class="n">0.5</span> * (aux.raster(<span class="s">"s3://.../copernicus-slope.tif"</span>) &gt; <span class="n">30</span>)
+        s[aux.raster(<span class="s">"s3://.../snow/{date}.tif"</span>, date=obs.granule.date) &gt; <span class="n">0</span>] = np.nan
+        <span class="k">return</span> s</code></pre>
+
+  <p>
+    <code>AuxAccessor</code> is the &ldquo;helper methods to access data&rdquo; layer, and it is where
+    most of the framework&rsquo;s value sits. Every call returns an array
+    <strong>already windowed to this block, already reprojected onto this block&rsquo;s grid, and
+    cached</strong> for the life of the worker:
+  </p>
+<pre><code>aux.raster(uri, date=<span class="n">None</span>)   <span class="c"># windowed COG read via GDAL range requests</span>
+aux.vector(uri, field=...)  <span class="c"># GeoParquet/GeoJSON, rasterized to the block</span>
+aux.table(uri).at(date)     <span class="c"># time series lookup, nearest or interpolated</span>
+aux.dem()                   <span class="c"># conveniences for the common ones</span>
+aux.granule_index           <span class="c"># the frozen index, for stack-level reasoning</span></code></pre>
+
+  <h3>Mode-through-time as a Reducer</h3>
+  <p>
+    The one capability Critical Minerals actually needs, and the one that exists nowhere in code we
+    can read today:
+  </p>
+<pre><code><span class="k">class</span> <span class="f">ModeThroughTime</span>:
+    outputs = (
+        BandSpec(<span class="s">"mineral_id"</span>,   <span class="s">"uint16"</span>, <span class="s">"most frequent ID across epochs"</span>),
+        BandSpec(<span class="s">"agreement"</span>,    <span class="s">"float32"</span>, <span class="s">"modal count / valid epochs"</span>),
+        BandSpec(<span class="s">"n_epochs"</span>,     <span class="s">"uint8"</span>,   <span class="s">"epochs contributing"</span>),
+        BandSpec(<span class="s">"runner_up_id"</span>, <span class="s">"uint16"</span>,  <span class="s">"second most frequent"</span>),
+    )
+
+    <span class="k">def</span> <span class="f">reduce</span>(self, snaps, aux):
+        ids = snaps[<span class="s">"mineral_id"</span>]              <span class="c"># (n_epochs, H, W) uint16</span>
+        <span class="c"># bincount along axis 0 over the (small) label alphabet</span>
+        ...</code></pre>
+  <div class="note find">
+    <span class="tag">Open science question this design surfaces</span>
+    <p>
+      Phil&rsquo;s open question &mdash; <em>&ldquo;mode over mineral ID directly, or over something
+      continuous first?&rdquo;</em> &mdash; becomes a choice between two <code>Reducer</code>
+      implementations rather than a pipeline fork. So does the tie-break policy at low observation
+      counts. That is the payoff of the whole abstraction: the argument moves into a 40-line class
+      that two people can read in a meeting.
+    </p>
+  </div>
+
+  <h3>Registration and discovery</h3>
+  <p>
+    Plugins register through standard Python entry points, so <code>stratum plugins list</code> can
+    enumerate what a given image or wheel provides, and the manifest refers to them by name:
+  </p>
+<pre><code>[project.entry-points.<span class="s">"stratum.scorers"</span>]
+min_view_zenith = <span class="s">"stratum_emit.scorers:MinViewZenith"</span>
+cleanest_nadir  = <span class="s">"stratum_emit.scorers:CleanestNadir"</span>
+
+[project.entry-points.<span class="s">"stratum.reducers"</span>]
+mode_through_time = <span class="s">"stratum_emit.reducers:ModeThroughTime"</span></code></pre>
+</section>
+
+<!-- ============ 05 BLOCKS ============ -->
+<section id="blocks">
+  <h2><span class="h-num">05</span>Blocks: the scaling move</h2>
+  <hr class="rule">
+  <p>
+    AMD&rsquo;s deferred-reduction design is the right one scientifically, and it is why AMD asks Slurm
+    for <span class="mono">32&nbsp;GB, 4&nbsp;CPUs and up to 24&nbsp;hours per 1&deg; bin</span>. Ported
+    naively to AWS, that is a large, long, expensive Batch job per tile &mdash; and a single failure
+    late in the job throws away everything.
+  </p>
+  <p>
+    The fix is to make the unit of work a <strong>block</strong> rather than a tile. A 1&deg; tile at
+    0.0003&deg; is 3334&nbsp;&times;&nbsp;3334; a 512&nbsp;&times;&nbsp;512 block is 1/42 of it:
+  </p>
+  <div class="tablewrap">
+    <table>
+      <thead>
+        <tr><th>Materialized stack, per unit</th><th class="num-col">1&deg; tile</th><th class="num-col">512&times;512 block</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>Cells</td><td class="num-col">11.1 M</td><td class="num-col">0.26 M</td></tr>
+        <tr><td>&times; 100 observations &times; 10 bands &times; float32</td><td class="num-col">~44 GB</td><td class="num-col">~1.0 GB</td></tr>
+        <tr><td>Observations actually intersecting the unit</td><td class="num-col">all</td><td class="num-col">a subset</td></tr>
+        <tr><td>Fits a 10 GB Lambda?</td><td class="num-col" style="color:var(--hematite)">no</td><td class="num-col" style="color:var(--accent2)">yes</td></tr>
+        <tr><td>Blast radius of one failure</td><td class="num-col">whole tile</td><td class="num-col">1/42 of a tile</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p>
+    Three things fall out at once. The materialized reduction fits in a serverless worker, so the
+    Lambda instinct becomes viable exactly where it was previously impossible. Parallelism goes up by
+    a factor of ~40, which matters because a Distributed Map can hold 10,000 child executions in
+    flight. And retries get cheap, which is what makes Spot capacity safe to use for the jobs that do
+    need Batch.
+  </p>
+  <div class="note warn">
+    <span class="tag">The catch, stated honestly</span>
+    <p>
+      Block decomposition is only sound for reducers that are <strong>spatially local</strong> &mdash;
+      each output cell depends only on the observations over that cell. Mode, median, percentile and
+      count all qualify. Anything with a spatial term does not, and this is not hypothetical: the
+      existing regrid already contains one. <code>remove_negatives(clean_contiguous=True)</code> runs
+      a 3&times;3 <code>convolve2d</code> over the interpolated-pixel mask and zeroes any cell with
+      three or more flagged neighbours &mdash; a stencil that reads one pixel beyond the block edge and
+      would produce visible seams if applied block-wise without overlap.
+    </p>
+    <p>
+      So the framework must let a plugin declare <code>halo: int</code> and materialize that overlap
+      itself, and anything genuinely global &mdash; segmentation, connected components &mdash; declares
+      <code>capability = "tile"</code> and routes to Batch. A seam-equivalence test belongs in CI from
+      the first commit: block-wise output must be bit-identical to tile-wise output on a fixture.
+    </p>
+  </div>
+</section>
+
+<!-- ============ 06 CACHE ============ -->
+<section id="cache">
+  <h2><span class="h-num">06</span>Caching geometry</h2>
+  <hr class="rule">
+  <p>
+    Every artifact is written to a content-addressed key derived from a hash of the inputs that
+    actually determine it. Nothing else. This is what makes iteration cheap, and it is worth being
+    pedantic about which inputs go into which key:
+  </p>
+  <div class="tablewrap">
+    <table>
+      <thead>
+        <tr><th>Artifact</th><th>Key derived from</th><th>Invalidated by a new scorer?</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><strong>GLT</strong><br><span class="muted">granule &times; tile</span></td>
+          <td class="mono">granule_id, grid_def, max_distance, regrid_algo_version</td>
+          <td style="color:var(--accent2)"><strong>No</strong></td>
+        </tr>
+        <tr>
+          <td><strong>Masked observation</strong><br><span class="muted">granule &times; tile &times; block</span></td>
+          <td class="mono">glt_key, asset_roles, pixel_mask_spec</td>
+          <td style="color:var(--accent2)">No</td>
+        </tr>
+        <tr>
+          <td><strong>Epoch snapshot</strong><br><span class="muted">tile &times; epoch &times; block</span></td>
+          <td class="mono">obs_keys[], scorer_ref, scorer_version, params</td>
+          <td style="color:var(--hematite)"><strong>Yes</strong></td>
+        </tr>
+        <tr>
+          <td><strong>Product block</strong><br><span class="muted">tile &times; block</span></td>
+          <td class="mono">snapshot_keys[], reducer_ref, reducer_version, params</td>
+          <td style="color:var(--hematite)">Yes</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  <p>
+    So the iteration loop the science team cares about &mdash; <em>change the scorer, rerun</em> &mdash;
+    skips stages 1 and 2 entirely and re-reads GLTs that are already sitting in S3. Changing only the
+    <em>reducer</em> skips stage 3 as well. The first run over a zone is expensive; the twentieth is
+    not, which is the property that decides whether people actually iterate.
+  </p>
+  <div class="note ok">
+    <span class="tag">Precedent</span>
+    <p>
+      This is a principled version of something the team already does by hand: <code>pipeline.sh</code>
+      carries a <code>steps=([query]=1 [apply-glt]=1 [classify]=1 [stack]=1)</code> toggle map so an
+      operator can skip work they know is still good. Content addressing makes that decision correct
+      automatically instead of relying on the operator remembering what changed.
+    </p>
+  </div>
+  <p>
+    A useful side effect: because the GLT cache is keyed on the granule and the grid, two different
+    projects on the same grid &mdash; Critical Minerals and AMD, say &mdash; share it. The second
+    project&rsquo;s first run is nearly free over ground the first has already touched.
+  </p>
+</section>
+
+<!-- ============ 07 MANIFEST ============ -->
+<!-- ============ 06a OUTPUT MAPPING ============ -->
+<section id="mapping">
+  <h2><span class="h-num">06a</span>Output mapping</h2>
+  <hr class="rule">
+  <p>
+    The artifact people actually look at is an image. A mineral class is not meaningful on screen until
+    something turns it into colour, and that mapping is a genuine part of the product &mdash; it is
+    argued over, versioned, and tuned far more often than the algorithm underneath it. It deserves a
+    first-class hook rather than being buried in the writer.
+  </p>
+  <div class="note key">
+    <span class="tag">The rule that keeps both audiences</span>
+    <p>
+      <strong>The mapper is a presentation layer over a data product that still ships.</strong> Stage 5
+      writes the class indices, counts and agreement bands <em>and</em> the rendered image, from the
+      same block, in the same run. The image is what MMGIS serves; the data is what makes the archive
+      re-usable. AMD&rsquo;s difficulty was not that it rendered colour &mdash; it is that rendering was
+      the only thing it emitted, so nothing downstream could restyle or recount.
+    </p>
+  </div>
+
+  <h3>Config for the ordinary cases</h3>
+  <p>
+    Most mappings are a lookup table or a ramp, and should never require code. These are declared in the
+    manifest and validated at plan time, so a bad domain or a missing class is caught before compute is
+    provisioned rather than after:
+  </p>
+<pre><code><span class="n">outputs</span>:
+  <span class="n">mineral_id</span>:
+    <span class="n">mapper</span>: categorical
+    <span class="n">classes</span>: <span class="s">"@ref:lumping/cm-v1.yaml"</span>   <span class="c"># id-keyed, not positional (§01)</span>
+    <span class="n">colors</span>:
+      pyrite:    [<span class="n">220</span>,   <span class="n">5</span>,  <span class="n">12</span>]
+      goethite:  [<span class="n">174</span>, <span class="n">118</span>, <span class="n">163</span>]
+    <span class="n">nodata</span>: transparent
+    <span class="n">alpha_from</span>:                     <span class="c"># confidence drives opacity</span>
+      <span class="n">band</span>: agreement
+      <span class="n">domain</span>: [<span class="n">0.3</span>, <span class="n">0.8</span>]
+      <span class="n">range</span>: [<span class="n">60</span>, <span class="n">255</span>]
+
+  <span class="n">band_depth</span>:
+    <span class="n">mapper</span>: continuous
+    <span class="n">ramp</span>: viridis
+    <span class="n">domain</span>: [<span class="n">0.0</span>, <span class="n">0.15</span>]
+    <span class="n">clip</span>: <span class="k">true</span></code></pre>
+  <p>
+    <code>alpha_from</code> is worth calling out. It generalizes what AMD did by hand &mdash; alpha 0 for
+    nodata &mdash; into something more useful: <strong>low-agreement pixels fade rather than asserting a
+    confident colour they have not earned</strong>. For a mode-through-time product where support varies
+    enormously with revisit, that is close to a requirement, and it is exactly the kind of thing that is
+    painful to retrofit once rendering is hard-coded.
+  </p>
+
+  <h3>A callable for the elaborate ones</h3>
+  <p>
+    The escape hatch is the same plugin mechanism as the other four hooks, so a mapper is versioned,
+    entry-point registered, and hashed into provenance like anything else:
+  </p>
+<pre><code><span class="k">class</span> <span class="f">OutputMapper</span>(Protocol):
+    outputs: tuple[ImageSpec, ...]
+
+    <span class="k">def</span> <span class="f">render</span>(self, bands: BandStack, aux: AuxAccessor) -&gt; RGBAArray:
+        <span class="s">"""(H, W, 4) uint8. Free to consult any finished band, not just one."""</span>
+
+    <span class="k">def</span> <span class="f">legend</span>(self) -&gt; Legend:
+        <span class="s">"""Class table or ramp stops. Written as a sidecar and into STAC."""</span></code></pre>
+  <p>
+    That covers the cases config cannot express: blending two minerals where they co-occur, hillshading
+    the classification against a DEM pulled through <code>aux</code>, or rendering a bivariate map of
+    class against confidence.
+  </p>
+  <div class="note find">
+    <span class="tag">Non-negotiable</span>
+    <p>
+      <code>legend()</code> is not optional. Every rendered product ships its class table or ramp stops
+      beside it &mdash; as a sidecar and in the STAC item. That single requirement is what prevents
+      Stratum from recreating the situation where the only record of what a colour means lives in a
+      config file on someone&rsquo;s cluster account.
+    </p>
+  </div>
+</section>
+
+<!-- ============ 06b ANCILLARY DATA ============ -->
+<section id="aux">
+  <h2><span class="h-num">06b</span>Ancillary data on other grids</h2>
+  <hr class="rule">
+  <p>
+    A cost function will want data that has nothing to do with EMIT&rsquo;s grid &mdash; a DEM, a snow
+    index, a landcover raster, mining-claim polygons. The framework&rsquo;s job is to make that a
+    non-event, and one rule does most of the work:
+  </p>
+  <div class="note key">
+    <span class="tag">The contract</span>
+    <p>
+      <strong>The block grid is the contract.</strong> Everything <code>AuxAccessor</code> returns is
+      already windowed to the block, already on the block&rsquo;s exact grid and CRS, and already
+      cached. A scorer never does geometry, never sees a CRS, and never resamples anything. If a plugin
+      author has to think about projections, the framework has failed.
+    </p>
+  </div>
+
+  <h3>Readers dispatch on shape</h3>
+  <div class="tablewrap">
+    <table>
+      <thead><tr><th>Source shape</th><th>Operation</th><th>Must be declared</th></tr></thead>
+      <tbody>
+        <tr><td>Raster, different CRS or resolution</td><td>Warp to the block grid</td><td><strong>Resampling</strong> &mdash; bilinear/cubic for continuous, nearest or mode for categorical</td></tr>
+        <tr><td>Vector polygons or lines</td><td>Rasterize, burning an attribute</td><td>Which field; all-touched vs centroid</td></tr>
+        <tr><td>Swath or irregular points</td><td>KD-tree &mdash; the same path as stage 2</td><td>Max distance</td></tr>
+        <tr><td>Date-keyed table, no geometry</td><td>Scalar lookup; no gridding at all</td><td>Nearest vs interpolated</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="note warn">
+    <span class="tag">The failure that does not throw</span>
+    <p>
+      Resampling method must be <em>declared, never defaulted</em>. Bilinear-interpolating a landcover
+      class or nearest-neighbouring a DEM are both wrong, and neither raises an error &mdash; they just
+      quietly produce a cost surface nobody can explain later. Categorical and continuous aux data must
+      be distinguishable in the manifest, and the reader should refuse to guess.
+    </p>
+  </div>
+
+  <h3>Warp once, slice many</h3>
+  <p>
+    A DEM is static; naively warping it per block per epoch per granule would re-do the same work
+    thousands of times. Aux sources are therefore warped <strong>once per (source, tile, grid)</strong>,
+    content-addressed exactly like a GLT (§06), with blocks reading windows out of the cached result.
+    The cost of an aux source is paid on first touch and never again.
+  </p>
+
+  <h3>Declare aux in the manifest</h3>
+  <p>
+    Sources are declared up front rather than reached for at runtime, which buys three things: the
+    planner can <strong>validate they exist and are readable before provisioning compute</strong>; it can
+    prefetch and warp them in stage 1; and their identity can be hashed into the cache key.
+  </p>
+  <div class="note warn">
+    <span class="tag">Why the declaration is load-bearing</span>
+    <p>
+      A scorer that quietly opens an undeclared raster produces a <strong>cache key that lies</strong>.
+      Swap that file and every cached snapshot is silently stale, with no signal that anything changed.
+      The accessor should therefore refuse undeclared URIs outright rather than trusting plugin authors
+      to remember &mdash; a small restriction that protects the reproducibility guarantee everything
+      else rests on.
+    </p>
+  </div>
+</section>
+
+<section id="manifest">
+  <h2><span class="h-num">07</span>The run manifest</h2>
+  <hr class="rule">
+  <p>
+    One declarative document is the entire interface for driving a run. It is versioned in git,
+    reviewed like code, hashed into provenance, and &mdash; critically &mdash;
+    <strong>it is not Terraform</strong>. Terraform owns the platform; the manifest owns the science.
+    Confusing the two is how platforms become unusable by the people they were built for.
+  </p>
+
+  <span class="pre-label">manifests/cm-zones-2026-annual.yaml</span>
+<pre><code><span class="n">run_id</span>: cm-zones-2026-annual-r3
+<span class="n">description</span>: Critical Minerals annual mineral ID, 4 pilot zones
+
+<span class="n">grid</span>:
+  <span class="n">crs</span>: EPSG:4326
+  <span class="n">resolution</span>: [<span class="n">0.0003</span>, <span class="n">-0.0003</span>]
+  <span class="n">tile_size</span>: <span class="n">1.0</span>
+  <span class="n">origin</span>: [<span class="n">-180</span>, <span class="n">-90</span>]
+  <span class="n">block</span>: <span class="n">512</span>
+
+<span class="n">aoi</span>:
+  <span class="n">zones</span>: [bingham-canyon, cuprite-nv, leadville-co, south-central-az]
+
+<span class="n">time</span>:
+  <span class="n">start</span>: <span class="n">2022-08-01</span>
+  <span class="n">end</span>: <span class="n">2026-07-31</span>
+  <span class="n">epoch</span>: P1M           <span class="c"># monthly snapshots</span>
+  <span class="n">deliver</span>: P1Y         <span class="c"># annual product</span>
+
+<span class="n">inputs</span>:
+  <span class="n">index</span>: s3://emit-l3/index/emit-granules.parquet
+  <span class="n">roles</span>:                <span class="c"># role -&gt; collection + variable</span>
+    <span class="n">geometry</span>:  {collection: EMITL1BOBS, var: obs}
+    <span class="n">mineral</span>:   {collection: EMITL2BMIN, var: mineral_id}
+    <span class="n">mineral_uncert</span>: {collection: EMITL2BMIN, var: band_depth_unc}
+    <span class="n">mask</span>:      {collection: EMITL2AMASK, var: mask}
+  <span class="n">band_aliases</span>:
+    <span class="n">view_zenith</span>: {role: geometry, band: <span class="n">5</span>}
+    <span class="n">solar_zenith</span>: {role: geometry, band: <span class="n">4</span>}
+
+<span class="n">granule_filter</span>:      <span class="c"># hook 1 - free, runs on the index</span>
+  - {max_cloud_fraction: <span class="n">0.5</span>}
+  - {max_solar_zenith: <span class="n">70</span>}
+
+<span class="n">pixel_mask</span>:          <span class="c"># hook 2</span>
+  - {ref: emit.masks:L2AStandard, flags: [cloud, cirrus, water, spacecraft]}
+
+<span class="n">scorer</span>:              <span class="c"># hook 3 - the cost function</span>
+  <span class="n">ref</span>: cleanest_nadir
+  <span class="n">params</span>: {slope_penalty: <span class="n">0.5</span>}
+
+<span class="n">reducer</span>:             <span class="c"># hook 4</span>
+  <span class="n">ref</span>: mode_through_time
+  <span class="n">params</span>: {min_epochs: <span class="n">3</span>, tie_break: earliest}
+
+<span class="n">plugins</span>:
+  <span class="n">wheel</span>: s3://emit-l3/plugins/stratum_emit-0.4.2-py3-none-any.whl
+
+<span class="n">budget</span>:              <span class="c"># refuse to run away</span>
+  <span class="n">max_tiles</span>: <span class="n">64</span>
+  <span class="n">max_granules</span>: <span class="n">12000</span>
+  <span class="n">max_vcpu_hours</span>: <span class="n">400</span>
+  <span class="n">on_exceed</span>: require_approval
+
+<span class="n">outputs</span>:
+  <span class="n">bucket</span>: s3://emit-l3-products
+  <span class="n">formats</span>: [cog, netcdf]
+  <span class="n">stac</span>: <span class="k">true</span></code></pre>
+
+  <h3>Budget as a first-class field</h3>
+  <p>
+    The <code>budget</code> block is not decoration. The planner Lambda computes the real fan-out
+    &mdash; tiles &times; epochs &times; blocks &times; granules &mdash; <em>before</em> any compute is
+    provisioned, compares it against the declared ceiling, and on exceedance parks the execution on a
+    Step Functions task token awaiting human approval. A one-character typo in a date range is
+    otherwise a five-figure mistake, and it is exactly the kind of mistake this pipeline invites:
+    the difference between one zone and the globe is one line of YAML.
+  </p>
+  <p>
+    The same planner emits a <strong>dry-run report</strong> &mdash; tile count, granule count,
+    estimated bytes read, cache hit rate, estimated vCPU-hours &mdash; which should be the default
+    behaviour of <code>stratum plan</code> and the thing reviewed in a PR alongside the manifest diff.
+  </p>
+  <div class="note ok">
+    <span class="tag">Borrowed from AMD</span>
+    <p>
+      <code>amd config print -c base.yml -p "mosaic&lt;-v6&lt;-filter-fit"</code> composes a config from a
+      base plus an ordered patch chain. That layering instinct is good and the manifest should keep it:
+      <code>stratum plan -m base.yaml -p zones-pilot -p scorer-v3</code>, so a variant is a patch, not a
+      copied file that drifts.
+    </p>
+  </div>
+</section>
+
+<!-- ============ 08 AWS ============ -->
+<section id="aws">
+  <h2><span class="h-num">08</span>AWS topology</h2>
+  <hr class="rule">
+  <p>
+    The instinct to reach for Step Functions is right, and the stateful features that make it right are
+    real: <strong>Distributed Map</strong> (up to 10,000 concurrent child executions, reading its work
+    list straight from an S3 object rather than from the 256&nbsp;KB state payload) and
+    <strong>Variables + JSONata</strong>, which let a run carry its manifest hash and cache keys across
+    states without a chain of Pass states.
+  </p>
+  <p>
+    The instinct to make the engine a Lambda is right for three of the five stages and wrong for the
+    two that matter most. The honest recommendation is a <strong>split plane</strong>.
+  </p>
+
+  <div class="grid2">
+    <div class="card">
+      <p class="kicker">Control plane</p>
+      <p class="hd">Step Functions + Lambda</p>
+      <p>
+        Planning, index queries, fan-out, cache probes, stitching, STAC registration, approval gates.
+        Seconds of runtime, hundreds of MB of memory, thousands of invocations. Lambda is the correct
+        and cheapest answer here, and this is where the serverless story genuinely pays.
+      </p>
+    </div>
+    <div class="card">
+      <p class="kicker">Data plane</p>
+      <p class="hd">AWS Batch on EC2 Spot</p>
+      <p>
+        Regrid, resolve, reduce. Minutes-to-hours, gigabytes of memory, GDAL and netCDF4 in the image.
+        Spot with Graviton where the wheels exist; block-level retries make interruption cheap.
+        The same container image runs locally and on the cluster.
+      </p>
+    </div>
+  </div>
+
+  <h3>One image, two executors</h3>
+  <p>
+    Do not pick between Lambda and Batch statically. Build <strong>one container image</strong> with
+    both an AWS Lambda Runtime Interface Client entrypoint and a plain CLI entrypoint, then let the
+    planner route each work item on measurable properties:
+  </p>
+<pre><code><span class="k">def</span> <span class="f">route</span>(item, plan) -&gt; Literal[<span class="s">"lambda"</span>, <span class="s">"batch"</span>]:
+    <span class="k">if</span> plan.scorer_capability == <span class="s">"tile"</span>:        <span class="k">return</span> <span class="s">"batch"</span>
+    <span class="k">if</span> item.est_peak_bytes  &gt; <span class="n">7</span> * GB:            <span class="k">return</span> <span class="s">"batch"</span>
+    <span class="k">if</span> item.est_seconds     &gt; <span class="n">600</span>:               <span class="k">return</span> <span class="s">"batch"</span>   <span class="c"># 15 min hard ceiling</span>
+    <span class="k">if</span> item.est_bytes_read  &gt; <span class="n">8</span> * GB:            <span class="k">return</span> <span class="s">"batch"</span>
+    <span class="k">return</span> <span class="s">"lambda"</span></code></pre>
+  <p>
+    A pilot zone at block granularity routes almost entirely to Lambda and finishes in minutes with no
+    infrastructure warm-up &mdash; which is the outcome the serverless instinct is reaching for. A
+    global reprocessing campaign routes to Batch and runs on Spot at a fraction of the Lambda price.
+    Same code, same image, same manifest.
+  </p>
+
+  <h3>The state machine</h3>
+  <p>
+    Nested Distributed Maps keep the payloads small: the outer map fans out over tiles, the inner over
+    blocks, and each child receives a pointer into S3 rather than the work item itself.
+  </p>
+<pre><code>Plan            <span class="c"># Lambda: manifest -&gt; frozen index -&gt; work list -&gt; S3</span>
+BudgetGate      <span class="c"># Choice: within budget? else -&gt; ApprovalWait (task token)</span>
+RegridMap       <span class="c"># Distributed Map over (granule x tile), ItemReader = S3 JSONL</span>
+  └─ CacheProbe -&gt; Regrid            <span class="c"># skipped entirely on hit</span>
+EpochMap        <span class="c"># Distributed Map over epochs</span>
+  └─ BlockMap   <span class="c"># nested Distributed Map over (tile x block)</span>
+       └─ Resolve
+ReduceMap       <span class="c"># Distributed Map over (tile x block)</span>
+PublishMap      <span class="c"># Distributed Map over tiles: stitch, COG, STAC</span>
+Finalize        <span class="c"># provenance record, run report, notification</span></code></pre>
+  <div class="note warn">
+    <span class="tag">Constraints to design around, not discover later</span>
+    <p>
+      Distributed Map&rsquo;s <code>ItemReader</code> and <code>ResultWriter</code> require S3 buckets
+      in the <em>same account and region</em> as the state machine &mdash; which, given the data lives
+      in <code>us-west-2</code> (§10), pins the whole deployment there. Child execution input is capped
+      at <strong>256&nbsp;KiB</strong> regardless of how large the item source is, so items must be
+      keys and hashes, never inline geometry or band lists. And Standard workflows bill per state
+      transition: at hundreds of thousands of blocks that is a real line item, which argues for
+      Express child workflows on the inner maps.
+    </p>
+  </div>
+</section>
+
+<!-- ============ 09 PACKAGING ============ -->
+<section id="packaging">
+  <h2><span class="h-num">09</span>Packaging &amp; Terraform</h2>
+  <hr class="rule">
+
+  <h3>Lambda layers will not work here &mdash; but the ergonomics can</h3>
+  <p>
+    A zip-based Lambda layer is capped at <strong>250&nbsp;MB unzipped across all layers</strong>.
+    GDAL plus netCDF4 plus scipy plus numpy does not fit; community GDAL layers land around 150&nbsp;MB
+    before any of our own code, and <code>SpectralUtil</code> pulls <code>gdal&gt;=3.0.0</code>,
+    <code>netCDF4&lt;1.7.1</code>, <code>scipy</code>, <code>pyproj</code>, <code>spectral</code> and
+    <code>earthaccess</code>. Container image Lambdas allow <strong>10&nbsp;GB</strong>, and that is the
+    only viable path for this dependency stack.
+  </p>
+  <p>
+    But the <em>reason</em> layers are appealing is real: a scientist should be able to change a cost
+    function without rebuilding and pushing a container image. Get that ergonomic without the layer:
+  </p>
+  <div class="grid2">
+    <div class="card hl">
+      <p class="kicker">Iteration path</p>
+      <p class="hd">Plugin wheel from S3</p>
+      <p>
+        The manifest names a wheel URI. The worker fetches and installs it into <code>/tmp</code> at
+        cold start, then resolves the scorer through entry points. Edit &rarr; <code>stratum plugins
+        publish</code> &rarr; rerun, in about ninety seconds. The wheel hash goes into the cache key
+        and the provenance record, so a run is still exactly reproducible.
+      </p>
+    </div>
+    <div class="card">
+      <p class="kicker">Production path</p>
+      <p class="hd">Baked into the image</p>
+      <p>
+        For delivered products, the plugin is pinned in the image and the wheel-fetch path is disabled
+        by policy. Reproducibility comes from an immutable image digest rather than a mutable bucket
+        object. The manifest records which mode was used.
+      </p>
+    </div>
+  </div>
+
+  <h3>What Terraform owns</h3>
+  <p>
+    A clean split, because the failure mode here is predictable: science parameters leak into HCL,
+    and then every experiment needs an infrastructure PR.
+  </p>
+  <div class="tablewrap">
+    <table>
+      <thead><tr><th>Terraform</th><th>The manifest</th><th>Neither &mdash; it's just code</th></tr></thead>
+      <tbody>
+        <tr>
+          <td>ECR repos, image build/push<br>Batch compute envs, queues, job defs<br>Lambda functions, SFN definition<br>S3 buckets + lifecycle rules<br>IAM roles, Earthdata secret<br>Budgets, alarms, dashboards</td>
+          <td>Grid + tiling + blocks<br>AOI and zones<br>Time range, epoch, cadence<br>Filters, masks, scorer, reducer<br>Plugin wheel URI<br>Budget ceilings, output formats</td>
+          <td>The framework package<br>The plugin package<br>Contracts and the aux accessor<br>Tests and fixtures</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>Many experiments, one deployment</h3>
+  <p>
+    Running five competing cost functions at once is a <strong>manifest concern, not an infrastructure
+    concern</strong>. Terraform stands up one run-agnostic deployment; a run is a manifest plus a
+    <code>run_id</code> that becomes an S3 prefix and a Step Functions execution. Five experiments are
+    five executions on shared infrastructure &mdash; no second <code>terraform apply</code>, no
+    duplicated queues.
+  </p>
+  <div class="note ok">
+    <span class="tag">The cache makes this pay</span>
+    <p>
+      Because GLTs are content-addressed on (granule, grid) and carry no dependence on the scorer,
+      <strong>every experiment over the same zone shares one GLT cache</strong>. The first run pays for
+      the geometry; the second through fifth skip stages 1&ndash;2 entirely and re-read it. Comparing
+      cost functions is the cheapest thing the system does, which is precisely the behaviour we want to
+      encourage.
+    </p>
+  </div>
+  <p>
+    Practical guardrails: tag every Batch job and Lambda invocation with <code>run_id</code> so cost
+    allocation is per-experiment; set <code>MaxConcurrency</code> per execution so one run cannot starve
+    another on a shared queue; and give outputs a <code>run_id</code> prefix while the cache stays
+    shared. Reach for a second deployment only on a real boundary &mdash; a separate account for
+    delivered products versus experimentation, or a different region &mdash; never for an experiment.
+  </p>
+
+  <h3>Repository layout</h3>
+<pre><code>stratum/
+  stratum/
+    grid.py          <span class="c"># grid defs, tiling, block decomposition, halos</span>
+    index.py         <span class="c"># granule index build + query (GeoParquet/DuckDB)</span>
+    contracts.py     <span class="c"># Scorer, Reducer, ObsWindow, AuxAccessor protocols</span>
+    aux.py           <span class="c"># windowed/reprojected/cached aux data access</span>
+    engines/
+      regrid.py      <span class="c"># wraps SpectralUtil KD-tree GLT build</span>
+      resolve.py     <span class="c"># streaming + materialized scorer execution</span>
+      reduce.py      <span class="c"># temporal reduction over epoch snapshots</span>
+    io/
+      staging.py     <span class="c"># S3 &lt;-&gt; local staging, the ENVI problem (§10)</span>
+      creds.py       <span class="c"># Earthdata token -&gt; refreshing S3 credentials</span>
+      cache.py       <span class="c"># content addressing</span>
+    handlers/        <span class="c"># lambda + batch entrypoints, same code</span>
+    cli.py           <span class="c"># plan / run / plugins / cache / inspect</span>
+  plugins/
+    stratum_emit/    <span class="c"># EMIT roles, mask semantics, scorers, reducers</span>
+  infra/             <span class="c"># terraform</span>
+  manifests/</code></pre>
+  <div class="note key">
+    <span class="tag">Relationship to SpectralUtil</span>
+    <p>
+      Stratum should <strong>wrap, not fork</strong>. The KD-tree regrid is good code and Phil owns it.
+      Two changes are worth contributing upstream rather than vendoring: making the selection seam
+      pluggable (a ~15-line change to accept a callable instead of
+      <code>criteria_band</code>/<code>criteria_mode</code>), and persisting the score band. Everything
+      else Stratum needs, it can build alongside. Note that EMIT-AMD still points at a
+      <em>personal fork</em> of SpectralUtil for a click interface that upstream now ships &mdash;
+      confirm that fork is genuinely redundant before anyone builds on it again.
+    </p>
+  </div>
+  <div class="note find">
+    <span class="tag">Small bug worth fixing on the way past</span>
+    <p>
+      <code>build_obs_nc</code> declares four band names &mdash;
+      <code>['GLT X', 'GLT Y', 'File Index', 'OBS val']</code> &mdash; but allocates a three-band array
+      and never writes the criteria values out. The score that decided each pixel is computed and then
+      discarded. For a product whose entire premise is defensible selection, <strong>persisting the
+      score band is a requirement, not a nicety</strong>: without it, no one can answer &ldquo;why did
+      this pixel win?&rdquo; six months later.
+    </p>
+  </div>
+</section>
+
+<!-- ============ 10 DATA ACCESS ============ -->
+<section id="dataaccess">
+  <h2><span class="h-num">10</span>Data access reality</h2>
+  <hr class="rule">
+  <p>
+    This section exists because it contains the two findings most likely to derail a schedule, and
+    both are invisible from the architecture diagram.
+  </p>
+
+  <h3>The delivered L2B mineral product cannot be read at all</h3>
+  <div class="note warn">
+    <span class="tag">Blocker &mdash; verify this first</span>
+    <p>
+      <code>spec_io.open_netcdf</code> dispatches on <em>filename substrings</em> and has readers for
+      EMIT <code>rdn</code>, <code>rfl</code>, <code>obs</code> and <code>l2a_mask</code>, plus the
+      airborne sensors. There is <strong>no reader for the L2B mineral products</strong> &mdash;
+      searching <code>spec_io.py</code> for <code>l2b</code>, <code>min</code>, <code>abun</code> or
+      <code>mineral</code> returns nothing, so an <code>EMIT_L2B_MIN_*.nc</code> falls through to
+      <code>raise ValueError(f'Unknown file type for {input_file}')</code>.
+    </p>
+    <p>
+      AMD never hit this because it reads cluster ENVI <code>.img</code> files, which take the
+      extension-based branch and need no product-specific reader. A cloud pipeline consuming the
+      <em>delivered</em> NetCDF cannot. Writing <code>open_emit_l2b_min_nc</code> is a small, concrete,
+      early deliverable &mdash; and it must be reconciled with the L2B output contract now moving in
+      <code>tetracorder-lite</code> PR&nbsp;#14, or the two will diverge immediately.
+    </p>
+  </div>
+  <p>
+    While in there: substring dispatch (<code>'emit' in name and 'rfl' in name</code>) is fragile in a
+    pipeline that stages files into cache-keyed paths. Stratum should pass the product type explicitly
+    from the manifest&rsquo;s role declaration rather than relying on a filename surviving the round
+    trip through S3.
+  </p>
+
+  <h3>S3 is closer than it looks</h3>
+  <p>
+    The good news is that this is a shallower problem than a first pass suggests.
+    <code>spec_io.py</code> contains no <code>s3</code>, <code>boto3</code>, <code>fsspec</code> or
+    <code>/vsis3/</code> references &mdash; but the NetCDF and TIFF paths go through libraries that
+    already speak object storage. What actually blocks remote access is two guards:
+  </p>
+<pre><code><span class="c"># spec_io.load_data, first statement in the function</span>
+<span class="k">if</span> <span class="k">not</span> os.path.exists(input_file):
+    <span class="k">raise</span> FileNotFoundError(<span class="s">f'{input_file} not found.'</span>)
+
+<span class="c"># and every mosaic CLI argument</span>
+@click.argument(<span class="s">'glt_file'</span>, type=click.Path(exists=<span class="n">True</span>))</code></pre>
+  <p>
+    So the sequencing is: <strong>stage-in shim now, streaming later</strong>. The shim downloads the
+    assets a work item needs to ephemeral disk, calls the existing code unmodified, and uploads the
+    result &mdash; Lambda offers up to 10&nbsp;GB of <code>/tmp</code>, Batch whatever the instance has.
+    It costs wall-clock and forces whole-file reads, but it works immediately and is the right first
+    move. Relaxing those two guards so GDAL and netCDF4 can stream via <code>/vsis3/</code> then turns a
+    block-level read into a range request over the pixels it actually touches, which is the property
+    that makes cloud-native raster processing economical. That is worth contributing upstream rather
+    than working around.
+  </p>
+  <p>
+    One caveat to carry: <code>write_cog</code> builds the whole output raster through GDAL&rsquo;s
+    in-memory <code>MEM</code> driver before writing, so output size is bounded by worker RAM. Blocks
+    (§05) keep that comfortable; whole-tile writes at 0.0003&deg; would not be.
+  </p>
+
+  <h3>Path resolution cannot be a port of <code>convert_fids.py</code></h3>
+  <p>
+    <code>convert_fids.py</code> maps FIDs to ENVI paths under
+    <code>/store/emit/ops/data/acquisitions/{date}/{name}/{lvl}/</code> with the build version
+    <code>b0106_v01</code> hard-coded in a module-level dict. None of that survives the move: ENVI
+    header/binary pairs have no meaning in object storage, and the layout is cluster-specific.
+  </p>
+  <p>
+    Replace it with a <strong>role resolver</strong> over the granule index. The manifest declares
+    <code>mineral &rarr; (EMITL2BMIN, mineral_id)</code>; the resolver returns an asset URI plus the
+    variable within it, and the build version becomes an indexed field that a
+    <code>GranuleFilter</code> can pin &mdash; which is also how a reprocessing campaign gets pinned to
+    a specific build instead of a hard-coded string.
+  </p>
+
+  <h3>Region and credentials</h3>
+  <div class="tablewrap">
+    <table>
+      <thead><tr><th>Fact</th><th>Consequence</th></tr></thead>
+      <tbody>
+        <tr>
+          <td>EMIT products sit in <code>lp-prod-protected</code>, <strong>us-west-2</strong></td>
+          <td>Deploy in us-west-2. Anywhere else pays egress on every granule and loses in-region free transfer &mdash; on a 1.8&nbsp;GB reflectance granule that dominates the bill.</td>
+        </tr>
+        <tr>
+          <td>Access needs Earthdata Login; S3 creds are <strong>temporary, ~1&nbsp;hour</strong></td>
+          <td>Any worker running longer than an hour must refresh mid-job. AMD asks Slurm for 24&nbsp;h per bin &mdash; a naive port fails silently partway through. Build refresh into <code>io/creds.py</code> from day one and store the EDL credential in Secrets Manager, never in the image.</td>
+        </tr>
+        <tr>
+          <td>&ldquo;Protected&rdquo;, not open data</td>
+          <td>No anonymous access. Every worker needs the credential path, which shapes IAM and VPC design.</td>
+        </tr>
+        <tr>
+          <td>EMIT covers roughly 52&deg;N&ndash;52&deg;S</td>
+          <td>Global tiling should clip to the coverage band rather than iterating dead cells &mdash; V002 already loops only &minus;55&deg;&hellip;55&deg;.</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>Replace the coverage GeoJSON with a frozen index</h3>
+  <p>
+    Both existing pipelines select granules by scanning a <code>coverage_pub.json</code>. In V002 that
+    file is fetched, if not supplied, straight off the <strong>MMGIS load balancer</strong>:
+  </p>
+<pre><code>wget -O {coverage_save_file} \
+  https://earth.jpl.nasa.gov/emit-mmgis-lb/Missions/EMIT/Layers/coverage/coverage_pub.json</code></pre>
+  <p>
+    Each feature carries <code>properties.fid</code>, <code>start_time</code>/<code>end_time</code>,
+    <code>Total Cloud Fraction</code>, and a polygon ring. <code>subset_from_coverage.py</code> then
+    applies ROI, time and cloud filters as three sequential passes, each of which
+    <code>deepcopy</code>s the entire coverage document and rebuilds a Shapely
+    <code>Polygon</code> per feature. Phil left a vectorized pandas implementation commented out
+    directly above the loops, so the cost was clearly known. There is no STAC or pgSTAC anywhere in
+    the repo.
+  </p>
+  <p>
+    Three problems, in increasing order of seriousness. It is <strong>slow</strong> &mdash; a linear
+    scan plus three full deep copies over a file that grows with the mission. It is
+    <strong>irreproducible</strong> &mdash; AMD refreshes the file whenever it is over 24 hours old,
+    so the same manifest run on two days silently selects different granules and nothing records
+    which. And <em>the archival L3 product&rsquo;s granule selection depends on a viewer
+    service&rsquo;s web endpoint being up and current</em>, which inverts the dependency Background.md
+    is careful to draw between L3 and MMGIS.
+  </p>
+  <div class="note warn">
+    <span class="tag">Silent data loss in the cloud filter</span>
+    <p>
+      The cloud filter drops any feature whose properties lack the key entirely:
+    </p>
+<pre style="margin:10px 0 8px"><code><span class="k">if</span> <span class="s">'Total Cloud Fraction'</span> <span class="k">in</span> feat[<span class="s">'properties'</span>] <span class="k">and</span> \
+   feat[<span class="s">'properties'</span>][<span class="s">'Total Cloud Fraction'</span>] &lt;= max_cloud_fraction:
+    subdir[<span class="s">'features'</span>].append(feat)</code></pre>
+    <p>
+      A granule with a missing cloud-fraction record is therefore excluded from the mosaic with no
+      warning, no count, and no way to distinguish &ldquo;too cloudy&rdquo; from &ldquo;unlabelled.&rdquo;
+      Any <code>GranuleFilter</code> in Stratum must <strong>report its exclusions by reason</strong>
+      into the run report, and missing metadata must be an explicit policy choice in the manifest
+      rather than an accident of a truth-test.
+    </p>
+  </div>
+  <p>
+    So stage 1 should materialize the candidate set into a <strong>GeoParquet index frozen into the
+    run</strong> &mdash; granule id, footprint, datetime, cloud fraction, build version, asset URIs,
+    quality flags &mdash; queried with DuckDB spatial (which reads directly from S3 over range
+    requests, with no server to operate) and hashed into provenance. A run then names exactly the
+    granules it consumed, forever; the scan becomes a columnar predicate pushdown; and the dependency
+    on an MMGIS endpoint disappears.
+  </p>
+</section>
+
+<!-- ============ 11 DIVERGENCE ============ -->
+<section id="divergence">
+  <h2><span class="h-num">11</span>Where this diverges from the sketch</h2>
+  <hr class="rule">
+  <p>
+    Four places where the research pushed back on the starting proposal. Recording them explicitly,
+    because the reasoning matters more than the conclusions.
+  </p>
+
+  <div class="grid2">
+    <div class="card">
+      <p class="kicker">Diverges</p>
+      <p class="hd">&ldquo;The main engine is a Lambda&rdquo;</p>
+      <p>
+        Right for planning, stitching and cataloguing; wrong for the reduction. Lambda caps at
+        15&nbsp;minutes and 10&nbsp;GB, and AMD asks for 32&nbsp;GB and up to 24&nbsp;hours per 1&deg;
+        bin. <strong>But</strong> block decomposition (§05) shrinks the unit until Lambda <em>does</em>
+        fit &mdash; so the answer is a router, not a choice.
+      </p>
+    </div>
+    <div class="card">
+      <p class="kicker">Diverges</p>
+      <p class="hd">&ldquo;Custom Lambda cost functions&rdquo;</p>
+      <p>
+        A cost function evaluates per pixel inside a vectorized loop; a Lambda invocation per pixel is
+        six orders of magnitude too coarse, and shipping the observation stack to a separate function
+        destroys the data locality that makes any of this affordable. The cost function must run
+        <strong>in-process</strong>. What the Lambda-layer idea is really reaching for is fast
+        iteration without an image rebuild &mdash; delivered by the plugin wheel in §09.
+      </p>
+    </div>
+    <div class="card">
+      <p class="kicker">Refines</p>
+      <p class="hd">&ldquo;A single output raster series mapped to a GLT&rdquo;</p>
+      <p>
+        True of V002, false of AMD, which builds one GLT per granule and keeps them all. The GLT is
+        better understood as a <em>regrid operator</em> than as the mosaic itself; selection is a
+        separate reduction that may or may not be fused into it. That reframing is what makes temporal
+        aggregation expressible at all.
+      </p>
+    </div>
+    <div class="card">
+      <p class="kicker">Adds</p>
+      <p class="hd">Terraform scope</p>
+      <p>
+        Terraform for layers was the starting thought; the dependency stack rules layers out entirely
+        (§09). Terraform still earns its place &mdash; ECR, Batch, Step Functions, IAM, budgets &mdash;
+        but it must stay out of the science parameters, or every experiment becomes an infrastructure
+        review.
+      </p>
+    </div>
+  </div>
+
+  <p>
+    One thing the sketch got exactly right and worth restating: the principles across the three
+    lineages really are the same, and the leverage really is in tooling that makes the mosaic flow easy
+    to implement so the science team iterates on a cost function. That framing survived contact with
+    the code intact &mdash; the corrections above are all about <em>where</em> the seams go, not
+    whether they exist.
+  </p>
+</section>
+
+<!-- ============ 12 COST ============ -->
+<section id="cost">
+  <h2><span class="h-num">12</span>Cost &amp; sizing</h2>
+  <hr class="rule">
+  <div class="note warn">
+    <span class="tag">These are estimates, not measurements</span>
+    <p>
+      Every number below is derived from stated assumptions, not from a run. Granule counts per tile in
+      particular are guesses about ISS revisit over specific ground and could be off by 3&times; either
+      way. <strong>Phase&nbsp;0 exists to replace this table with measured numbers</strong>, and no
+      commitment should be made against it.
+    </p>
+  </div>
+  <p>Assumptions: one 1&deg; pilot tile at 0.0003&deg;; 4 years; monthly epochs (48); ~100 granules
+     intersecting the tile across the mission; L2B MIN + MINUNCERT + L2A MASK + L1B OBS staged, no
+     reflectance.</p>
+  <div class="tablewrap">
+    <table>
+      <thead><tr><th>Stage</th><th>Unit count</th><th>Driver</th><th>Where the cost sits</th></tr></thead>
+      <tbody>
+        <tr><td>Plan</td><td class="num-col">1</td><td>Index query</td><td>Negligible</td></tr>
+        <tr><td>Regrid</td><td class="num-col">100</td><td>KD-tree, ~1.6M &rarr; 11M points</td><td><strong>CPU-bound.</strong> First run only &mdash; then cached forever</td></tr>
+        <tr><td>Stage-in</td><td class="num-col">100</td><td>~4 assets/granule</td><td><strong>I/O-bound.</strong> Free in-region; costs wall-clock until <code>/vsis3/</code> lands</td></tr>
+        <tr><td>Resolve</td><td class="num-col">48 &times; 42 blocks</td><td>Scorer over the obs stack</td><td>Re-runs on every scorer change &mdash; the loop to optimize</td></tr>
+        <tr><td>Reduce</td><td class="num-col">42 blocks</td><td>Mode over 48 epochs</td><td>Cheap; stack is epochs, not granules</td></tr>
+        <tr><td>Publish</td><td class="num-col">1</td><td>Stitch + COG + STAC</td><td>Negligible</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p>
+    The shape to take from this, which is robust even if the magnitudes are wrong: <strong>the first
+    run over new ground is dominated by regrid and staging; every subsequent run is dominated by
+    resolve.</strong> That is the argument for the cache boundary in §06, and it is the number
+    Phase&nbsp;0 should actually go and measure &mdash; specifically, the wall-clock and byte count for
+    one tile, which sizes everything else.
+  </p>
+  <h3>Levers, in rough order of impact</h3>
+  <ul>
+    <li><strong>Stay in us-west-2.</strong> Egress on a reflectance-scale campaign dwarfs compute.</li>
+    <li><strong>Cache GLTs across projects.</strong> Shared grid means AMD and Critical Minerals amortize the same geometry.</li>
+    <li><strong>Spot for Batch.</strong> Block-level retries make interruption cheap enough to take the discount.</li>
+    <li><strong>Express workflows on inner maps.</strong> Standard-workflow state transitions add up fast at hundreds of thousands of blocks.</li>
+    <li><strong>Intermediate lifecycle rules.</strong> Epoch snapshots are reproducible; expire them on a short clock. Keep GLTs, which are expensive and immortal.</li>
+    <li><strong>Skip reflectance unless a scorer asks for it.</strong> At ~1.8&nbsp;GB/granule it is the single largest input; make it opt-in per manifest.</li>
+    <li><strong>Actually use the cores you pay for.</strong> AMD requests <code>--cpus-per-task=4</code> but hardcodes <code>--n_cores 1</code>, which is what feeds <code>KDTree.query(..., workers=n_cores)</code> &mdash; the compute-bound inner loop &mdash; and its per-granule loop is strictly serial. Three of four CPUs idle through the entire regrid phase. Before buying bigger workers, check the parallelism already available.</li>
+  </ul>
+  <div class="note find">
+    <span class="tag">What the 32&nbsp;GB is really buying</span>
+    <p>
+      Probably not the KD-tree. <code>write_cog</code> materializes the full tile array, then a GDAL
+      <code>MEM</code> copy, then overview levels before <code>CreateCopy</code> &mdash; so peak memory
+      scales with <em>tile area</em>, not swath size or granule count. That is a strong independent
+      argument for blocks (§05): shrinking the output unit attacks the term that actually dominates,
+      which is why a block-wise worker can be small even when AMD&rsquo;s tile-wise one could not.
+    </p>
+  </div>
+</section>
+
+<!-- ============ 13 RISKS ============ -->
+<section id="risks">
+  <h2><span class="h-num">13</span>Risks &amp; open questions</h2>
+  <hr class="rule">
+  <div class="tablewrap">
+    <table>
+      <thead><tr><th>Risk</th><th>Why it bites</th><th>Response</th></tr></thead>
+      <tbody>
+        <tr>
+          <td><strong>The mode implementation is unreadable</strong></td>
+          <td><code>amd stack</code> is the only working temporal integration and it lives in a package that is not vendored anywhere we can see. We are designing around a black box. The complete temporal evidence in EMIT-AMD is a <code>.freq-&lt;N&gt;.</code> token in filenames, one line of README prose, and the <code>amd stack</code> call &mdash; <em>no filename anywhere carries a date</em>, and no config key for chunking is ever referenced.</td>
+          <td>Ask James for <code>/store/jamesmo/amd/repo/configs/config.yml</code> <strong>first</strong> &mdash; it defines <code>mosaic</code>, <code>v6</code>/<code>v7</code>, <code>filter-fit</code>, <code>filter-clouds-1-4</code> and <code>pyrite</code> as composable patches, so one file answers the chunking keys, filter thresholds and classifier versions at once. A far smaller ask than the whole package, and it may be sufficient.</td>
+        </tr>
+        <tr>
+          <td><strong>AWS access is the long pole</strong></td>
+          <td>Already flagged in the task README. Nothing past Phase&nbsp;1 works without an account, quota and an EDL credential path.</td>
+          <td>Start it now, in parallel with everything else. Build and test locally against staged granules meanwhile.</td>
+        </tr>
+        <tr>
+          <td><strong>No reader for delivered L2B</strong></td>
+          <td>§10. <code>spec_io</code> has no NetCDF reader for the mineral products &mdash; the primary Critical Minerals input. AMD avoided this by reading cluster ENVI.</td>
+          <td>Write <code>open_emit_l2b_min_nc</code> early; reconcile with the L2B contract in <code>tetracorder-lite</code> PR&nbsp;#14 before it sets.</td>
+        </tr>
+        <tr>
+          <td><strong>SpectralUtil has no remote IO</strong></td>
+          <td>§10. Shallower than it looks &mdash; an <code>os.path.exists</code> guard plus <code>click.Path(exists=True)</code>, not a deep rewrite.</td>
+          <td>Stage-in shim first; relax the guards for <code>/vsis3/</code> streaming second, upstream.</td>
+        </tr>
+        <tr>
+          <td><strong>Non-local reducers</strong></td>
+          <td>Block decomposition silently produces wrong answers at block seams for anything with a spatial term.</td>
+          <td>Make <code>capability</code> and <code>halo</code> explicit in the contract; route tile-scope plugins to Batch. Add a seam test to CI.</td>
+        </tr>
+        <tr>
+          <td><strong>No failure handling exists to copy</strong></td>
+          <td>Neither pipeline retries anything. <code>watch.sh</code> only infers a job id from log filenames and counts finished bins &mdash; it is a progress display, not a supervisor. A failed 1&deg; bin is noticed by a human reading logs, if at all.</td>
+          <td>Retry, idempotency and per-item error capture are Stratum&rsquo;s job from day one; content addressing (§06) makes retry safe by construction.</td>
+        </tr>
+        <tr>
+          <td><strong>Over-engineering ahead of the science</strong></td>
+          <td>Phil&rsquo;s instruction was to <em>start building</em>. A framework built before one real mosaic exists will abstract the wrong things.</td>
+          <td>Build the pilot zone first with the contracts as thin wrappers. Generalize only where a second use case actually pulls.</td>
+        </tr>
+        <tr>
+          <td><strong>Grid choice is inherited, not decided</strong></td>
+          <td>5&deg;/0.00055&deg; is a V002 artifact; AMD uses 1&deg;/0.0003&deg;. Blocks make tile size much less load-bearing, but the output resolution still needs a deliberate answer.</td>
+          <td>Decide with Dana and Phil in Phase&nbsp;1. The manifest makes it a one-line change, so this need not block anything.</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>Questions this design does not answer</h3>
+  <ul>
+    <li>Mode over mineral ID directly, or over something continuous first? Tie-break at low observation counts? &mdash; <em>for Phil; now a choice between two Reducer classes.</em></li>
+    <li>What else besides snow and high vegetation should be filtered? &mdash; <em>for Dana; a <code>PixelMask</code> chain in the manifest.</em></li>
+    <li>One collection with multiple files, or multiple collections? &mdash; <em>affects stage 5 only, and can be deferred until there is real output to look at.</em></li>
+    <li>Does MMGIS consume this artifact or a derived layer? &mdash; <em>if derived, it is another Reducer plus a publish target, not another pipeline. Worth knowing that <strong>no MMGIS handoff exists in EMIT-AMD at all</strong>: the automated chain terminates at a tarball, there is no layer config, upload or publish step anywhere, and <code>addToQGIS.py</code> is a separate QGIS-console script, not registration. QGIS is the working visualization path today; MMGIS is a manual, undocumented last mile. So there is no precedent to inherit here &mdash; this genuinely has to be designed.</em></li>
+    <li>Is there an intermediate value-added L2B between L2B and L3? &mdash; <em>would enter as another input role; no structural change.</em></li>
+  </ul>
+</section>
+
+<!-- ============ 14 PLAN ============ -->
+<section id="plan">
+  <h2><span class="h-num">14</span>How to build it</h2>
+  <hr class="rule">
+  <p>
+    Deliberately sequenced so a working mosaic exists before any of the framework is generalized, and
+    so the AWS access question is being worked in parallel rather than blocking. This slots into the
+    existing Phase&nbsp;0&ndash;3 plan in the task README rather than replacing it.
+  </p>
+
+  <div class="grid3">
+    <div class="card">
+      <p class="kicker">Step 1 &middot; while access lands</p>
+      <p class="hd">Local vertical slice</p>
+      <ul class="checklist" style="font-size:13.5px;color:var(--muted);margin-top:10px">
+        <li>Get the <code>amd</code> source</li>
+        <li>Write <code>open_emit_l2b_min_nc</code></li>
+        <li>Stage one tile of granules locally</li>
+        <li>Contracts + <code>MinViewZenith</code></li>
+        <li>Reproduce a V002 cell as reference</li>
+        <li>Write <code>ModeThroughTime</code></li>
+      </ul>
+    </div>
+    <div class="card">
+      <p class="kicker">Step 2</p>
+      <p class="hd">Cache &amp; blocks</p>
+      <ul class="checklist" style="font-size:13.5px;color:var(--muted);margin-top:10px">
+        <li>Content addressing</li>
+        <li>Block decomposition + halo</li>
+        <li>Seam-equivalence test in CI</li>
+        <li>Prove: change scorer, skip regrid</li>
+        <li>Frozen GeoParquet index</li>
+      </ul>
+    </div>
+    <div class="card">
+      <p class="kicker">Step 3</p>
+      <p class="hd">Cloud</p>
+      <ul class="checklist" style="font-size:13.5px;color:var(--muted);margin-top:10px">
+        <li>Container image, both entrypoints</li>
+        <li>Terraform: ECR, Batch, SFN, IAM</li>
+        <li>EDL credential refresh</li>
+        <li>Distributed Map fan-out</li>
+        <li>Budget gate + dry-run report</li>
+      </ul>
+    </div>
+    <div class="card">
+      <p class="kicker">Step 4</p>
+      <p class="hd">Pilot zones</p>
+      <ul class="checklist" style="font-size:13.5px;color:var(--muted);margin-top:10px">
+        <li>2&ndash;4 zones with Dana</li>
+        <li>Annual product + spread</li>
+        <li>Characterize vs V002 &amp; AMD</li>
+        <li>Measure and publish real costs</li>
+      </ul>
+    </div>
+    <div class="card">
+      <p class="kicker">Step 5</p>
+      <p class="hd">Productize</p>
+      <ul class="checklist" style="font-size:13.5px;color:var(--muted);margin-top:10px">
+        <li>STAC + provenance records</li>
+        <li>Granule/collection layout</li>
+        <li>MMGIS publish target</li>
+        <li>Align with L2B <code>daac.py</code></li>
+      </ul>
+    </div>
+    <div class="card hl">
+      <p class="kicker">The test that matters</p>
+      <p class="hd">Iteration latency</p>
+      <p style="margin-top:8px">
+        A scientist edits a scorer, publishes a wheel, reruns one zone, and sees a new annual mosaic
+        <strong>without touching Terraform, an image, or a pipeline script</strong>. If that loop is
+        minutes, the architecture worked. If it is hours, it did not, whatever else is true.
+      </p>
+    </div>
+  </div>
+
+  <div class="note key">
+    <span class="tag">First thing to write</span>
+    <p>
+      Not the framework. Write <code>ModeThroughTime</code> against a hand-staged stack of monthly
+      snapshots for one tile, and look at the output with Phil and Dana. It is the only genuinely new
+      capability in the whole proposal, it is the piece with the most unresolved science, and
+      everything else here is plumbing that can be built once that question has an answer.
+    </p>
+  </div>
+</section>
+
+</main>
+</div>
+
+<footer>
+  <div class="footer-inner">
+    <p>
+      <strong style="color:var(--muted)">Stratum</strong> &mdash; architecture proposal for the EMIT
+      Critical Minerals L3 mosaic. Draft, 26&nbsp;August&nbsp;2026. Companion to
+      <a href="README.md">README.md</a> and <a href="Background.md">Background.md</a> in this task
+      folder.
+    </p>
+    <p>
+      Code references are to <code>SpectralUtil</code>, <code>emit-sds-l3</code> and
+      <code>EMIT-AMD</code> as checked out in the EMIT monorepo on 26&nbsp;Aug&nbsp;2026. Cost figures
+      in §12 are estimates from stated assumptions and have not been measured.
+      &ldquo;Stratum&rdquo; is a working name, not a decision.
+    </p>
+  </div>
+</footer>
+
+<script>
+// Smooth scrolling is a nicety; a working table of contents is not. In some
+// browser configurations `scroll-behavior: smooth` is inert, which silently
+// makes every in-page anchor do nothing. Drive the scroll explicitly and fall
+// back to an instant jump if the page hasn't moved.
+(function () {
+  var reduce = window.matchMedia('(prefers-reduced-motion: reduce)');
+
+  document.querySelectorAll('a[href^="#"]').forEach(function (link) {
+    link.addEventListener('click', function (ev) {
+      var id = link.getAttribute('href').slice(1);
+      var target = id && document.getElementById(id);
+      if (!target) return;
+
+      ev.preventDefault();
+      var from = window.scrollY;
+      // 'instant' rather than 'auto' — 'auto' defers to the CSS scroll-behavior,
+      // which is exactly the value we may need to bypass.
+      target.scrollIntoView({ behavior: reduce.matches ? 'instant' : 'smooth', block: 'start' });
+
+      // If nothing has moved shortly after, smooth scrolling isn't working here.
+      window.setTimeout(function () {
+        if (window.scrollY === from && Math.abs(target.getBoundingClientRect().top) > 4) {
+          target.scrollIntoView({ behavior: 'instant', block: 'start' });
+        }
+      }, 250);
+
+      if (history.replaceState) history.replaceState(null, '', '#' + id);
+    });
+  });
+})();
+</script>
+</body>
+</html>
