@@ -170,17 +170,27 @@ writes a new image. Consequences worth designing for:
 
 ## 6. Class tables key on stable IDs
 
-The `classes` reference resolves mineral identity through the **stable `id` slug** from the
-Tetracorder reference matrix (`tetrapy/data/v6.00a6.csv`: `index, id, group, library, record,
-title, ...`), never the positional `index`.
+AMD's `hashmap` keys on position — `goethite: [3, 5, 6, 7, 8]`. Positions shift when rows are
+added, removed or deduplicated, so a colour or lumping table keyed on `index` **silently reassigns
+minerals on a version bump**, with no error. `tetracorder-lite` PR #20 added an `id` column
+precisely for this reason.
 
-AMD's `hashmap` keys on position — `goethite: [3, 5, 6, 7, 8]`. `tetracorder-lite` PR #20 added the
-`id` column precisely because positions shift when rows are added, removed or deduplicated. A
-grouping or colour table keyed on `index` **silently reassigns minerals on a version bump**, with
-no error.
+**But `id` does not exist yet in delivered data.** Measured on a real V001 granule
+([11 §9](11-types.md)), `index` is the *only* unique key — `(library, record, group)` collides on
+2 of 294 entries, bare `name` on 11. And the index space already differs between vintages: 294
+entries in the granule against 312 in `v6.00a6.csv`.
 
-**Requirements.** Lumping and colour tables key on `id`. The manifest pins the reference-matrix
-version. Plan-time validation fails if a referenced `id` is absent from the pinned matrix.
+**Requirements, given that reality:**
+
+1. A class table **declares the vintage it was built for** and fails validation against any other.
+   V001 tables are vintage-locked by construction; this is not a workaround, it is the honest
+   consequence.
+2. Tables carry `(library, record, group, name)` beside `index` as **provenance**, so migration
+   between vintages is computable and the handful of ambiguous entries surface for manual
+   reconciliation instead of being guessed.
+3. Prefer reading the table from the granule's own `/mineral_metadata` group over a checked-in
+   CSV — it cannot drift from the data it describes.
+4. When V002 lands, migrate the primary key to `id` and relax rule 1.
 
 ---
 

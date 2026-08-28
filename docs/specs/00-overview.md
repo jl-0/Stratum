@@ -193,3 +193,4 @@ These hold across every stage, and violating any of them breaks something the de
 | [08 — Execution](08-execution.md) | Step Functions, Batch, Lambda, routing, retries |
 | [09 — Run manifest](09-run-manifest.md) | Schema, composition, budget, validation |
 | [10 — Provenance](10-provenance.md) | STAC, run records, reproducibility |
+| [11 — Core types](11-types.md) | Every shared type, fill/nodata rules, mineral identity |

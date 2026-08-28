@@ -23,6 +23,7 @@ Interfaces and contracts. Numbered by dependency order, not by build order.
 | [08 — Execution](specs/08-execution.md) | Step Functions, Batch, Lambda, routing, failures |
 | [09 — Run manifest](specs/09-run-manifest.md) | Schema, composition, budget, validation |
 | [10 — Provenance](specs/10-provenance.md) | STAC, run records, reproducibility |
+| [11 — Core types](specs/11-types.md) | Every shared type, fill/nodata rules, mineral identity |
 
 ## Decisions
 
@@ -45,6 +46,7 @@ Interfaces and contracts. Numbered by dependency order, not by build order.
 |---|---|---|
 | `amd-config.yml` | `/store/jamesmo/amd/repo/configs/config.yml` | The only readable record of `amd stack` parameters (`mincount`, `ignore`), the lumping `hashmap`, and the RGBA `colors` table |
 | `2026-08-28-mines-transcript.md` | Voice transcript, Mines tag-up | Source for the notes above. Attribution is unreliable — see the caveat in the notes |
+| `EMIT_L2B_MIN_001_20260825T151308_2623710_050.nc` | Delivered LP DAAC granule, `V001` / build `010635` | Ground truth for [11 — Core types](specs/11-types.md); reader and GLT fixtures |
 
 ## Conventions
 

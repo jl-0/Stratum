@@ -88,8 +88,16 @@ Requirements:
   manifest explicitly opts in with a documented reason;
 - the run report states the vintage(s) selected, prominently.
 
-Open: what the version identifier actually looks like in delivered metadata, and whether a
-reprocessed granule is distinguishable from its predecessor *before* download. Confirm with Phil.
+**Partly answered by the reference granule.** It carries `software_build_version` (`010635`),
+`software_delivery_version`, and `product_version` (`V001`) as global attributes, and its `history`
+names `tetracorder5.27c.cmds`. So the identifier exists and is unambiguous *in the file*.
+
+Still open: whether CMR exposes these **before download**. If not, vintage filtering cannot be an
+index predicate and the index build must record it at ingest — which is the design assumed here.
+
+> Phil has since confirmed that V002 only **adds** metadata. A reader written against V001 fields
+> therefore stays forward-compatible. Note this does *not* extend to class tables keyed on
+> `index` — see [11 §9](11-types.md).
 
 ---
 
