@@ -17,7 +17,7 @@ not going to check them against the code.
 
 | If you change… | Update |
 |---|---|
-| Any shared type (`ObsWindow`, `AuxAccessor`, `GLT`, `SnapshotStack`, `BandStack`, `GranuleRef`, `MineralTable`) | [`docs/specs/11-types.md`](docs/specs/11-types.md) — **always**, no exceptions |
+| Any shared type (`ObsWindow`, `AuxAccessor`, `GLT`, `SnapshotStack`, `BandStack`, `GranuleRef`, `ClassTable`) | [`docs/specs/11-types.md`](docs/specs/11-types.md) — **always**, no exceptions |
 | A plugin contract | [`04-cost-functions.md`](docs/specs/04-cost-functions.md), and [`07`](docs/specs/07-output-mapping.md) for `OutputMapper` |
 | What goes into a cache key | [`06-caching.md`](docs/specs/06-caching.md) |
 | The manifest schema | [`09-run-manifest.md`](docs/specs/09-run-manifest.md) |
@@ -62,9 +62,11 @@ Established by reading code and data. Do not re-derive; do not assume the opposi
   everything. Both are reductions over an observation stack; that unification is the core idea.
 - **`-9999` ≠ `0`.** In a mineral ID, `-9999` is "not observed" and `0` is "observed, nothing
   identified". Conflating them fabricates agreement.
-- **`index` is the only unique key in V001 mineral metadata, and it is positional.** 294 entries in
-  the delivered granule vs 312 in `v6.00a6.csv`. Class tables are vintage-locked. See
-  [`11-types.md` §9](docs/specs/11-types.md).
+- **Products carry their own class tables; use them.** The L2B granule embeds `/mineral_metadata`
+  (294 entries). Read the table from the granule being processed rather than a checked-in CSV — it
+  cannot drift from the pixels it describes. Raw values are positional and differ between vintages
+  (294 in the granule vs 312 in `v6.00a6.csv`), so match on **attributes**
+  (`library`, `record`, `group`), never on the integer. See [`11-types.md` §9](docs/specs/11-types.md).
 - **EMIT is a push-broom.** Every *column* is a different detector, so cross-track edges need
   trimming (7 columns each side) but along-track granule boundaries are a download artifact and
   need nothing.
@@ -72,6 +74,11 @@ Established by reading code and data. Do not re-derive; do not assume the opposi
   (`os.path.exists`, `click.Path(exists=True)`), not by architecture.
 - **Wrap SpectralUtil, never fork it.** EMIT-AMD depends on a personal fork for a CLI upstream now
   ships; do not repeat that.
+
+**Layering.** `stratum` core knows nothing about Tetracorder, minerals, spectral libraries or EMIT.
+It knows a band may have a class table, where config says to find it, and how to check that
+several agree. Everything domain-specific lives in `stratum_emit`. If you find yourself writing
+"mineral" in a core module, it belongs in the plugin.
 
 ---
 

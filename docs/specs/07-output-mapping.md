@@ -168,29 +168,46 @@ writes a new image. Consequences worth designing for:
 
 ---
 
-## 6. Class tables key on stable IDs
+## 6. Lumping resolves through the product's own class table
 
-AMD's `hashmap` keys on position — `goethite: [3, 5, 6, 7, 8]`. Positions shift when rows are
-added, removed or deduplicated, so a colour or lumping table keyed on `index` **silently reassigns
-minerals on a version bump**, with no error. `tetracorder-lite` PR #20 added an `id` column
-precisely for this reason.
+AMD's `hashmap` keys on raw position — `goethite: [3, 5, 6, 7, 8]`. Positions shift when the
+reference matrix gains, loses or deduplicates rows, so a table keyed on them **silently reassigns
+minerals on a version bump**, with no error.
 
-**But `id` does not exist yet in delivered data.** Measured on a real V001 granule
-([11 §9](11-types.md)), `index` is the *only* unique key — `(library, record, group)` collides on
-2 of 294 entries, bare `name` on 11. And the index space already differs between vintages: 294
-entries in the granule against 312 in `v6.00a6.csv`.
+The fix is not a better external table. It is to stop maintaining an external table at all:
+**every delivered granule embeds its own class table** ([11 §9](11-types.md)), so the authority
+travels with the data and cannot drift from the pixels it describes.
 
-**Requirements, given that reality:**
+Lumping is therefore expressed against **semantic attributes**, and resolved to integer values
+per-granule at plan time:
 
-1. A class table **declares the vintage it was built for** and fails validation against any other.
-   V001 tables are vintage-locked by construction; this is not a workaround, it is the honest
-   consequence.
-2. Tables carry `(library, record, group, name)` beside `index` as **provenance**, so migration
-   between vintages is computable and the handful of ambiguous entries surface for manual
-   reconciliation instead of being guessed.
-3. Prefer reading the table from the granule's own `/mineral_metadata` group over a checked-in
-   CSV — it cannot drift from the data it describes.
-4. When V002 lands, migrate the primary key to `id` and relax rule 1.
+```yaml
+lumping:
+  match_on: [library, record, group]     # attributes from the embedded table
+  classes:
+    goethite:
+      - {library: sprlb06, record: 882,  group: 1}
+      - {library: splib06, record: 5736, group: 1}
+    pyrite:
+      - {library: splib06, record: 2568, group: 1}
+```
+
+Nothing here names a positional index, so the same lumping file survives a vintage change. What
+changes between vintages is which integers those attributes resolve *to*, and that resolution is
+recomputed per run from the granules actually being read.
+
+**Requirements:**
+
+1. Lumping matches on declared attributes, never on the raw pixel value.
+2. Resolution happens at plan time against the granules' embedded tables; an entry matching zero
+   or multiple rows is a **plan-time error**, not a runtime surprise. Measured on the delivered
+   file, `(library, record, group)` uniquely resolves 292 of 294 entries, so the ambiguous handful
+   surface as errors to be reconciled explicitly rather than guessed.
+3. The mosaic publishes **its own** class table — post-lumping classes are not input classes —
+   which is the legend requirement in §2 arrived at from the other direction.
+
+None of this is Tetracorder-specific: the framework matches attributes it was told to match, and
+`stratum_emit` supplies only the knowledge that `/mineral_metadata` is where EMIT keeps its table.
 
 ---
 

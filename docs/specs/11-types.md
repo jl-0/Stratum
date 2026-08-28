@@ -279,79 +279,82 @@ available in the type so it stays cheap to answer later.
 
 ---
 
-## 9. Mineral identity — the version problem
+## 9. Class tables
 
-**[observed]** The granule embeds its own reference table at `/mineral_metadata`, dimension
-`minerals = 294`:
+Some bands are categorical: their integer values index a table of classes. The framework needs a
+generic way to carry that table around. **It must not know what the classes mean.**
 
-| Variable | Type | Notes |
-|---|---|---|
-| `index` | `uint32` | **1…294, contiguous** — positional |
-| `record` | `uint32` | specpr record number |
-| `name` | `str` | e.g. `Goethite WS222 <250um MedGrn W1R1H_ AREF` |
-| `library` | `str` | `splib06` or `sprlb06` |
-| `group` | `uint32` | 1 or 2 (95 and 199 entries respectively) |
-| `url` | `str` | USGS metadata page |
+> **Layering rule.** Nothing in `stratum` core knows about Tetracorder, minerals, spectral
+> libraries or EMIT. It knows that a band may have a class table, that the table has a key column
+> and some attribute columns, and where to find it. Every domain specific of what those attributes
+> signify lives in `stratum_emit`.
 
-`group_N_mineral_id` values index into this table. **[observed]** group 1 in this granule uses 22
-distinct values in 0…76.
+### Self-describing products are the good case
 
-### There is no stable unique key in V001
+**[observed]** The L2B granule embeds its own class table at `/mineral_metadata`
+(`minerals = 294`), with columns `index`, `record`, `name`, `library`, `group`, `url`.
+`group_N_mineral_id` values index into it.
 
-Measured on the delivered file:
-
-| Candidate key | Unique | Duplicate keys |
-|---|---:|---:|
-| `index` | **294 / 294** | 0 |
-| `(library, record, group)` | 292 / 294 | 2 |
-| `(name, group)` | 292 / 294 | 2 |
-| `(library, record)` | 282 / 294 | 12 |
-| `name` | 283 / 294 | 11 |
-
-Most `(library, record)` collisions are the same spectrum appearing in both groups — e.g.
-`splib06/2568` Jarosite at `index 15` (group 1) and `index 205` (group 2) — so adding `group`
-resolves all but two.
-
-This is exactly why `tetracorder-lite` PR #20 deduplicated the matrix and added an `id` column.
-
-> **Consequence.** In V001, **`index` is the only unique key, and it is positional.** The delivered
-> file has 294 entries; `tetrapy/data/v6.00a6.csv` has 312. The index spaces are therefore
-> *already different between vintages*, and a lumping or colour table keyed on `index` silently
-> remaps minerals when the vintage changes.
->
-> So a V001 class table is **vintage-locked by construction**. This strengthens rather than
-> softens the pinning requirement in [02 §3](02-granule-index.md): the class table is only
-> meaningful for the vintage it was built against.
-
-### Practical policy
-
-1. Class tables **declare the vintage they were built for** and fail validation against any other.
-2. Tables carry `(library, record, group, name)` alongside `index` as **provenance**, so a
-   migration between vintages can be computed and the ~2 ambiguous entries reconciled by hand
-   rather than guessed.
-3. **[design]** When V002 lands with the added metadata, migrate the primary key to the stable
-   `id` slug and relax rule 1. Per Phil, V002 only *adds* metadata, so a V001-only reader stays
-   forward-compatible — but a V001-keyed *class table* does not, and that distinction is the whole
-   point of this section.
+This is the arrangement to prefer wherever a product offers it, because **the authority travels
+with the data**. There is no external CSV to drift, no version to pin by hand, and no way for the
+table to disagree with the pixels it describes. A reader that pulls the table out of the granule
+it is currently processing is correct by construction.
 
 ```python
 @dataclass(frozen=True)
-class MineralEntry:
-    index: int; record: int; name: str; library: str; group: int; url: str
-
-@dataclass(frozen=True)
-class MineralTable:
-    entries: Sequence[MineralEntry]
-    vintage: str                  # build/product version it came from
-    @classmethod
-    def from_granule(cls, path) -> "MineralTable": ...   # read /mineral_metadata
+class ClassTable:
+    key: str                              # column whose values appear in pixels
+    entries: pa.Table                     # key + arbitrary attribute columns
+    source: str                           # provenance: URI + path, or file
+    def attrs(self) -> Sequence[str]: ...
+    def fingerprint(self) -> str: ...     # content hash; enters cache keys
 ```
 
-Reading the table **from the granule** rather than a checked-in CSV is preferable where possible:
-it cannot drift from the data it describes.
+### Where to find it is config
 
----
+Declared per role, so the framework never hard-codes a path — and so products that *don't* embed
+a table are equally expressible:
 
+```yaml
+inputs:
+  roles:
+    mineral:
+      collection: EMITL2BMIN
+      var: group_1_mineral_id
+      class_table:
+        source: embedded          # embedded | file
+        path: /mineral_metadata   # group within the product
+        key: index                # column matching pixel values
+        attributes: [name, record, library, group, url]
+```
+
+### The residual problem, and why it is now tractable
+
+A mosaic spans many granules, and their class tables must agree — a pixel value of `15` has to
+mean the same thing in every granule contributing to a cell, or the reduction is nonsense.
+
+**[observed]** `index` is 1…294 contiguous and positional. `v6.00a6.csv` has 312 entries. So the
+index space genuinely does differ between vintages, and during the reprocessing window a run can
+span both.
+
+The embedded table does not make that go away. What it does is make it **detectable and
+mechanically solvable**, where an external table would have made it silent:
+
+1. **Fingerprint every granule's table** at plan time.
+2. **All identical** → the common case. Proceed; record the fingerprint in provenance.
+3. **They differ** → the run spans vintages. Either fail loudly, or remap through the attribute
+   columns, which carry enough identity to compute the correspondence. Measured on the delivered
+   file, `(library, record, group)` resolves 292 of 294 entries — so a remap is computable, with a
+   short list of genuine ambiguities surfaced for a human rather than guessed.
+
+That check is generic: it is "do these class tables agree", not "do these minerals agree", and it
+belongs in the core.
+
+### Output products carry their own table
+
+A mosaic's classes are its own — post-lumping, they are not the input classes. Stage 5 therefore
+publishes a `ClassTable` for the product alongside it, which is the same requirement as the legend
+in [07 §2](07-output-mapping.md), reached from the other direction.
 ## 10. Observed oddities
 
 Recorded so nobody re-derives them.
@@ -374,6 +377,8 @@ Recorded so nobody re-derives them.
    whether vintage filtering is an index predicate or requires touching files.
 2. Should `ObsWindow` expose per-granule uncertainty as a first-class alias, or is it just another
    role? Leaning role.
-3. Does `MineralTable.from_granule` need to reconcile tables across granules in one run, or can we
-   assert they are identical within a pinned vintage? Assert, and fail loudly — but verify on a
-   real multi-granule set first.
+3. Is fingerprint-and-assert enough for class-table agreement in practice, or is cross-vintage
+   remapping needed in v1? Assert first; verify on a real multi-granule set spanning the
+   reprocessing boundary before deciding.
+4. Should `ClassTable` be `pyarrow.Table`, or a plain dataclass of columns? Arrow makes
+   fingerprinting and attribute matching easy and is already implied by GeoParquet.
