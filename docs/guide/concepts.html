@@ -43,16 +43,37 @@
 </table>
 </div>
 
-<h2 id="crs">Coordinate reference systems, briefly</h2>
+<h2 id="grid">Grid</h2>
 
-<p>If <code>EPSG:4326</code> already means something to you, skip to <a href="#grid">Grid</a>.</p>
+<p>A grid is CRS, resolution and origin. <strong>It has no extent.</strong> It is a rule — cell
+edges fall at <code>origin + n &times; resolution</code> — which fixes where cell boundaries lie
+anywhere in the CRS's domain, without anyone having to say where the data is.</p>
+
+<p>That is what makes tiles align. Tile bounds are derived from the grid, never from the extent of
+your granules, so two runs over the same ground at the same grid produce identical tile bounds and
+can share cached geometry. A grid that took its bounds from data would give every run subtly
+different tiles.</p>
+
+<p>The <code>crs</code> field decides what the other numbers <em>mean</em>. Everything below it is
+expressed in that CRS's units — degrees for <code>EPSG:4326</code>, metres for most projected
+systems.</p>
+
+<div class="warn">
+  <span class="label">The mistake that bites</span>
+  <p>In <code>EPSG:4326</code>, <code>resolution: 0.0003</code> means 0.0003 <em>degrees</em> —
+  roughly 33 m at the equator. In a metre-based projected CRS the same number would mean 0.3 mm.
+  Confusing the two is the most common configuration error in this system, which is why Stratum
+  rejects the obvious cases below.</p>
+</div>
+
+<details class="explainer">
+<summary>What is a CRS, and what does <code>EPSG:4326</code> mean?</summary>
+<div class="body">
 
 <p>A pair of numbers like <code>(-115.3, 37.5)</code> means nothing on its own. A <strong>coordinate
-reference system</strong> — CRS, sometimes called a spatial reference system — is what says which
-point on Earth those numbers refer to: what shape the Earth is taken to be, where the origin sits,
-and what the units are.</p>
-
-<p>Two kinds matter here:</p>
+reference system</strong> — CRS, sometimes called a spatial reference system — says which point on
+Earth those numbers refer to: what shape the Earth is taken to be, where the origin sits, and what
+the units are.</p>
 
 <div class="tw">
 <table>
@@ -65,24 +86,15 @@ and what the units are.</p>
 </div>
 
 <p><strong>EPSG codes</strong> are short numeric identifiers from a public registry of CRS
-definitions, maintained by the IOGP Geomatics Committee. Writing <code>EPSG:4326</code> is a
-compact, unambiguous way of saying "WGS 84 longitude/latitude in degrees" — the same system a GPS
-receiver reports. Geographic CRSs occupy the <code>4xxx</code> range, which Stratum uses as a sanity
-check below.</p>
+definitions, maintained by the IOGP Geomatics Committee. <code>EPSG:4326</code> is a compact,
+unambiguous way of saying "WGS 84 longitude/latitude in degrees" — the same system a GPS receiver
+reports. Geographic CRSs occupy the <code>4xxx</code> range, which is what the guard rail below
+keys on.</p>
 
-<div class="warn">
-  <span class="label">The consequence that bites</span>
-  <p><strong>Resolution is expressed in the CRS's units.</strong> In <code>EPSG:4326</code>,
-  <code>0.0003</code> means 0.0003 <em>degrees</em> — roughly 33 m at the equator, and less toward
-  the poles, because lines of longitude converge. In a metre-based projected CRS the same number
-  would mean 0.3 mm. Confusing the two is the most common configuration mistake in this whole
-  system.</p>
-</div>
-
-<p>A second consequence: a cell in a geographic CRS is not a constant size on the ground.
-0.0003° of longitude is about 33 m at the equator and about 24 m at 45° latitude. That is workable
-here because the source products are themselves distributed on a geographic grid, but it is worth
-knowing before you read a cell count as an area.</p>
+<p>One more consequence worth knowing: a cell in a geographic CRS is not a constant size on the
+ground. 0.0003° of longitude is about 33 m at the equator and about 24 m at 45° latitude. That is
+workable here because the source products are themselves distributed on a geographic grid, but it
+matters before you read a cell count as an area.</p>
 
 <div class="reading">
   <span class="label">Further reading</span>
@@ -95,16 +107,8 @@ knowing before you read a cell count as an area.</p>
   </ul>
 </div>
 
-<h2 id="grid">Grid</h2>
-
-<p>A grid is CRS, resolution and origin. <strong>It has no extent.</strong> It is a rule — cell
-edges fall at <code>origin + n &times; resolution</code> — which fixes where cell boundaries lie
-anywhere in the CRS's domain, without anyone having to say where the data is.</p>
-
-<p>That is what makes tiles align. Tile bounds are derived from the grid, never from the extent of
-your granules, so two runs over the same ground at the same grid produce identical tile bounds and
-can share cached geometry. A grid that took its bounds from data would give every run subtly
-different tiles.</p>
+</div>
+</details>
 
 <pre><code>grid:
   <span class="c"># Which coordinate system the numbers below are in.</span>
@@ -286,6 +290,23 @@ space, because regridding discards the source column. Declare which one you mean
   you do not configure it by hand.</p>
 </div>
 
+<details class="explainer">
+<summary>What is a push-broom sensor, and why does it matter here?</summary>
+<div class="body">
+
+<p>A push-broom instrument has a single line of detectors laid out across the flight direction. It
+builds an image by sweeping that line forward as the platform moves — one row at a time, the way a
+push broom sweeps a floor.</p>
+
+<p>The consequence for you is that <strong>every column of the raw image comes from a different
+physical detector</strong>, each with its own calibration and its own defects. A bad detector shows
+up as a persistent stripe down the whole scene, not as a blob. Rows, by contrast, are just moments
+in time: the boundary between one granule and the next is a decision about where to cut a
+continuous strip for distribution, and carries no physical meaning.</p>
+
+<p>That asymmetry is why masks need to say which space they operate in, why cross-track edge columns
+are trimmed, and why along-track edges are left alone.</p>
+
 <div class="reading">
   <span class="label">Further reading</span>
   <ul>
@@ -293,6 +314,9 @@ space, because regridding discards the source column. Declare which one you mean
     <li><a href="https://gdal.org/en/stable/user/raster_data_model.html">GDAL raster data model</a> <span class="what">— how a geotransform maps pixel/line indices to world coordinates</span></li>
   </ul>
 </div>
+
+</div>
+</details>
 
 <h2 id="nodata">Missing data</h2>
 
@@ -332,12 +356,27 @@ cell</em>. It loses to any observation with a real score, and if every observati
 </table>
 </div>
 
+<details class="explainer">
+<summary>How is missing data declared in the source files?</summary>
+<div class="body">
+
+<p>NetCDF and GeoTIFF both carry an attribute naming the value that stands for "no data" —
+<code>_FillValue</code> in NetCDF, the nodata tag in GeoTIFF. It is a convention, not a type: the
+value is an ordinary number in the array, and nothing stops arithmetic from running over it. That
+is exactly how a <code>-9999</code> ends up averaged into a result.</p>
+
+<p>Stratum converts these to an explicit validity mask on read and re-applies the sentinel only on
+write, so plugin code never has to remember which number is special.</p>
+
 <div class="reading">
   <span class="label">Further reading</span>
   <ul>
     <li><a href="https://cfconventions.org/">CF Conventions</a> <span class="what">— the NetCDF metadata standard that defines _FillValue and how missing data is declared</span></li>
   </ul>
 </div>
+
+</div>
+</details>
 
 <h2 id="class-tables">Class tables</h2>
 
@@ -414,6 +453,20 @@ product, never a substitute for it.</p>
 <p>A mosaic's classes are its own — after lumping they are not the input classes — so the published
 class table describes the product, not the granules that fed it.</p>
 
+<details class="explainer">
+<summary>What are COG and STAC?</summary>
+<div class="body">
+
+<p><strong>COG</strong> — Cloud Optimized GeoTIFF — is an ordinary GeoTIFF whose internal layout is
+arranged so a reader can fetch just the part it needs over HTTP range requests, rather than
+downloading the whole file. Internal tiling (typically 512 × 512) and precomputed overviews are what
+make that work, and it is why the default block size aligns with the tile size.</p>
+
+<p><strong>STAC</strong> — SpatioTemporal Asset Catalog — is a JSON schema for describing a
+geospatial asset: its footprint, its time, its bands, and links to the files themselves. Writing one
+per output tile is what makes the products discoverable by standard tooling instead of by knowing
+the bucket layout.</p>
+
 <div class="reading">
   <span class="label">Further reading</span>
   <ul>
@@ -422,6 +475,9 @@ class table describes the product, not the granules that fed it.</p>
     <li><a href="https://stacspec.org/">STAC</a> <span class="what">— SpatioTemporal Asset Catalog — the item and collection format used for cataloguing outputs</span></li>
   </ul>
 </div>
+
+</div>
+</details>
 
 </div>
 <nav class="pager" aria-label="Pagination"></nav>

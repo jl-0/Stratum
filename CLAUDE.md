@@ -187,12 +187,41 @@ Do not inline SVG into the pages, and do not add a per-theme variant. If you red
 at 18px (its real size) as well as large; the first attempt looked like a city skyline at small
 sizes because the termination was too shallow and the prism too wide.
 
-### Assume no GIS background
+### Assume no GIS background — but do not let it take over the page
 
 Readers include software engineers with no geospatial training. A section that leans on a domain
-concept — CRS, EPSG, resampling kernels, push-broom geometry, COG internal tiling, ISO 8601
-durations — either explains it inline or ends with a `.reading` block pointing somewhere
-authoritative.
+concept — CRS, EPSG, resampling kernels, push-broom geometry, COG internal tiling — must not assume
+it. But the guide pages document **Stratum**, so background cannot be allowed to become the
+narrative.
+
+The split:
+
+| Content | Where it goes |
+|---|---|
+| What the concept means *for Stratum* — the field, the unit, the failure it causes | Visible body text |
+| What the concept *is*, for someone meeting it for the first time | `<details class="explainer">`, **collapsed** |
+| Links to authoritative sources | Inside that expander, as a `.reading` block |
+
+`guide/concepts.html` is the model. "Resolution is in the CRS's units, and confusing degrees with
+metres is the most common error here" stays visible, because it explains a guard rail. "What is a
+CRS, and what does `EPSG:4326` mean?" collapses.
+
+```html
+<details class="explainer">
+<summary>What is a CRS, and what does <code>EPSG:4326</code> mean?</summary>
+<div class="body">
+  <p>…</p>
+  <div class="reading">…</div>
+</div>
+</details>
+```
+
+Rules: **no `<h2>` for background material** — an expander, never a heading, so the page outline
+stays a list of Stratum concepts. Phrase the summary as the question a newcomer would actually ask.
+Make the body worth opening: a definition plus why it matters here, not just links.
+
+A short standalone `.reading` block with no explainer is still fine at the end of a section on the
+other pages, where it is a pointer rather than a lesson.
 
 ```html
 <div class="reading">

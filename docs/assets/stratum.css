@@ -240,6 +240,53 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
 }
 .gen p { margin: 0; }
 
+/* ---------- collapsible background explainer ----------
+   For material a reader may already know: "what is a CRS". Collapsed by
+   default so it never interrupts the Stratum-specific narrative. */
+
+.explainer {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  margin: 1.3rem 0 1.5rem;
+}
+.explainer > summary {
+  display: flex; align-items: center; gap: .55rem;
+  padding: .58rem .85rem;
+  font-size: .885rem; font-weight: 600;
+  color: var(--accent);
+  cursor: pointer;
+  list-style: none;
+  border-radius: 7px;
+}
+.explainer > summary::-webkit-details-marker { display: none; }
+.explainer > summary:hover { background: var(--accent-soft); }
+.explainer > summary:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.explainer > summary::before {
+  content: "?"; flex: none;
+  width: 1.05rem; height: 1.05rem; border-radius: 50%;
+  border: 1.5px solid currentColor;
+  font-size: .68rem; font-weight: 700;
+  display: grid; place-items: center;
+}
+.explainer > summary::after {
+  content: ""; flex: none; margin-left: auto;
+  width: .42rem; height: .42rem;
+  border-right: 1.6px solid currentColor;
+  border-bottom: 1.6px solid currentColor;
+  transform: rotate(45deg) translateY(-2px);
+  transition: transform .15s ease;
+}
+.explainer[open] > summary { border-bottom: 1px solid var(--border); border-radius: 7px 7px 0 0; }
+.explainer[open] > summary::after { transform: rotate(225deg) translateY(1px); }
+.explainer .body { padding: 1rem 1.1rem .3rem; }
+.explainer .body > :last-child { margin-bottom: 1rem; }
+/* a reading list inside an explainer is already boxed - flatten it */
+.explainer .reading {
+  border: 0; border-top: 1px solid var(--border); border-radius: 0;
+  background: none; margin: .2rem 0 0; padding: .7rem 0 .2rem;
+}
+
 /* ---------- further reading ---------- */
 
 .reading {
