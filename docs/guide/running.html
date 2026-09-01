@@ -1,0 +1,279 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Running a mosaic · Stratum</title>
+<link rel="stylesheet" href="../assets/stratum.css">
+</head>
+<body data-page="guide/running" data-root="../">
+<a class="skip" href="#content">Skip to content</a>
+<header class="masthead">
+  <a class="wordmark" href="../index.html"><span class="glyph"></span>Stratum</a>
+  <span class="stage">Pre-release</span>
+  <span class="spacer"></span>
+  <span class="repo">EMIT Critical Minerals L3</span>
+</header>
+<div class="layout">
+<nav id="sidebar" aria-label="Documentation"></nav>
+<main id="content">
+<div class="prose">
+
+<h1>Running a mosaic</h1>
+<p class="lede">Write a manifest, check what it would cost, submit it, collect the output.</p>
+
+<h2 id="workflow">The workflow</h2>
+
+<pre><code><span class="c"># 1. See what would run. Reads the index; provisions nothing.</span>
+stratum plan -m manifest.yaml
+
+<span class="c"># 2. Run it.</span>
+stratum submit -m manifest.yaml
+
+<span class="c"># 3. Watch it.</span>
+stratum status --run cm-zones-2026-annual-r3
+
+<span class="c"># 4. Read the report.</span>
+stratum report --run cm-zones-2026-annual-r3</code></pre>
+
+<p>The manifest is the entire interface. It is versioned in git, reviewed like code, and hashed
+into the provenance record — so a run can be traced back to the exact document that produced
+it.</p>
+
+<h2 id="manifest">A minimal manifest</h2>
+
+<p>Enough to produce a single-epoch mosaic of one area, preferring the most nadir look:</p>
+
+<pre><code>run_id: cuprite-2024
+
+grid:
+  crs: EPSG:4326
+  resolution: [0.0003, -0.0003]
+  origin: [-180, -90]
+  tile_size: 1.0
+  block: 512
+
+aoi:
+  zones: [cuprite-nv]
+
+time:
+  start: 2024-01-01
+  end:   2024-12-31
+  epoch: P1Y
+  deliver: P1Y
+
+inputs:
+  index: s3://emit-l3/index/emit-granules.parquet
+  roles:
+    geometry: {collection: EMITL1BOBS, var: obs}
+    mineral:
+      collection: EMITL2BMIN
+      var: group_1_mineral_id
+      class_table: {source: embedded, path: /mineral_metadata, key: index,
+                    attributes: [name, record, library, group, url]}
+  band_aliases:
+    view_zenith: {role: geometry, band: 5}
+
+granule_filter:
+  - {build_version: b0107_v02}
+  - {max_cloud_fraction: 0.5, on_missing: fail}
+
+scorer:
+  ref: min_view_zenith
+
+outputs:
+  bucket: s3://emit-l3-products
+  formats: [cog]
+  stac: true
+
+budget:
+  max_tiles: 4
+  max_granules: 500
+  max_vcpu_hours: 20</code></pre>
+
+<p>No <code>reducer</code> block means no temporal reduction — the single epoch passes through
+unchanged. Add one when you want to combine epochs; see
+<a href="plugins.html#reducer">Writing plugins</a>.</p>
+
+<p>The full field list is in the <a href="../reference/manifest.html">manifest reference</a>.</p>
+
+<h2 id="dry-run">Check before you run</h2>
+
+<p><code>stratum plan</code> resolves everything and provisions nothing. It reports the real
+fan-out — tiles &times; epochs &times; blocks &times; granules — before a worker starts:</p>
+
+<pre><code>$ stratum plan -m manifest.yaml
+
+Manifest      cuprite-2024  (sha256:9f2c1ab8…)
+Grid          EPSG:4326 @ 0.0003°, tile 1.0°, block 512        [emit30]
+Area          1 zone → 2 tiles
+Time          2024-01-01 … 2024-12-31 → 1 epoch, 1 delivery period
+
+Granules      1 284 candidates
+              −  412  build_version == b0107_v02
+              −  147  cloud_fraction &lt;= 0.5
+              =  725  selected          vintage: b0107_v02 (single)
+
+Work          725 regrid · 84 resolve · 0 reduce · 2 publish
+Cache         GLT 681/725 hit (94%)  →  44 to build
+Estimate      3.1 GB read · ~11 vCPU-hours · ~28 min wall
+
+Budget        OK — 2/4 tiles, 725/500 granules  ⚠ EXCEEDED
+              on_exceed: require_approval
+
+Plan is valid. Submit will pause for approval.</code></pre>
+
+<div class="key">
+  <span class="label">Review this in the pull request</span>
+  <p>Attach the dry-run output to the same PR as the manifest diff. The difference between one zone
+  and the globe is one line of YAML, and the plan output is where that shows up before it
+  costs anything.</p>
+</div>
+
+<h2 id="budget">Budgets</h2>
+
+<p>The budget block is required and cannot be infinite.</p>
+
+<pre><code>budget:
+  max_tiles: 64
+  max_granules: 12000
+  max_vcpu_hours: 400
+  on_exceed: require_approval      <span class="c"># require_approval | fail | warn</span></code></pre>
+
+<p>With <code>require_approval</code>, a submitted run that exceeds a ceiling pauses before
+provisioning compute and waits for a human. Approve or reject it with:</p>
+
+<pre><code>stratum approve --run cm-zones-2026-annual-r3
+stratum reject  --run cm-zones-2026-annual-r3</code></pre>
+
+<h2 id="filters">Selecting granules</h2>
+
+<p>Filters run against the index before any pixel is read, so rejecting early is free. They apply
+in order, and each one's effect is counted and reported.</p>
+
+<pre><code>granule_filter:
+  - {build_version: b0107_v02}                    <span class="c"># required — see below</span>
+  - {max_cloud_fraction: 0.5, on_missing: fail}
+  - {max_solar_zenith: 70}
+  - {month_in: [8, 9, 10, 11]}                    <span class="c"># recurring seasonal window</span></code></pre>
+
+<h3 id="seasonal">Absolute versus seasonal windows</h3>
+
+<p><code>time.start</code> / <code>time.end</code> give you an absolute interval.
+<code>month_in</code> gives you a window that <em>recurs</em> — August-to-November over several
+years, avoiding peak vegetation without discarding whole years. The two compose: the time range
+bounds the run, the month filter selects within it.</p>
+
+<h3 id="missing">Missing metadata is a decision you make</h3>
+
+<p>Every filter that reads an optional field takes an <code>on_missing</code> policy:</p>
+
+<div class="tw">
+<table>
+<thead><tr><th>Value</th><th>Effect on a granule whose field is absent</th></tr></thead>
+<tbody>
+<tr><td><code>fail</code></td><td>Plan-time error naming the granules. <strong>Default.</strong></td></tr>
+<tr><td><code>reject</code></td><td>Dropped, and counted separately in the report</td></tr>
+<tr><td><code>keep</code></td><td>Passes the filter, and counted separately in the report</td></tr>
+</tbody>
+</table>
+</div>
+
+<p>The default is <code>fail</code> because a granule with no cloud metadata and a granule that is
+too cloudy are different situations, and silently merging them loses data with no signal. If you
+know which you want, say so.</p>
+
+<h3 id="vintage">Vintage pinning is required</h3>
+
+<div class="warn">
+  <span class="label">Required</span>
+  <p>A run must pin a product vintage. If the frozen granule set spans more than one,
+  <code>stratum plan</code> fails unless the manifest explicitly opts in with
+  <code>allow_mixed_vintage: true</code> and a documented reason.</p>
+</div>
+
+<p>Upstream reprocessing regenerates products and can shift class definitions. A run that spans a
+reprocessing boundary blends two incompatible products into a result that looks entirely plausible
+and is not. Nothing in the data announces the problem, so Stratum refuses rather than warns.</p>
+
+<p>The plan output always states the vintage or vintages selected.</p>
+
+<h2 id="masks">Masking pixels</h2>
+
+<p>Masks compose by conjunction — a pixel is eligible only if every mask admits it — and are
+applied during regrid, so masked pixels never enter the observation stack.</p>
+
+<pre><code>pixel_mask:
+  - {ref: emit.masks:EdgeTrim, columns: 7}
+  - {ref: emit.masks:L2AStandard, flags: [cloud, cirrus, water, spacecraft]}
+  - {ref: emit.masks:SoilFraction, min_soil: 0.65}</code></pre>
+
+<p>Masks say <em>unusable</em>, not <em>worse</em>. If you want to express a preference between two
+usable observations, that is a scorer, not a mask.</p>
+
+<h2 id="variants">Running variants</h2>
+
+<p>A variant is a patch on a base manifest, not a copied file that drifts out of sync:</p>
+
+<pre><code>stratum plan -m base.yaml -p zones-pilot -p scorer-v3</code></pre>
+
+<p>Patches merge in the order given, before validation, so the merged document is what gets
+validated and hashed. Lists <strong>replace</strong> rather than append.</p>
+
+<p>Because cached geometry does not depend on your scorer, running several competing cost functions
+over the same area costs roughly one regrid plus <em>n</em> cheap passes. Comparing scorers is meant
+to be routine; see <a href="caching.html">Caching &amp; reruns</a>.</p>
+
+<h2 id="outputs">What you get back</h2>
+
+<pre><code>s3://{bucket}/products/{run_id}/
+  {tile}/
+    {tile}_{period}_data.tif        <span class="c"># bands your reducer declared</span>
+    {tile}_{period}_image.tif       <span class="c"># RGBA rendering</span>
+    {tile}_{period}_legend.json     <span class="c"># class table or ramp stops</span>
+    {tile}_{period}.json            <span class="c"># STAC item</span>
+
+s3://{bucket}/runs/{run_id}/
+  index.parquet                     <span class="c"># the frozen granule set</span>
+  provenance.json                   <span class="c"># what ran, against what</span>
+  report.md                         <span class="c"># the human-readable summary</span>
+  failures.jsonl                    <span class="c"># per-item outcomes, if any</span></code></pre>
+
+<p>The data product always ships alongside the image. If you only want to change how it looks, you
+do not need to re-run anything:</p>
+
+<pre><code>stratum render --run cuprite-2024 --mapper my_colours</code></pre>
+
+<h2 id="report">Reading the report</h2>
+
+<p><code>stratum report</code> answers, without opening JSON: how many granules each filter
+removed and why; cache hit rate by artifact type and what a rerun would cost; which blocks failed;
+cost against budget; and a diff against the previous run of the same manifest lineage.</p>
+
+<p>That last one is the most useful in practice. <em>"This run selected 812 fewer granules than the
+last one"</em> is how you catch an upstream reprocessing or an index change before it becomes a
+mystery in the product.</p>
+
+<h2 id="reproduce">Reproducing a run</h2>
+
+<p>Every run is reproducible from its manifest hash. The provenance record pins the frozen granule
+index, the container image by digest, the plugin wheel by content hash, and the content version of
+every ancillary source.</p>
+
+<pre><code>stratum submit --from-provenance s3://.../runs/cuprite-2024/provenance.json</code></pre>
+
+<p>This re-runs against the frozen index rather than re-querying, so it reproduces the original
+result rather than asking the same question of a catalogue that has since changed.</p>
+
+</div>
+<nav class="pager" aria-label="Pagination"></nav>
+<footer class="site">
+  Specified in <a href="../specs/09-run-manifest.md"><code>specs/09-run-manifest.md</code></a>,
+  <a href="../specs/02-granule-index.md"><code>02</code></a>,
+  <a href="../specs/10-provenance.md"><code>10</code></a>
+</footer>
+</main>
+</div>
+<script src="../assets/stratum.js"></script>
+</body>
+</html>

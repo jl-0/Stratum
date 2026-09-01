@@ -3,14 +3,14 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Stratum — design documentation</title>
+<title>Stratum — documentation</title>
 <link rel="stylesheet" href="assets/stratum.css">
 </head>
 <body data-page="index" data-root="">
 <a class="skip" href="#content">Skip to content</a>
 <header class="masthead">
   <a class="wordmark" href="index.html"><span class="glyph"></span>Stratum</a>
-  <span class="stage">Design stage</span>
+  <span class="stage">Pre-release</span>
   <span class="spacer"></span>
   <span class="repo">EMIT Critical Minerals L3</span>
 </header>
@@ -20,63 +20,51 @@
 <div class="prose">
 
 <h1>Stratum</h1>
-<p class="lede">A cost-function-driven mosaic engine for imaging spectroscopy, built to run in
-the cloud.</p>
+<p class="lede">Build mosaics from overlapping imaging-spectroscopy granules, where you control
+which observation wins.</p>
 
 <div class="warn">
-  <span class="label">Status</span>
-  <p>There is no implementation. Everything here is specification and interface design,
-  deliberately ahead of code. Names, contracts and file layouts are all still cheap to change —
-  which is the point of writing them down first. &ldquo;Stratum&rdquo; is a working name.</p>
+  <span class="label">Pre-release</span>
+  <p>These pages describe the interface as specified. <strong>The package is not yet
+  implemented</strong> — see <a href="status.html">Status</a> for what exists. Commands and
+  contracts shown here are the contract being built to, not a shipped API.</p>
 </div>
 
-<h2 id="question">The question this exists to answer</h2>
+<h2 id="what">What it does</h2>
 
-<p>EMIT has built a mineral mosaic pipeline three times. Each one hard-codes a different answer to
-the same question:</p>
+<p>You give Stratum an area, a time range, and a rule for choosing between overlapping
+observations. It gives you back a mosaic — as a data product, a rendered image, and a provenance
+record that says exactly which granules went into it.</p>
 
-<div class="key">
-  <span class="label">The whole problem</span>
-  <p>When several observations cover the same patch of ground, <strong>which one wins?</strong></p>
-</div>
+<pre><code>stratum plan   -m manifest.yaml     <span class="c"># what would run, and what it would cost</span>
+stratum submit -m manifest.yaml     <span class="c"># run it</span></code></pre>
 
-<p>V002 answers <em>the most nadir look</em>. EMIT-AMD answers <em>whatever the temporal stacker
-decides afterwards</em>. A third answer &mdash; prefer the observation that actually sees ground
-rather than vegetation &mdash; came out of the Colorado School of Mines tag-up and has no
-implementation anywhere.</p>
+<p>The rule for choosing is the part you write. Everything else — finding granules, putting them on
+a common grid, fanning the work out, caching, cataloguing — is the framework's job.</p>
 
-<p>Each answer arrived as a new pipeline. Stratum factors the question out instead. The framework
-owns the parts that never change &mdash; querying an index, regridding granules onto a common
-grid, orchestrating fan-out, caching, provenance &mdash; and exposes the parts that are genuinely
-science as versioned plugins. A science team iterates on a cost function; nobody rebuilds a
-pipeline.</p>
+<h2 id="pipeline">The pipeline</h2>
 
-<p>The immediate driver is the EMIT Critical Minerals L3 mosaic, but nothing in the core is
-EMIT-specific. Instrument knowledge lives in a plugin package, <code>stratum_emit</code>.</p>
-
-<h2 id="stages">Five stages</h2>
-
-<p>Only the middle three carry science. Everything else is machinery the framework should own once
-and never ask a scientist about again.</p>
+<p>Five stages. You configure all of them and supply plugins for the middle three.</p>
 
 <div class="stages">
   <div class="stage-row">
     <div class="n">1</div>
     <div class="b">
       <h3>Plan</h3>
-      <p class="meta">unit: run &middot; Lambda</p>
-      <p>Manifest &rarr; index query &rarr; <strong>frozen</strong> candidate set &rarr; work list
-      &rarr; budget gate. Freezing is what makes a run reproducible rather than merely repeatable.</p>
+      <p class="meta">unit: run</p>
+      <p>Resolves your area to tiles and your time range to epochs, queries the granule index,
+      applies your filters, and <strong>freezes</strong> the surviving granule set. Reports the
+      fan-out and stops if it exceeds your budget.</p>
     </div>
   </div>
   <div class="stage-row science">
     <div class="n">2</div>
     <div class="b">
       <h3>Regrid <span class="chip chip-obs">PixelMask</span></h3>
-      <p class="meta">unit: granule &times; tile &middot; cached indefinitely</p>
-      <p>KD-tree nearest-neighbour from the granule&rsquo;s <code>loc</code> array to the tile
-      grid, producing a GLT. <strong>Pure geometry</strong> &mdash; it may not read a single
-      science parameter.</p>
+      <p class="meta">unit: granule &times; tile</p>
+      <p>Puts each granule on the output grid by nearest-neighbour lookup, producing a GLT. Your
+      pixel masks are applied here, so masked pixels never enter the stack. <strong>Cached
+      indefinitely</strong>.</p>
     </div>
   </div>
   <div class="stage-row science">
@@ -84,8 +72,8 @@ and never ask a scientist about again.</p>
     <div class="b">
       <h3>Resolve <span class="chip chip-obs">Scorer</span></h3>
       <p class="meta">unit: tile &times; epoch &times; block</p>
-      <p>Apply the GLTs for this block, run the cost function, keep the winner. Writes the winning
-      value, <strong>the score that won</strong>, and a contributing-observation count.</p>
+      <p>Runs your cost function over the observations covering each cell and keeps the winner.
+      Writes the winning value, the score that won it, and how many observations competed.</p>
     </div>
   </div>
   <div class="stage-row science">
@@ -93,140 +81,135 @@ and never ask a scientist about again.</p>
     <div class="b">
       <h3>Reduce <span class="chip chip-obs">Reducer</span></h3>
       <p class="meta">unit: tile &times; block</p>
-      <p>Collapse epoch snapshots through time. Mode-through-time for Critical Minerals; a no-op
-      here reproduces V002 exactly.</p>
+      <p>Collapses the per-epoch snapshots through time — mode, median, consensus, or whatever you
+      write. Skip it and you get the single-epoch result unchanged.</p>
     </div>
   </div>
   <div class="stage-row">
     <div class="n">5</div>
     <div class="b">
       <h3>Publish <span class="chip chip-obs">OutputMapper</span></h3>
-      <p class="meta">unit: tile &middot; Lambda</p>
-      <p>Stitch blocks, write the data product <em>and</em> the rendered image, plus legend, STAC
-      item and provenance record. Both artifacts, always.</p>
+      <p class="meta">unit: tile</p>
+      <p>Stitches blocks into tiles and writes the data product, the rendered image, the legend,
+      a STAC item and the provenance record.</p>
     </div>
   </div>
 </div>
 
-<h2 id="hooks">Five plugin hooks</h2>
-
-<p>The first four decide <em>which observation wins</em>. The fifth decides <em>what it looks
-like</em>. They are separate hooks because their cost profiles differ by orders of magnitude, and
-collapsing them would force the cheapest decision to pay the price of the most expensive.</p>
+<h2 id="extend">Where you plug in</h2>
 
 <div class="tw">
 <table>
-<thead><tr><th>Hook</th><th>Stage</th><th>Cost</th><th>Decides</th></tr></thead>
+<thead><tr><th>Hook</th><th>You use it to say</th><th>Runs</th></tr></thead>
 <tbody>
-<tr><td><code>GranuleFilter</code></td><td>1 &middot; plan</td><td>&micro;s, no IO</td><td>Which granules are candidates &mdash; dates, seasons, cloud, vintage</td></tr>
-<tr><td><code>PixelMask</code></td><td>2 &middot; regrid</td><td>vectorized</td><td>Which pixels are eligible &mdash; cloud, water, detector edges</td></tr>
-<tr><td><code>Scorer</code></td><td>3 &middot; resolve</td><td>vectorized</td><td><strong>Which observation wins in a cell</strong> &mdash; the cost function proper</td></tr>
-<tr><td><code>Reducer</code></td><td>4 &middot; reduce</td><td>N = #epochs</td><td>How epochs collapse through time</td></tr>
-<tr><td><code>OutputMapper</code></td><td>5 &middot; publish</td><td>presentation</td><td>What the result looks like &mdash; colour, ramps, confidence alpha</td></tr>
+<tr><td><code>GranuleFilter</code></td><td>Which granules are candidates at all — dates, seasons, cloud cover, product version</td><td>Once per run, against the index</td></tr>
+<tr><td><code>PixelMask</code></td><td>Which pixels are unusable — cloud, water, detector edges</td><td>Per granule, during regrid</td></tr>
+<tr><td><code>Scorer</code></td><td><strong>Which observation wins a cell</strong></td><td>Per block, per epoch</td></tr>
+<tr><td><code>Reducer</code></td><td>How epochs combine into the delivered product</td><td>Per block</td></tr>
+<tr><td><code>OutputMapper</code></td><td>What the rendered image looks like</td><td>Per tile, at publish</td></tr>
 </tbody>
 </table>
 </div>
 
-<p>Full contracts in <a href="reference/plugins.html">Plugin contracts</a>.</p>
+<p>The first four decide <em>which observation wins</em>; the fifth decides <em>what it looks
+like</em>. Most mappings and filters are configuration, not code — you only write a plugin when
+the built-ins do not cover what you need. See <a href="guide/plugins.html">Writing plugins</a>.</p>
 
-<h2 id="idea">The idea the whole design rests on</h2>
+<h2 id="iterate">Changing your mind is cheap</h2>
 
-<div class="key">
-  <span class="label">Separate geometry from science</span>
-  <p>Regridding is expensive and depends only on geometry. Scoring is cheap and changes hourly.
-  V002 welds them together, so changing a selection criterion rebuilds every GLT. Splitting them
-  and content-addressing the GLT turns &ldquo;try a different cost function&rdquo; from a full
-  rebuild into a re-read.</p>
+<p>Regridding is the expensive stage and depends only on geometry. Scoring is cheap and is the
+thing you will change constantly. Stratum keeps them separate and content-addresses everything, so
+what you change determines what re-runs:</p>
+
+<div class="tw">
+<table>
+<thead><tr><th>You change</th><th>Re-runs</th><th>Re-uses</th></tr></thead>
+<tbody>
+<tr><td>Your scorer</td><td>Stages 3&ndash;5</td><td>Every cached GLT — no regridding</td></tr>
+<tr><td>Your reducer</td><td>Stages 4&ndash;5</td><td>Every epoch snapshot</td></tr>
+<tr><td>Your colours</td><td>Rendering only</td><td>The published data — no pipeline run</td></tr>
+<tr><td>Your pixel masks</td><td>Stages 2b&ndash;5</td><td>The GLTs — geometry does not depend on cloudiness</td></tr>
+</tbody>
+</table>
 </div>
 
-<p>Everything else follows from that split: the cache key table, the iteration story, the ability
-to run five competing scorers over one zone for the price of one, and the fact that stage 2 is
-forbidden from reading a scorer parameter. See <a href="design/caching.html">Caching &amp;
-iteration</a>.</p>
+<p>Running several competing cost functions over the same area is therefore cheap: the first pays
+for the geometry and the rest reuse it. See <a href="guide/caching.html">Caching &amp;
+reruns</a>.</p>
 
-<h2 id="read">How to read these docs</h2>
+<h2 id="scope">What it is and is not</h2>
+
+<div class="tw">
+<table>
+<thead><tr><th>Stratum does</th><th>Stratum does not</th></tr></thead>
+<tbody>
+<tr><td>Mosaic granules that are already science products</td><td>Produce those products — it consumes them, it does not generate them</td></tr>
+<tr><td>Nearest-neighbour regrid onto a shared grid</td><td>Atmospheric correction, unmixing, or spectral fitting</td></tr>
+<tr><td>Temporal aggregation you define</td><td>Impose a temporal model of its own</td></tr>
+<tr><td>Render an image and ship the data behind it</td><td>Serve tiles — that is MMGIS's job, downstream</td></tr>
+</tbody>
+</table>
+</div>
+
+<p>The core is instrument-agnostic. It knows about grids, tiles, blocks, GLTs, class tables and
+caching — not about minerals, spectral libraries or EMIT. Instrument and domain knowledge lives in
+a plugin package:</p>
+
+<div class="tw">
+<table>
+<thead><tr><th>Package</th><th>Provides</th></tr></thead>
+<tbody>
+<tr><td><code>stratum</code></td><td>The pipeline, the plugin contracts, the CLI, caching, provenance</td></tr>
+<tr><td><code>stratum_emit</code></td><td>EMIT readers, detector-edge masks, mineral scorers, FRCOV support, lumping</td></tr>
+</tbody>
+</table>
+</div>
+
+<h2 id="start">Where to start</h2>
 
 <div class="cards">
-  <a class="card" href="design/concepts.html">
-    <h3>Concepts &amp; vocabulary</h3>
-    <p>Tile vs block, epoch vs cadence, the three coordinate spaces, and the invariants everything
-    else depends on. Start here.</p>
+  <a class="card" href="guide/concepts.html">
+    <h3>Concepts</h3>
+    <p>Grid, tile and block; epoch and cadence; roles and aliases; how missing data is
+    represented. Read this before writing a manifest.</p>
   </a>
-  <a class="card" href="design/architecture.html">
-    <h3>Why this architecture</h3>
-    <p>The evidence. What the three existing pipelines actually do, read out of their source, and
-    which observations forced each design choice.</p>
+  <a class="card" href="guide/running.html">
+    <h3>Running a mosaic</h3>
+    <p>The workflow end to end — write a manifest, dry-run it, submit it, and find what came
+    out.</p>
   </a>
-  <a class="card" href="design/caching.html">
-    <h3>Caching &amp; iteration</h3>
-    <p>Content addressing, cache keys, and what invalidates what. The property that decides
-    whether people actually iterate.</p>
+  <a class="card" href="guide/plugins.html">
+    <h3>Writing plugins</h3>
+    <p>The five hooks in full, with worked cost functions, how to register them, and how to ship
+    one without rebuilding an image.</p>
   </a>
-  <a class="card" href="design/execution.html">
-    <h3>Execution &amp; orchestration</h3>
-    <p>Step Functions, Batch, Lambda, and the routing decision between them. Where the sketch met
-    the service limits.</p>
+  <a class="card" href="guide/caching.html">
+    <h3>Caching &amp; reruns</h3>
+    <p>What invalidates what, how to check a cache hit, and how to keep iteration fast.</p>
   </a>
-  <a class="card" href="reference/plugins.html">
-    <h3>Plugin contracts</h3>
-    <p>All five hooks in full, with worked examples including V002 parity and the bare-earth
-    scorer from the Mines tag-up.</p>
-  </a>
-  <a class="card" href="reference/types.html">
-    <h3>Core types</h3>
-    <p>The concrete objects that cross every interface, grounded in a real delivered granule.</p>
+  <a class="card" href="guide/deployment.html">
+    <h3>Deployment</h3>
+    <p>For operators — AWS topology, where work runs, credentials, failure handling.</p>
   </a>
   <a class="card" href="reference/manifest.html">
-    <h3>Run manifest</h3>
-    <p>One declarative document is the entire interface for driving a run. Schema, composition,
-    budget gate.</p>
+    <h3>Manifest reference</h3>
+    <p>Every field, what validates it, and what it defaults to.</p>
   </a>
-  <a class="card" href="status.html">
-    <h3>Status &amp; open questions</h3>
-    <p>What is locked, what is still moving, what blocks whom, and the first implementation
-    slice.</p>
+  <a class="card" href="reference/types.html">
+    <h3>Type reference</h3>
+    <p>The objects your plugins receive and return.</p>
   </a>
-</div>
-
-<h2 id="layers">Two packages, one rule</h2>
-
-<div class="tw">
-<table>
-<thead><tr><th>Package</th><th>Knows about</th><th>Must never know about</th></tr></thead>
-<tbody>
-<tr><td><code>stratum</code></td><td>Grids, tiles, blocks, GLTs, class tables, caching, orchestration, provenance</td><td>Tetracorder, minerals, spectral libraries, EMIT</td></tr>
-<tr><td><code>stratum_emit</code></td><td>L2B readers, detector-edge trims, mineral scorers, FRCOV, lumping tables</td><td>&mdash;</td></tr>
-</tbody>
-</table>
-</div>
-
-<p>The rule of thumb: <strong>if you find yourself writing &ldquo;mineral&rdquo; in a core module,
-it belongs in the plugin.</strong> This is not architectural fastidiousness &mdash; Colorado
-School of Mines is independently building the same thing for AVIRIS-5 and UAV imagery, so a second
-consumer already exists.</p>
-
-<h2 id="sources">Where this comes from</h2>
-
-<p>These pages are the design layer. Underneath them sit twelve component specs in Markdown, which
-carry the full contracts, the citations into existing source, and the per-spec open questions.</p>
-
-<div class="tw">
-<table>
-<thead><tr><th>Layer</th><th>Holds</th><th>Audience</th></tr></thead>
-<tbody>
-<tr><td>These HTML pages</td><td>The design &mdash; shape, rationale, what is locked</td><td>Anyone joining, reviewing, or deciding</td></tr>
-<tr><td><a href="specs/00-overview.md">Component specs</a> (Markdown)</td><td>Contracts, invariants, citations, open questions</td><td>Whoever implements a stage</td></tr>
-<tr><td><a href="decisions/index.html">Decision records</a></td><td>Choices made, with alternatives and consequences</td><td>Whoever wants to overturn one</td></tr>
-<tr><td><a href="design/Cloud-Mosaic-Architecture.html">Original proposal</a></td><td>The full research write-up that started this</td><td>Background reading</td></tr>
-</tbody>
-</table>
+  <a class="card" href="reference/cli.html">
+    <h3>Command reference</h3>
+    <p>Every <code>stratum</code> subcommand and its options.</p>
+  </a>
 </div>
 
 </div>
 <nav class="pager" aria-label="Pagination"></nav>
 <footer class="site">
-  Stratum design documentation &middot; design stage, no implementation &middot;
-  specs in <a href="specs/00-overview.md"><code>docs/specs/</code></a>
+  Interfaces and contracts are specified in <a href="specs/00-overview.md"><code>docs/specs/</code></a>.
+  Prior art and where the code it replaces lives: <a href="notes/heritage.md">heritage notes</a>.
 </footer>
 </main>
 </div>

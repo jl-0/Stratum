@@ -1,0 +1,440 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Writing plugins · Stratum</title>
+<link rel="stylesheet" href="../assets/stratum.css">
+</head>
+<body data-page="guide/plugins" data-root="../">
+<a class="skip" href="#content">Skip to content</a>
+<header class="masthead">
+  <a class="wordmark" href="../index.html"><span class="glyph"></span>Stratum</a>
+  <span class="stage">Pre-release</span>
+  <span class="spacer"></span>
+  <span class="repo">EMIT Critical Minerals L3</span>
+</header>
+<div class="layout">
+<nav id="sidebar" aria-label="Documentation"></nav>
+<main id="content">
+<div class="prose">
+
+<h1>Writing plugins</h1>
+<p class="lede">Five extension points. Most runs need none of them written from scratch — start by
+checking whether configuration covers what you want.</p>
+
+<h2 id="first">Your first cost function</h2>
+
+<p>A scorer is a class with one method. Higher scores win.</p>
+
+<pre><code><span class="k">class</span> MinViewZenith:
+    <span class="c">"""The most nadir look wins."""</span>
+    capability = <span class="k">"streaming"</span>
+    required_roles = (<span class="k">"geometry"</span>,)
+
+    <span class="k">def</span> score(self, obs, aux):
+        <span class="k">return</span> -obs[<span class="k">"view_zenith"</span>]</code></pre>
+
+<p>Register it, name it in a manifest, and run:</p>
+
+<pre><code>[project.entry-points.<span class="k">"stratum.scorers"</span>]
+min_view_zenith = <span class="k">"my_package.scorers:MinViewZenith"</span></code></pre>
+
+<pre><code>scorer:
+  ref: min_view_zenith</code></pre>
+
+<p>That is the whole loop. Everything below is detail on the other four hooks and on doing more
+inside <code>score</code>.</p>
+
+<h2 id="choosing">Which hook do you want?</h2>
+
+<div class="tw">
+<table>
+<thead><tr><th>You want to</th><th>Use</th><th>Because</th></tr></thead>
+<tbody>
+<tr><td>Exclude whole granules — dates, seasons, cloud cover, version</td><td><code>GranuleFilter</code></td><td>Runs against the index before a byte is read</td></tr>
+<tr><td>Exclude individual pixels — cloud, water, bad detectors</td><td><code>PixelMask</code></td><td>Applied at regrid, so they never enter the stack</td></tr>
+<tr><td>Choose between overlapping observations</td><td><code>Scorer</code></td><td>The cost function proper</td></tr>
+<tr><td>Combine epochs through time</td><td><code>Reducer</code></td><td>Sees all epochs for a block at once</td></tr>
+<tr><td>Control how the output looks</td><td><code>OutputMapper</code></td><td>Runs at publish, over finished bands</td></tr>
+</tbody>
+</table>
+</div>
+
+<div class="key">
+  <span class="label">Masking is not ranking</span>
+  <p>A <code>PixelMask</code> returns a boolean: usable or not. A <code>Scorer</code> returns a
+  number: better or worse. Putting a preference in a mask turns "this pixel is unusable" into
+  "this pixel is merely worse", which is rarely what you meant and is hard to see later.</p>
+</div>
+
+<h2 id="scorer">Scorer</h2>
+
+<pre><code><span class="k">class</span> Scorer(Protocol):
+    capability: Literal[<span class="k">"streaming"</span>, <span class="k">"stack"</span>, <span class="k">"tile"</span>]
+    halo: int = 0
+    required_roles: tuple[str, ...] = ()
+    required_aux:   tuple[str, ...] = ()
+
+    <span class="k">def</span> score(self, obs: ObsWindow, aux: AuxAccessor) -&gt; FloatArray:
+        <span class="c">"""Higher wins. NaN marks a cell this observation may not occupy."""</span></code></pre>
+
+<h3 id="capability">Pick a capability</h3>
+
+<p><code>capability</code> tells Stratum what your scorer needs to see. It determines memory
+behaviour and where the work runs, so pick the cheapest one that works.</p>
+
+<div class="tw">
+<table>
+<thead><tr><th>Capability</th><th>Called</th><th>Band shape</th><th>Memory</th><th>Use when</th></tr></thead>
+<tbody>
+<tr><td><code>streaming</code></td><td>Once per granule</td><td><code>(H, W)</code></td><td>O(block)</td><td>Each observation can be judged on its own</td></tr>
+<tr><td><code>stack</code></td><td>Once with all observations</td><td><code>(N, H, W)</code></td><td>O(block &times; N)</td><td>You need to compare observations to each other</td></tr>
+<tr><td><code>tile</code></td><td>Once per tile</td><td><code>(N, H, W)</code></td><td>O(tile &times; N)</td><td>You need global spatial context. Gives up block parallelism.</td></tr>
+</tbody>
+</table>
+</div>
+
+<p><code>streaming</code> keeps a running best-score array, so memory does not grow with the number
+of overlapping observations. Prefer it. Reach for <code>stack</code> only when the decision
+genuinely depends on the other observations — a median, a consensus, an outlier test. In stack mode
+observations arrive ordered by acquisition time.</p>
+
+<h3 id="obs">Reading bands</h3>
+
+<p>Address bands by alias, never by index. The manifest maps aliases to a role and band per
+collection, so an alias-based scorer moves to another instrument without edits.</p>
+
+<pre><code>obs[<span class="k">"view_zenith"</span>]        <span class="c"># (H, W) — this block only</span>
+obs.valid                 <span class="c"># bool, same shape — observed and unmasked</span>
+obs.granule.datetime      <span class="c"># acquisition metadata</span>
+obs.grid                  <span class="c"># this block's transform and CRS</span>
+obs.n                     <span class="c"># 1 when streaming, N when stacked</span></code></pre>
+
+<p>Declare every alias you use through <code>required_roles</code>. A missing role is a plan-time
+error, so you find out before the run rather than in several thousand workers.</p>
+
+<h3 id="aux">Reaching other datasets</h3>
+
+<p>A cost function often needs data that is not the granule — a DEM, a snow index, a landcover
+raster, mining-claim polygons. Declare it in the manifest and read it through <code>aux</code>:</p>
+
+<pre><code>aux:
+  slope: {uri: "s3://.../slope.tif", kind: continuous, resampling: bilinear}
+  snow:  {uri: "s3://.../snow/{date}.tif", kind: categorical, resampling: nearest,
+          temporal: nearest, max_age: P3D}</code></pre>
+
+<pre><code><span class="k">class</span> CleanestNadir:
+    <span class="c">"""Nadir-preferring, penalised for steep terrain, rejecting snow."""</span>
+    capability = <span class="k">"streaming"</span>
+    required_roles = (<span class="k">"geometry"</span>,)
+    required_aux = (<span class="k">"slope"</span>, <span class="k">"snow"</span>)
+
+    <span class="k">def</span> score(self, obs, aux):
+        s = -obs[<span class="k">"view_zenith"</span>] / 90.0
+        s -= 0.5 * (aux.raster(<span class="k">"slope"</span>) &gt; 30)
+        s[aux.raster(<span class="k">"snow"</span>, date=obs.granule.datetime) &gt; 0] = np.nan
+        <span class="k">return</span> s</code></pre>
+
+<div class="key">
+  <span class="label">The block grid is the contract</span>
+  <p>Everything <code>aux</code> returns is already windowed to your block, already on your
+  block's grid and CRS, and already cached. <strong>You never reproject, resample, or window
+  anything yourself.</strong></p>
+</div>
+
+<p>Two rules that come with it:</p>
+
+<ul>
+<li><strong>Declare what you read.</strong> The accessor refuses an undeclared alias rather than
+opening a path. Undeclared reads would produce a cache key that does not mention them, and your
+cached results would silently go stale when the file changed.</li>
+<li><strong>Declare the resampling.</strong> <code>kind</code> and <code>resampling</code> are both
+required. Bilinear-interpolating a landcover class and nearest-neighbouring a DEM are both wrong
+and neither raises an error on its own, so Stratum will not guess — a categorical source with a
+continuous resampling method is a plan-time error.</li>
+</ul>
+
+<pre><code>aux.raster(<span class="k">"dem"</span>)                          <span class="c"># (H, W) on this block's grid</span>
+aux.raster(<span class="k">"snow"</span>, date=obs.granule.datetime)
+aux.vector(<span class="k">"claims"</span>)                       <span class="c"># rasterized to this block</span>
+aux.table(<span class="k">"climate_index"</span>).at(date)         <span class="c"># scalar, no gridding</span>
+aux.granule_index                          <span class="c"># the frozen index</span></code></pre>
+
+<h3 id="worked">A worked example</h3>
+
+<p>Given several observations of a pixel, most of which see vegetation, prefer the one that sees
+ground:</p>
+
+<pre><code><span class="k">class</span> PreferBareEarth:
+    capability = <span class="k">"streaming"</span>
+    required_roles = (<span class="k">"frcov"</span>,)
+
+    <span class="k">def</span> __init__(self, min_soil=0.80, hard_floor=0.65):
+        self.min_soil, self.hard_floor = min_soil, hard_floor
+
+    <span class="k">def</span> score(self, obs, aux):
+        soil = obs[<span class="k">"soil_fraction"</span>]
+        s = soil.copy()
+        s[soil &lt; self.hard_floor] = np.nan     <span class="c"># unusable, not merely worse</span>
+        <span class="k">return</span> s</code></pre>
+
+<p>Two thresholds rather than one, deliberately. Below <code>hard_floor</code> the observation is
+rejected outright; between <code>hard_floor</code> and <code>min_soil</code> it still
+<em>ranks</em>, so a marginal observation can win a cell where nothing better exists. Collapsing
+them into a single cutoff throws that range away.</p>
+
+<p>Constructor arguments come from the manifest:</p>
+
+<pre><code>scorer:
+  ref: prefer_bare_earth
+  params: {min_soil: 0.85, hard_floor: 0.7}</code></pre>
+
+<h3 id="score-band">The score is kept</h3>
+
+<p>Stage 3 writes the winning score alongside the winning value, so <em>"why did this pixel
+win?"</em> is answerable from the artifact afterwards. You get this for free; there is nothing to
+declare.</p>
+
+<h2 id="pixel-mask">PixelMask</h2>
+
+<pre><code><span class="k">class</span> PixelMask(Protocol):
+    space: Literal[<span class="k">"map"</span>, <span class="k">"sensor"</span>] = <span class="k">"map"</span>
+    required_roles: tuple[str, ...] = ()
+
+    <span class="k">def</span> valid(self, obs: ObsWindow, aux: AuxAccessor) -&gt; BoolArray:
+        <span class="c">"""(H, W) bool. True = usable."""</span></code></pre>
+
+<p>Set <code>space</code> to match what your condition is a property of:</p>
+
+<div class="tw">
+<table>
+<thead><tr><th><code>space</code></th><th><code>obs</code> is</th><th>Use for</th></tr></thead>
+<tbody>
+<tr><td><code>"map"</code></td><td>On the block grid, post-regrid</td><td>Conditions about a <em>location</em> — cloud, water, land cover</td></tr>
+<tr><td><code>"sensor"</code></td><td>Raw <code>(downtrack, crosstrack)</code>, pre-regrid</td><td>Conditions about the <em>instrument</em> — bad columns, detector artifacts</td></tr>
+</tbody>
+</table>
+</div>
+
+<p>Sensor-space masks must be applied before the GLT is built, because regridding discards the
+source column. Declaring the space is how Stratum knows to run yours at the right point.</p>
+
+<h3 id="builtin-masks">Built-in masks</h3>
+
+<p><code>stratum_emit</code> ships the instrument knowledge so you do not encode it in config:</p>
+
+<div class="tw">
+<table>
+<thead><tr><th>Mask</th><th>Space</th><th>Does</th></tr></thead>
+<tbody>
+<tr><td><code>EdgeTrim</code></td><td>sensor</td><td>Drops the outer 7 columns each side (5 minimum)</td></tr>
+<tr><td><code>SlitDust</code></td><td>sensor</td><td>Drops 2&ndash;3 columns at cross-track centre. Off by default.</td></tr>
+<tr><td><code>L2AStandard</code></td><td>map</td><td>Cloud, cirrus, water and spacecraft flags from the L2A mask</td></tr>
+<tr><td><code>SoilFraction</code></td><td>map</td><td>Requires soil fraction above a threshold, from the <code>frcov</code> role</td></tr>
+</tbody>
+</table>
+</div>
+
+<h2 id="reducer">Reducer</h2>
+
+<p>A reducer receives every epoch snapshot for one block and returns the delivered bands.</p>
+
+<pre><code><span class="k">class</span> Reducer(Protocol):
+    outputs: tuple[BandSpec, ...]
+    halo: int = 0
+
+    <span class="k">def</span> reduce(self, snaps: SnapshotStack, aux: AuxAccessor) -&gt; dict[str, Array]:
+        <span class="c">"""snaps[name] is (n_epochs, H, W). One array per declared output."""</span></code></pre>
+
+<p>Declare your outputs up front. Stratum derives the raster schema, the STAC item and the
+<code>OutputMapper</code> contract from them without running anything, which is how a bad output
+declaration fails at plan time.</p>
+
+<pre><code><span class="k">class</span> ModeThroughTime:
+    outputs = (
+        BandSpec(<span class="k">"mineral_id"</span>,   <span class="k">"uint16"</span>,  <span class="k">"most frequent class across epochs"</span>),
+        BandSpec(<span class="k">"agreement"</span>,    <span class="k">"float32"</span>, <span class="k">"modal count / valid epochs"</span>),
+        BandSpec(<span class="k">"n_epochs"</span>,     <span class="k">"uint8"</span>,   <span class="k">"epochs contributing"</span>),
+        BandSpec(<span class="k">"runner_up_id"</span>, <span class="k">"uint16"</span>,  <span class="k">"second most frequent class"</span>),
+    )</code></pre>
+
+<pre><code>reducer:
+  ref: mode_through_time
+  params: {min_count: 3, ignore: [0, -4], tie_break: highest_score}</code></pre>
+
+<div class="tw">
+<table>
+<thead><tr><th>Parameter</th><th>Effect</th></tr></thead>
+<tbody>
+<tr><td><code>min_count</code></td><td>Suppress pixels whose modal class has fewer than this many votes</td></tr>
+<tr><td><code>ignore</code></td><td>Class values excluded from the tally — typically the "nothing identified" class</td></tr>
+<tr><td><code>tie_break</code></td><td><code>earliest</code> | <code>latest</code> | <code>highest_score</code> | <code>nodata</code></td></tr>
+</tbody>
+</table>
+</div>
+
+<h3 id="reducer-inputs">What you get</h3>
+
+<pre><code>snaps[<span class="k">"mineral_id"</span>]     <span class="c"># (n_epochs, H, W) — the winning value per epoch</span>
+snaps.valid              <span class="c"># (n_epochs, H, W) bool — was there an observation at all</span>
+snaps.score              <span class="c"># (n_epochs, H, W) — the score that won each cell</span>
+snaps.epochs             <span class="c"># ordered ascending</span></code></pre>
+
+<p><code>snaps.valid</code> is what keeps counts honest: an epoch with no observation over a pixel
+must not count toward agreement. Check it rather than testing values against a sentinel.</p>
+
+<p><code>snaps.score</code> lets you weight epochs by the confidence that produced them instead of
+treating them equally.</p>
+
+<div class="note">
+  <span class="label">Reduce continuous quantities where you can</span>
+  <p>Voting over class labels discards information that voting over band depths or fit values
+  keeps. If your product allows it, aggregate the continuous bands and classify at the end. Both
+  approaches use the same contract — the difference is which bands your scorer carried forward.</p>
+</div>
+
+<h2 id="mapper">OutputMapper</h2>
+
+<p>Most rendering is configuration. Reach for a plugin only when a lookup table or a ramp cannot
+express what you want.</p>
+
+<pre><code>outputs:
+  render:
+    mineral_id:
+      mapper: categorical
+      classes: "@ref:lumping/cm-v1.yaml"
+      colors:
+        pyrite:   [220,   5,  12]
+        goethite: [174, 118, 163]
+      nodata: transparent
+      on_unmapped: fail            <span class="c"># fail | grey | transparent</span>
+      alpha_from: {band: agreement, domain: [0.3, 0.8], range: [60, 255]}</code></pre>
+
+<p>Built-in mappers: <code>categorical</code>, <code>continuous</code>, <code>threshold</code>
+(classed breaks) and <code>composite</code> (three bands to RGB).</p>
+
+<p><code>on_unmapped: fail</code> is the default on purpose. A class present in the data but absent
+from your colour table is a real error, and rendering it grey is how a class quietly disappears
+from a map.</p>
+
+<p><code>alpha_from</code> is worth knowing about: deriving opacity from an agreement or count band
+makes low-support pixels fade rather than assert a confident colour they have not earned.</p>
+
+<h3 id="custom-mapper">A custom mapper</h3>
+
+<pre><code><span class="k">class</span> ConfidenceShaded:
+    <span class="c">"""Class colour, hillshaded by terrain, faded by agreement."""</span>
+    outputs = (ImageSpec(<span class="k">"mineral_id_shaded"</span>, <span class="k">"RGBA"</span>),)
+
+    <span class="k">def</span> render(self, bands, aux):
+        rgb = self.table[bands[<span class="k">"mineral_id"</span>]]
+        rgb = rgb * hillshade(aux.raster(<span class="k">"dem"</span>))[..., <span class="k">None</span>]
+        alpha = np.interp(bands[<span class="k">"agreement"</span>], [0.3, 0.8], [60, 255])
+        <span class="k">return</span> np.dstack([rgb, alpha]).astype(<span class="k">"uint8"</span>)
+
+    <span class="k">def</span> legend(self):
+        <span class="k">return</span> Legend.categorical(self.table, note=<span class="k">"shaded by terrain"</span>)</code></pre>
+
+<p><code>bands</code> holds every band your reducer declared, so a mapper can reason across them.
+<code>legend()</code> is not optional — it is written as a sidecar and into the STAC item, so the
+meaning of a colour travels with the product.</p>
+
+<p>Because rendering is a pure function of the published data, changing a mapper never re-runs the
+pipeline. <code>stratum render --run &lt;id&gt; --mapper &lt;ref&gt;</code> reads the data blocks
+and writes a new image.</p>
+
+<h2 id="granule-filter">GranuleFilter</h2>
+
+<p>Most filtering is configuration — see <a href="running.html#filters">Running a mosaic</a>. Write
+a plugin when you need a predicate the manifest cannot express.</p>
+
+<pre><code><span class="k">class</span> GranuleFilter(Protocol):
+    <span class="k">def</span> keep(self, granules: GranuleFrame) -&gt; BoolArray:
+        <span class="c">"""Vectorized over the whole candidate frame. True = keep."""</span>
+
+    <span class="k">def</span> describe(self) -&gt; str:
+        <span class="c">"""One line for the run report, e.g. 'cloud_fraction &lt;= 0.5'."""</span></code></pre>
+
+<p><code>GranuleFrame</code> is the index as a dataframe — one row per granule, with footprint,
+timing, cloud fraction, version and asset URIs. Operate on it vectorized; you never see individual
+granules.</p>
+
+<p>Implement <code>describe()</code> properly. It is what appears in the run report next to the
+count of granules your filter removed, and a filter that removes 800 granules without saying why
+is how data goes missing unnoticed.</p>
+
+<h2 id="registering">Registering and shipping</h2>
+
+<p>Plugins are ordinary Python entry points:</p>
+
+<pre><code>[project.entry-points.<span class="k">"stratum.scorers"</span>]
+min_view_zenith = <span class="k">"stratum_emit.scorers:MinViewZenith"</span>
+prefer_bare_earth = <span class="k">"stratum_emit.scorers:PreferBareEarth"</span>
+
+[project.entry-points.<span class="k">"stratum.reducers"</span>]
+mode_through_time = <span class="k">"stratum_emit.reducers:ModeThroughTime"</span></code></pre>
+
+<pre><code>stratum plugins list        <span class="c"># what this image or environment provides</span></code></pre>
+
+<p>There are two ways to get your plugin to the workers:</p>
+
+<div class="tw">
+<table>
+<thead><tr><th>Path</th><th>How</th><th>Use for</th></tr></thead>
+<tbody>
+<tr><td><strong>Iteration</strong></td><td>Point the manifest at a wheel in S3; workers fetch it at cold start</td><td>Experiments. Edit, publish, rerun in about 90 seconds.</td></tr>
+<tr><td><strong>Production</strong></td><td>Pin the plugin in the container image; wheel-fetch disabled by policy</td><td>Delivered products, reproducible from an immutable digest</td></tr>
+</tbody>
+</table>
+</div>
+
+<pre><code>plugins:
+  wheel: s3://emit-l3/plugins/stratum_emit-0.4.2-py3-none-any.whl</code></pre>
+
+<p>Both paths record the plugin version and content hash in provenance, and both feed the cache
+key — so a changed plugin invalidates its own results and nothing else.</p>
+
+<h2 id="validation">What is checked before you run</h2>
+
+<p><code>stratum plan</code> catches all of this before any compute is provisioned:</p>
+
+<ul>
+<li>the named plugin resolves and its version is recordable;</li>
+<li>every <code>required_roles</code> entry exists in <code>inputs.roles</code>;</li>
+<li>every <code>required_aux</code> entry is declared in <code>aux</code>, and those sources exist
+and are readable;</li>
+<li><code>capability</code> and <code>halo</code> are consistent with the configured block size;</li>
+<li>declared <code>outputs</code> are non-empty and uniquely named, and have a mapper if rendering
+is requested;</li>
+<li>every class you name in lumping or a colour table resolves to exactly one class-table row.</li>
+</ul>
+
+<h2 id="testing">Testing a plugin</h2>
+
+<p>Plugins are plain classes over numpy arrays, so most tests need no pipeline at all — construct
+an <code>ObsWindow</code> from the test helpers and call <code>score</code> directly.</p>
+
+<p>Two behaviours are worth testing explicitly because they fail quietly:</p>
+
+<ol>
+<li><strong>If you set a <code>halo</code></strong>, check that block-wise output matches
+tile-wise output. Stratum runs this check in CI for its own plugins; the same fixture is available
+to yours.</li>
+<li><strong>If you take parameters</strong>, check that changing one changes the cache key.
+A parameter that does not reach the key will serve you stale results from a previous
+configuration.</li>
+</ol>
+
+</div>
+<nav class="pager" aria-label="Pagination"></nav>
+<footer class="site">
+  Specified in <a href="../specs/04-cost-functions.md"><code>specs/04-cost-functions.md</code></a>,
+  <a href="../specs/05-ancillary-data.md"><code>05</code></a>,
+  <a href="../specs/07-output-mapping.md"><code>07</code></a>
+</footer>
+</main>
+</div>
+<script src="../assets/stratum.js"></script>
+</body>
+</html>

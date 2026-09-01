@@ -13,27 +13,27 @@
     { section: null, items: [
       { id: 'index', href: 'index.html', label: 'Overview' }
     ]},
-    { section: 'Design', items: [
-      { id: 'design/concepts',     href: 'design/concepts.html',     label: 'Concepts & vocabulary' },
-      { id: 'design/architecture', href: 'design/architecture.html', label: 'Why this architecture' },
-      { id: 'design/caching',      href: 'design/caching.html',      label: 'Caching & iteration' },
-      { id: 'design/execution',    href: 'design/execution.html',    label: 'Execution & orchestration' }
+    { section: 'Guide', items: [
+      { id: 'guide/concepts',   href: 'guide/concepts.html',   label: 'Concepts' },
+      { id: 'guide/running',    href: 'guide/running.html',    label: 'Running a mosaic' },
+      { id: 'guide/plugins',    href: 'guide/plugins.html',    label: 'Writing plugins' },
+      { id: 'guide/caching',    href: 'guide/caching.html',    label: 'Caching & reruns' },
+      { id: 'guide/deployment', href: 'guide/deployment.html', label: 'Deployment' }
     ]},
     { section: 'Reference', items: [
-      { id: 'reference/plugins',  href: 'reference/plugins.html',  label: 'Plugin contracts' },
-      { id: 'reference/types',    href: 'reference/types.html',    label: 'Core types' },
-      { id: 'reference/manifest', href: 'reference/manifest.html', label: 'Run manifest' }
+      { id: 'reference/manifest', href: 'reference/manifest.html', label: 'Manifest' },
+      { id: 'reference/types',    href: 'reference/types.html',    label: 'Types' },
+      { id: 'reference/cli',      href: 'reference/cli.html',      label: 'Commands' }
     ]},
     { section: 'Project', items: [
       { id: 'decisions/index', href: 'decisions/index.html', label: 'Decision records' },
-      { id: 'status',          href: 'status.html',          label: 'Status & open questions' }
+      { id: 'status',          href: 'status.html',          label: 'Status' }
     ]}
   ];
 
   var SOURCES = [
-    { href: 'specs/00-overview.md', label: 'Component specs (Markdown)' },
-    { href: 'design/Cloud-Mosaic-Architecture.html', label: 'Original proposal' },
-    { href: 'notes/2026-08-28-mines-tagup.md', label: 'Mines tag-up notes' }
+    { href: 'specs/00-overview.md', label: 'Component specs' },
+    { href: 'notes/heritage.md', label: 'Prior art & heritage' }
   ];
 
   var body = document.body;

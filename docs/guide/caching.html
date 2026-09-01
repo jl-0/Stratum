@@ -1,0 +1,181 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Caching &amp; reruns · Stratum</title>
+<link rel="stylesheet" href="../assets/stratum.css">
+</head>
+<body data-page="guide/caching" data-root="../">
+<a class="skip" href="#content">Skip to content</a>
+<header class="masthead">
+  <a class="wordmark" href="../index.html"><span class="glyph"></span>Stratum</a>
+  <span class="stage">Pre-release</span>
+  <span class="spacer"></span>
+  <span class="repo">EMIT Critical Minerals L3</span>
+</header>
+<div class="layout">
+<nav id="sidebar" aria-label="Documentation"></nav>
+<main id="content">
+<div class="prose">
+
+<h1>Caching &amp; reruns</h1>
+<p class="lede">Every artifact is stored under a hash of the inputs that determine it. Change one
+thing and exactly what depended on it is rebuilt.</p>
+
+<h2 id="what-invalidates">What invalidates what</h2>
+
+<p>This is the table to know. Read down the right-hand column to see why iterating on a cost
+function is cheap.</p>
+
+<div class="tw">
+<table>
+<thead><tr><th>Artifact</th><th>Key includes</th><th>New scorer<br>rebuilds?</th></tr></thead>
+<tbody>
+<tr><td><strong>GLT</strong><br><span class="chip chip-obs">granule &times; tile</span></td><td><code>granule_id</code>, <code>grid_def</code>, <code>max_distance</code>, <code>regrid_algo_version</code></td><td><strong>No</strong></td></tr>
+<tr><td><strong>Masked observation</strong><br><span class="chip chip-obs">granule &times; tile &times; block</span></td><td><code>glt_key</code>, <code>asset_roles</code>, <code>pixel_mask_spec</code>, <code>mask_plugin_version</code></td><td>No</td></tr>
+<tr><td><strong>Aux warp</strong><br><span class="chip chip-obs">source &times; tile</span></td><td><code>source_uri</code>, <code>source_etag</code>, <code>grid_def</code>, <code>resampling</code></td><td>No</td></tr>
+<tr><td><strong>Epoch snapshot</strong><br><span class="chip chip-obs">tile &times; epoch &times; block</span></td><td><code>obs_keys[]</code>, <code>scorer_ref</code>, <code>scorer_version</code>, <code>scorer_params</code>, <code>epoch_bounds</code></td><td><strong>Yes</strong></td></tr>
+<tr><td><strong>Product block</strong><br><span class="chip chip-obs">tile &times; block</span></td><td><code>snapshot_keys[]</code>, <code>reducer_ref</code>, <code>reducer_version</code>, <code>reducer_params</code></td><td>Yes</td></tr>
+<tr><td><strong>Rendered image</strong><br><span class="chip chip-obs">tile</span></td><td><code>product_keys[]</code>, <code>mapper_ref</code>, <code>mapper_version</code>, <code>mapper_params</code></td><td>No</td></tr>
+</tbody>
+</table>
+</div>
+
+<p>In practice:</p>
+
+<div class="tw">
+<table>
+<thead><tr><th>You change</th><th>Rebuilds</th><th>Reuses</th></tr></thead>
+<tbody>
+<tr><td>Scorer code or params</td><td>Stages 3&ndash;5</td><td>All cached GLTs and masked observations</td></tr>
+<tr><td>Reducer only</td><td>Stages 4&ndash;5</td><td>All epoch snapshots</td></tr>
+<tr><td>Colours only</td><td>Nothing — use <code>stratum render</code></td><td>The published data product</td></tr>
+<tr><td>Pixel masks</td><td>Stages 2b&ndash;5</td><td>The GLTs — geometry does not depend on cloudiness</td></tr>
+<tr><td>Grid or resolution</td><td>Everything</td><td>Nothing. This is a different product.</td></tr>
+<tr><td>Time range or filters</td><td>Whatever the changed granule set touches</td><td>Cached geometry for granules still selected</td></tr>
+</tbody>
+</table>
+</div>
+
+<h2 id="iterating">Iterating on a cost function</h2>
+
+<p>The first run over new ground pays for the geometry. Every run after that does not.</p>
+
+<pre><code>$ stratum submit -m base.yaml -p scorer-v1
+  Cache  GLT 0/725 hit  →  725 to build
+  ~11 vCPU-hours · ~28 min
+
+$ stratum submit -m base.yaml -p scorer-v2
+  Cache  GLT 725/725 hit (100%)  →  0 to build
+  ~0.9 vCPU-hours · ~4 min</code></pre>
+
+<p>Running several competing scorers over the same area is therefore roughly the cost of one
+regrid plus <em>n</em> cheap passes. That is the intended way to work: build variants as patches
+and compare them, rather than deciding a cost function up front.</p>
+
+<h2 id="sharing">The cache is shared</h2>
+
+<p>GLT keys contain no run, project or area component — only the granule, the grid and the mask
+spec. Two consequences:</p>
+
+<ul>
+<li><strong>Across experiments.</strong> Every run over the same ground at the same grid shares
+cached geometry, regardless of who launched it or what they were trying.</li>
+<li><strong>Across projects.</strong> If two projects adopt the same grid, the second one's first
+run is nearly free over ground the first has already touched.</li>
+</ul>
+
+<p>Because tile bounds are derived from the grid rather than from data extents, a GLT built for one
+project is byte-identical to one built for another over the same ground.</p>
+
+<pre><code>s3://{bucket}/cache/...          <span class="c">shared, content-addressed, long-lived</span>
+s3://{bucket}/runs/{run_id}/...  <span class="c">run-scoped: frozen index, work lists, reports</span>
+s3://{bucket}/products/{run_id}/ <span class="c">delivered outputs</span></code></pre>
+
+<h2 id="inspecting">Inspecting the cache</h2>
+
+<pre><code>stratum cache stats  --run &lt;id&gt;     <span class="c"># hit rate by artifact type; what a rerun costs</span>
+stratum cache explain &lt;key&gt;         <span class="c"># the inputs that produced this artifact</span>
+stratum cache diff &lt;key-a&gt; &lt;key-b&gt;  <span class="c"># which input differs</span>
+stratum cache gc --dry-run          <span class="c"># unreferenced entries past their lifecycle</span></code></pre>
+
+<p>Every artifact has an <code>.inputs.json</code> stored beside it, holding the exact document
+that was hashed to produce its key. So a cache entry can always be explained:</p>
+
+<pre><code>$ stratum cache explain glt/emit30/-111_32/a3f9c1e04b28d7f6
+
+artifact      GLT
+granule_id    001_20240612T183317_2416412_012
+grid_def      {crs: EPSG:4326, resolution: [0.0003, -0.0003], origin: [-180, -90]}
+max_distance  0.00045
+regrid_algo_version  3
+
+written       2026-08-14T09:12:44Z by run cuprite-2024
+size          41.2 MB
+referenced by 6 runs</code></pre>
+
+<p>When a rerun misses and you expected a hit, <code>cache diff</code> is the fast answer — the
+cause is always one field:</p>
+
+<pre><code>$ stratum cache diff a3f9c1e0… 7b2e4419…
+  max_distance   0.00045  →  0.0006
+  (all other inputs identical)</code></pre>
+
+<h2 id="rules">Rules the cache relies on</h2>
+
+<p>Mostly these are the framework's problem, but two affect what you do.</p>
+
+<div class="tw">
+<table>
+<thead><tr><th>Rule</th><th>What it means for you</th></tr></thead>
+<tbody>
+<tr><td><strong>Undeclared reads are refused</strong></td><td>A plugin must declare every aux source in <code>required_aux</code>. The accessor raises on an undeclared alias rather than opening it, because a read that is not in the key would silently go stale.</td></tr>
+<tr><td><strong>Aux sources are keyed by content</strong></td><td>Replacing a file in place under the same URI still invalidates correctly, via ETag or an explicit version. You do not need to rename files to force a rebuild.</td></tr>
+<tr><td><strong>Plugin versions are in the key</strong></td><td>Both the wheel URI and its content hash. Republishing a wheel at the same URI does invalidate; you do not have to bump a version string to see your change take effect.</td></tr>
+<tr><td><strong>Algorithms are versioned</strong></td><td><code>regrid_algo_version</code> is bumped when regrid output changes. If you are changing regrid behaviour, bump it, or cached geometry stays stale forever.</td></tr>
+<tr><td><strong>Writes are atomic</strong></td><td>An interrupted task cannot leave a truncated artifact that later reads as a hit, so retries and Spot interruptions are safe.</td></tr>
+</tbody>
+</table>
+</div>
+
+<h2 id="lifecycle">Lifecycle</h2>
+
+<div class="tw">
+<table>
+<thead><tr><th>Class</th><th>Retention</th><th>Why</th></tr></thead>
+<tbody>
+<tr><td>GLT</td><td>Indefinite</td><td>Expensive, immutable, shared, small relative to imagery</td></tr>
+<tr><td>Masked observations</td><td>~30 days</td><td>Large, and cheap to rebuild from a cached GLT</td></tr>
+<tr><td>Epoch snapshots</td><td>~30 days</td><td>Reproducible, and invalidated by scorer changes anyway</td></tr>
+<tr><td>Product blocks</td><td>Until the tile publishes</td><td>Superseded by the stitched product</td></tr>
+<tr><td>Frozen index, reports, provenance</td><td>Indefinite</td><td>Tiny, and the basis of reproducibility</td></tr>
+</tbody>
+</table>
+</div>
+
+<p>An expired masked observation costs one cheap rebuild from cached geometry, not a regrid. The
+retention policy is set per deployment; these are the defaults.</p>
+
+<h2 id="forcing">Forcing a rebuild</h2>
+
+<p>Rarely needed — a correct key makes it unnecessary — but available when you are debugging the
+cache itself:</p>
+
+<pre><code>stratum submit -m manifest.yaml --no-cache            <span class="c"># ignore hits, rebuild everything</span>
+stratum submit -m manifest.yaml --no-cache-from glt   <span class="c"># rebuild GLTs and downstream</span></code></pre>
+
+<p>If you find yourself reaching for these routinely, something is missing from a cache key. That
+is a bug worth reporting rather than working around.</p>
+
+</div>
+<nav class="pager" aria-label="Pagination"></nav>
+<footer class="site">
+  Specified in <a href="../specs/06-caching.md"><code>specs/06-caching.md</code></a>,
+  <a href="../specs/05-ancillary-data.md"><code>05</code></a>
+</footer>
+</main>
+</div>
+<script src="../assets/stratum.js"></script>
+</body>
+</html>

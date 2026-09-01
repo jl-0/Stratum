@@ -1,0 +1,335 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Concepts · Stratum</title>
+<link rel="stylesheet" href="../assets/stratum.css">
+</head>
+<body data-page="guide/concepts" data-root="../">
+<a class="skip" href="#content">Skip to content</a>
+<header class="masthead">
+  <a class="wordmark" href="../index.html"><span class="glyph"></span>Stratum</a>
+  <span class="stage">Pre-release</span>
+  <span class="spacer"></span>
+  <span class="repo">EMIT Critical Minerals L3</span>
+</header>
+<div class="layout">
+<nav id="sidebar" aria-label="Documentation"></nav>
+<main id="content">
+<div class="prose">
+
+<h1>Concepts</h1>
+<p class="lede">The model you need to hold in your head to write a manifest or a plugin.</p>
+
+<h2 id="vocabulary">Vocabulary</h2>
+
+<div class="tw">
+<table>
+<thead><tr><th>Term</th><th>Meaning</th></tr></thead>
+<tbody>
+<tr><td><strong>Granule</strong></td><td>One acquisition from one instrument. The atom of input. EMIT: ~75&nbsp;&times;&nbsp;75&nbsp;km at 60&nbsp;m.</td></tr>
+<tr><td><strong>Grid</strong></td><td>CRS + resolution + origin. Global and infinite; defines cell boundaries everywhere.</td></tr>
+<tr><td><strong>Tile</strong></td><td>A bounded rectangle of the grid. What you download.</td></tr>
+<tr><td><strong>Block</strong></td><td>A subdivision of a tile. What a worker processes. Never appears in outputs.</td></tr>
+<tr><td><strong>Epoch</strong></td><td>One time window, e.g. a month. Granules within it produce one snapshot.</td></tr>
+<tr><td><strong>Cadence</strong></td><td>The delivered temporal unit, e.g. a year. One or more epochs reduce into it.</td></tr>
+<tr><td><strong>GLT</strong></td><td>Geographic lookup table. Maps a grid cell to (granule, raw row, raw col).</td></tr>
+<tr><td><strong>Role</strong></td><td>A logical input name — <code>geometry</code>, <code>mineral</code>, <code>mask</code> — resolved to a collection and variable per run.</td></tr>
+<tr><td><strong>Observation</strong></td><td>One granule's contribution to one block, after regrid and masking.</td></tr>
+<tr><td><strong>Snapshot</strong></td><td>The winning value per cell for one epoch. What a <code>Scorer</code> produces.</td></tr>
+<tr><td><strong>Product</strong></td><td>The reduced result per tile, plus its rendering.</td></tr>
+</tbody>
+</table>
+</div>
+
+<h2 id="grid">Grid</h2>
+
+<p>A grid is CRS, resolution and origin. It is global and infinite, so any tile derived from it
+aligns with any other tile from the same grid — which is what lets cached geometry be shared
+between runs and between projects.</p>
+
+<pre><code>grid:
+  crs: EPSG:4326
+  resolution: [0.0003, -0.0003]    <span class="c"># x positive, y negative</span>
+  origin: [-180, -90]
+  tile_size: 1.0
+  block: 512</code></pre>
+
+<p>Cell edges fall at <code>origin + n &times; resolution</code>. Tile bounds are derived from the
+grid, never from the extent of your data.</p>
+
+<p>Stratum refuses three configurations at plan time because they are almost always mistakes:</p>
+
+<ul>
+<li>a <strong>positive <code>y</code> resolution</strong>, unless you explicitly force it;</li>
+<li><strong><code>resolution &gt; 1</code> with a <code>4xxx</code> EPSG</strong> — metres and
+degrees confused;</li>
+<li>a tile whose cell count at the configured resolution will not fit a worker (warning).</li>
+</ul>
+
+<h2 id="tile-block">Tile and block</h2>
+
+<p>Two different units for two different reasons, and it is worth keeping them straight.</p>
+
+<div class="tw">
+<table>
+<thead><tr><th></th><th>Tile</th><th>Block</th></tr></thead>
+<tbody>
+<tr><th>Is</th><td>The unit you download</td><td>The unit a worker processes</td></tr>
+<tr><th>Appears in</th><td>Filenames, STAC items, the catalogue</td><td>Nothing user-visible</td></tr>
+<tr><th>Set by</th><td><code>grid.tile_size</code></td><td><code>grid.block</code></td></tr>
+<tr><th>Changing it</th><td>Changes the product you deliver</td><td><strong>Changes nothing about the output</strong></td></tr>
+<tr><th>Typical</th><td>1&deg;</td><td>512 &times; 512 cells</td></tr>
+</tbody>
+</table>
+</div>
+
+<div class="key">
+  <span class="label">Guarantee</span>
+  <p>Block-wise output is <strong>bit-identical</strong> to tile-wise output. Tune
+  <code>grid.block</code> freely for memory and parallelism; it cannot change your result.</p>
+</div>
+
+<p>Tiles are named by their grid indices, so a tile name is a position:</p>
+
+<pre><code>{grid_id}/{tile_x}_{tile_y}          <span class="c">e.g.  emit30/-111_32</span></code></pre>
+
+<p>Tiles need not cover the world. An area of interest resolves to the set of tiles intersecting
+it, so a global EMIT run should clip to the coverage band rather than iterate dead cells.</p>
+
+<h3 id="block-size">Choosing a block size</h3>
+
+<div class="tw">
+<table>
+<thead><tr><th>Pressure</th><th>Direction</th></tr></thead>
+<tbody>
+<tr><td>The materialized observation stack must fit the worker</td><td>smaller</td></tr>
+<tr><td>Halo overhead</td><td>larger</td></tr>
+<tr><td>Per-task fixed cost — cold start, credential fetch, index read</td><td>larger</td></tr>
+<tr><td>Parallelism and retry granularity</td><td>smaller</td></tr>
+<tr><td>Source chunk alignment — COG internal tiling is typically 512</td><td>align to it</td></tr>
+</tbody>
+</table>
+</div>
+
+<p>The default is <strong>512</strong>, aligned with typical COG internal tiling so windowed reads
+do not straddle chunks.</p>
+
+<h3 id="halos">Halos</h3>
+
+<p>Splitting a tile into blocks is only safe when each output cell depends on observations over
+that cell alone. Mode, median, percentile and count all qualify. Anything with spatial extent — a
+smoothing filter, a neighbourhood test — does not, and would produce visible seams at block
+boundaries.</p>
+
+<p>A plugin that needs neighbouring pixels declares how many:</p>
+
+<pre><code><span class="k">class</span> MyScorer:
+    halo = 1        <span class="c"># pixels of overlap needed on every side</span></code></pre>
+
+<p>Stratum materializes <code>halo</code> extra pixels around the block, runs your plugin, and
+trims before writing. Halo cost is <code>(1 + 2h/B)&sup2;</code> — at <code>block: 512</code>, a
+one-pixel halo costs 0.8% and a 32-pixel halo 13%.</p>
+
+<p>A plugin that genuinely needs the whole tile at once declares
+<code>capability = "tile"</code> instead. That gives up block parallelism and routes the work to
+Batch, but it is honest about the cost rather than silently wrong.</p>
+
+<h2 id="epoch">Epoch and cadence</h2>
+
+<p>Epochs are the <strong>voting population</strong>. Cadence is the <strong>delivery unit</strong>.</p>
+
+<pre><code>time:
+  start: 2022-08-01
+  end:   2026-07-31
+  epoch: P1M              <span class="c"># monthly snapshots — the voting population</span>
+  deliver: P1Y            <span class="c"># annual product — the delivery cadence</span></code></pre>
+
+<p>Monthly epochs delivered annually means up to twelve votes per output pixel. Set
+<code>epoch</code> equal to <code>deliver</code> and each product is built from a single snapshot,
+with no temporal reduction.</p>
+
+<p>Rules that decide edge cases:</p>
+
+<ul>
+<li>A granule belongs to the epoch containing its <strong>acquisition start</strong>, regardless of
+end time.</li>
+<li>Epoch bounds are <strong>half-open</strong>, <code>[start, end)</code>, in UTC.</li>
+<li>Epochs are generated from <code>time.start</code> by the <code>epoch</code> period, not aligned
+to the calendar, unless you set <code>align: calendar</code>.</li>
+<li>A granule falling outside every epoch is an error at plan time, not a silent drop.</li>
+</ul>
+
+<h2 id="roles">Roles and band aliases</h2>
+
+<p>Plugins never name a collection or a band index. They name a <strong>role</strong>, and the
+manifest resolves it — which is what lets the same scorer run against a different instrument.</p>
+
+<pre><code>inputs:
+  roles:
+    geometry: {collection: EMITL1BOBS,  var: obs}
+    mineral:  {collection: EMITL2BMIN,  var: group_1_mineral_id}
+    mask:     {collection: EMITL2AMASK, var: mask}
+  band_aliases:
+    view_zenith:  {role: geometry, band: 5}
+    solar_zenith: {role: geometry, band: 4}</code></pre>
+
+<p>Your scorer then writes <code>obs["view_zenith"]</code>, never <code>obs[:, :, 5]</code>. If a
+plugin declares a role the manifest does not define, the run fails at plan time rather than in
+several thousand workers.</p>
+
+<h2 id="spaces">Coordinate spaces</h2>
+
+<p>Three spaces exist, and every array you receive tells you which one it is in.</p>
+
+<div class="tw">
+<table>
+<thead><tr><th>Space</th><th>Axes</th><th>You see it in</th></tr></thead>
+<tbody>
+<tr><td><strong>sensor</strong></td><td><code>(downtrack, crosstrack)</code></td><td>Raw granule variables; a <code>PixelMask</code> with <code>space = "sensor"</code></td></tr>
+<tr><td><strong>granule-ortho</strong></td><td><code>(ortho_y, ortho_x)</code></td><td>The GLT shipped inside a granule. Not the run grid.</td></tr>
+<tr><td><strong>block</strong></td><td><code>(y, x)</code></td><td>Everything from stage 3 onward, and any <code>space = "map"</code> mask</td></tr>
+</tbody>
+</table>
+</div>
+
+<p>The distinction matters for masks. Some conditions are properties of a <em>location</em> — this
+cell is water — and are expressed in map space after regridding. Others are properties of the
+<em>detector</em> — this cross-track column is unreliable — and can only be expressed in sensor
+space, because regridding discards the source column. Declare which one you mean; see
+<a href="plugins.html#pixel-mask">Writing plugins</a>.</p>
+
+<div class="note">
+  <span class="label">EMIT specifics</span>
+  <p>EMIT is a push-broom: every <em>column</em> is a different detector. Cross-track edges
+  therefore need trimming, but along-track granule boundaries are a download convenience with no
+  physical meaning and need nothing. <code>stratum_emit</code> ships this as a built-in mask, so
+  you do not configure it by hand.</p>
+</div>
+
+<h2 id="nodata">Missing data</h2>
+
+<p>Two kinds of "nothing here" exist and they are not interchangeable:</p>
+
+<div class="key">
+  <span class="label">The rule</span>
+  <p><code>-9999</code> means <strong>not observed</strong>. <code>0</code> in a class band means
+  <strong>observed, nothing identified</strong>. A reduction that treats them alike will report
+  confident agreement over pixels nobody ever looked at.</p>
+</div>
+
+<p>Inside Stratum you never see either. Integer fills are converted to a validity mask on read and
+sentinels are re-applied only on write, so a plugin works with <code>obs.valid</code> and with
+<code>NaN</code> for floats:</p>
+
+<pre><code><span class="k">def</span> score(self, obs, aux):
+    s = -obs[<span class="k">"view_zenith"</span>]
+    s[~obs.valid] = np.nan      <span class="c"># never compare against -9999 yourself</span>
+    <span class="k">return</span> s</code></pre>
+
+<p>Returning <code>NaN</code> from a scorer means <em>this observation may not occupy this
+cell</em>. It loses to any observation with a real score, and if every observation returns
+<code>NaN</code> the cell is left empty.</p>
+
+<div class="tw">
+<table>
+<thead><tr><th>Quantity</th><th>On disk</th><th>In a plugin</th></tr></thead>
+<tbody>
+<tr><td>Class band, not observed</td><td><code>-9999</code></td><td><code>obs.valid</code> is <code>False</code></td></tr>
+<tr><td>Class band, nothing identified</td><td><code>0</code></td><td>value <code>0</code>, valid</td></tr>
+<tr><td>Continuous band, no data</td><td><code>-9999.0</code></td><td><code>NaN</code></td></tr>
+<tr><td>GLT cell, no source pixel</td><td><code>0</code></td><td>—</td></tr>
+<tr><td>GLT cell, nearest neighbour beyond <code>max_distance</code></td><td>negative</td><td>—</td></tr>
+<tr><td>Scorer output, cell not eligible</td><td>—</td><td><code>NaN</code></td></tr>
+</tbody>
+</table>
+</div>
+
+<h2 id="class-tables">Class tables</h2>
+
+<p>A categorical band's integer values index a table of classes. Stratum carries that table around
+generically: it has a key column whose values appear in the pixels, plus any number of attribute
+columns.</p>
+
+<p>Where the table lives is declared per role, because some products embed one and some do not:</p>
+
+<pre><code>inputs:
+  roles:
+    mineral:
+      collection: EMITL2BMIN
+      var: group_1_mineral_id
+      class_table:
+        source: embedded          <span class="c"># embedded | file</span>
+        path: /mineral_metadata   <span class="c"># group within the product</span>
+        key: index                <span class="c"># column matching pixel values</span>
+        attributes: [name, record, library, group, url]</code></pre>
+
+<p>Prefer <code>source: embedded</code> whenever a product offers it. The table then travels with
+the data it describes and cannot drift from it.</p>
+
+<h3 id="class-agreement">Why you match on attributes, not integers</h3>
+
+<p>A mosaic spans many granules, and a pixel value of <code>15</code> has to mean the same thing in
+all of them. Key columns are usually <em>positional</em>, and the class list can change when the
+upstream producer is upgraded — so the same integer can mean different things in two granules of
+different vintages.</p>
+
+<p>Stratum handles this in two ways, and both are things you configure rather than code:</p>
+
+<ol>
+<li><strong>Pin a vintage</strong> in <code>granule_filter</code> so a run does not span the
+change. This is required, not optional — see <a href="running.html#vintage">Running a
+mosaic</a>.</li>
+<li><strong>Refer to classes by attribute</strong> wherever you name one — in lumping, in colour
+tables. Stratum resolves the attributes to integers per granule at plan time.</li>
+</ol>
+
+<pre><code>lumping:
+  match_on: [library, record, group]
+  classes:
+    goethite:
+      - {library: sprlb06, record: 882,  group: 1}
+      - {library: splib06, record: 5736, group: 1}</code></pre>
+
+<p>At plan time Stratum fingerprints every contributing granule's class table. If they all agree,
+it proceeds and records the fingerprint in provenance. If they differ, it fails and tells you —
+unless you have explicitly permitted a cross-vintage remap, in which case it computes the
+correspondence through the attribute columns and reports any entry it cannot resolve
+unambiguously.</p>
+
+<p>An entry that matches zero or multiple rows is a plan-time error, never a guess.</p>
+
+<h2 id="outputs">What a run produces</h2>
+
+<p>Every tile ships both the data and the picture. The rendered image is derived from the data
+product, never a substitute for it.</p>
+
+<div class="tw">
+<table>
+<thead><tr><th>Artifact</th><th>Contains</th><th>For</th></tr></thead>
+<tbody>
+<tr><td><strong>Data</strong></td><td>Class indices, counts, agreement, score — the bands your reducer declared</td><td>Analysis, statistics, reprocessing, restyling</td></tr>
+<tr><td><strong>Image</strong></td><td>RGBA rendering</td><td>MMGIS, QGIS, looking at a map</td></tr>
+<tr><td><strong>Legend</strong></td><td>Class table or ramp stops, as a sidecar and in the STAC item</td><td>Making the image interpretable and the data joinable</td></tr>
+<tr><td><strong>STAC item</strong></td><td>Assets, class table, projection, processing metadata</td><td>Cataloguing and discovery</td></tr>
+<tr><td><strong>Provenance</strong></td><td>Frozen index, plugin versions, image digest, filter counts</td><td>Explaining and reproducing the run</td></tr>
+</tbody>
+</table>
+</div>
+
+<p>A mosaic's classes are its own — after lumping they are not the input classes — so the published
+class table describes the product, not the granules that fed it.</p>
+
+</div>
+<nav class="pager" aria-label="Pagination"></nav>
+<footer class="site">
+  Specified in <a href="../specs/00-overview.md"><code>specs/00-overview.md</code></a>,
+  <a href="../specs/01-grid-tiling.md"><code>01</code></a>,
+  <a href="../specs/11-types.md"><code>11</code></a>
+</footer>
+</main>
+</div>
+<script src="../assets/stratum.js"></script>
+</body>
+</html>

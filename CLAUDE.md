@@ -20,7 +20,8 @@ one.
 | Layer | Where | Role |
 |---|---|---|
 | **Specs** | `docs/specs/*.md` | The contract. Carries citations, invariants, open questions. **Authoritative.** |
-| **Design site** | `docs/*.html` | The narrative. Explains shape and rationale to someone new. |
+| **Site** | `docs/*.html` | How the tool works and how to use it. |
+| **Heritage** | `docs/notes/heritage.md` | Prior art, where the old code lives, why choices were made. **Internal.** |
 | **Code** | *(none yet)* | Authoritative for signatures once it exists. |
 
 **When you make a design decision, record it in the same commit that makes it.**
@@ -42,21 +43,23 @@ do not duplicate field lists that will drift.
 
 ### Spec → site map
 
-Not every spec edit needs a site edit. The site carries the *shape* of a decision; the spec carries
-its detail. Update the site when the shape changes, a name changes, or a claim on the page becomes
-false.
+Not every spec edit needs a site edit. The site carries observable *behaviour*; the spec carries
+the contract and the reasoning. Update the site when behaviour changes, a name changes, or a
+statement on the page becomes false.
 
 | Spec | Site page |
 |---|---|
-| `00-overview`, `01-grid-tiling`, `11-types` §1–2, §9 | [`docs/design/concepts.html`](docs/design/concepts.html) |
-| `01` §3, `02`, `03` | [`docs/design/architecture.html`](docs/design/architecture.html) |
-| `05`, `06` | [`docs/design/caching.html`](docs/design/caching.html) |
-| `08`, `09` §4 | [`docs/design/execution.html`](docs/design/execution.html) |
-| `04`, `07` | [`docs/reference/plugins.html`](docs/reference/plugins.html) |
+| `00-overview`, `01-grid-tiling`, `11-types` §1–2, §9 | [`docs/guide/concepts.html`](docs/guide/concepts.html) |
+| `02-granule-index`, `09-run-manifest`, `10-provenance` | [`docs/guide/running.html`](docs/guide/running.html) |
+| `04-cost-functions`, `05-ancillary-data`, `07-output-mapping` | [`docs/guide/plugins.html`](docs/guide/plugins.html) |
+| `06-caching` | [`docs/guide/caching.html`](docs/guide/caching.html) |
+| `08-execution`, `ADR-0002` | [`docs/guide/deployment.html`](docs/guide/deployment.html) |
+| `09-run-manifest` (fields) | [`docs/reference/manifest.html`](docs/reference/manifest.html) |
 | `11-types` | [`docs/reference/types.html`](docs/reference/types.html) |
-| `09`, `10` | [`docs/reference/manifest.html`](docs/reference/manifest.html) |
+| Any CLI surface | [`docs/reference/cli.html`](docs/reference/cli.html) |
 | Any ADR | [`docs/decisions/index.html`](docs/decisions/index.html) |
 | Any spec's **open questions** | [`docs/status.html`](docs/status.html) |
+| A finding about an existing pipeline | [`docs/notes/heritage.md`](docs/notes/heritage.md) — **not** the site |
 
 The last row is the one most easily forgotten. `status.html` rolls up every spec's open questions,
 so resolving one means striking it there too — otherwise the page slowly fills with questions
@@ -118,14 +121,14 @@ several agree. Everything domain-specific lives in `stratum_emit`. If you find y
 ## Repo layout
 
 ```
-docs/index.html    design site landing page (GitHub Pages serves docs/)
-docs/design/       concepts, architecture, caching, execution + the original proposal
-docs/reference/    plugins, types, manifest
+docs/index.html    site landing page (GitHub Pages serves docs/)
+docs/guide/        concepts, running, plugins, caching, deployment  <- how to use it
+docs/reference/    manifest, types, cli                             <- field/API reference
 docs/decisions/    ADR digest (HTML) + the ADRs themselves (Markdown)
-docs/status.html   rolled-up open questions and the first slice
+docs/status.html   what is implemented, what is open
 docs/assets/       stratum.css, stratum.js - the only shared chrome
 docs/specs/        00-11, numbered by dependency order   <- authoritative
-docs/notes/        meeting notes, with attribution caveats
+docs/notes/        heritage.md, meeting notes, archived proposal    <- internal
 refs/              verbatim external artifacts - do not edit
 ```
 
@@ -190,14 +193,42 @@ knows what it is allowed to overwrite — and so a reader knows which parts to t
 exists. **Do not** add a generator now; the pages have to survive being hand-edited until there is
 something to generate them from.
 
+### What the site is for
+
+**The site documents the tool as it is. It does not argue for it.**
+
+This is the rule most easily broken, because the reasoning is interesting and the heritage is
+fresh. It still does not belong there. A user reading `guide/plugins.html` needs to know that a
+`PixelMask` returns a boolean and a `Scorer` returns a number — not which prior pipeline conflated
+them.
+
+| Belongs on the site | Belongs in `notes/heritage.md` |
+|---|---|
+| What a field does, what it defaults to | Why the default is that value |
+| A constraint the user must satisfy | Which pipeline taught us the constraint |
+| Behaviour, limits, error conditions | Comparisons with V002 / AMD / SpectralUtil |
+| Worked examples | The code the example was derived from |
+| EMIT data facts a user needs (extents, fill values) | How those facts were established |
+
+Concretely: **no guide or reference page should name V002, EMIT-AMD, `pipeline.sh`, `watch.sh`,
+`SpectralUtil` or a cluster path.** If you are about to write "unlike the existing pipeline", stop
+— either state the rule on its own terms, or put the comparison in `heritage.md`.
+
+`status.html` is the one exception, and only for naming a **parity or validation target** ("the
+first slice must reproduce the existing V002 output"). That is a statement about project state,
+not a justification. It still does not explain what V002 does or why we differ.
+
+Where a constraint is genuinely EMIT-specific and a user needs it (detector-edge trimming, `-9999`
+vs `0`), state it as a property of the data, not as a story about who discovered it.
+
 ### Style on the site
 
 The same rules as the specs, plus two:
 
-- **Every claim about existing code names its source.** The site is where a claim gets read
-  without the spec beside it, so an unattributed assertion here does more damage.
-- **Status chips are load-bearing.** `locked` means someone may now build on it. Do not mark
-  something locked to look decisive.
+- **Write for someone doing the task**, not someone evaluating the design. Second person, present
+  tense, concrete.
+- **Status chips are load-bearing.** `locked` means someone may build on it. Do not mark something
+  locked to look decisive.
 
 `refs/` holds things we did not write: a real L2B granule, AMD's `config.yml`, a meeting
 transcript. **Never edit them.** They are evidence.

@@ -46,29 +46,31 @@ function re-reads cached geometry instead of rebuilding it.
 
 ## Documentation
 
-**Start at [`docs/index.html`](docs/index.html)** — the design site. Open it locally or browse it
-on GitHub Pages. It explains *why* the design looks like this, with the evidence behind each
-choice, and marks what is locked versus still moving.
+**Start at [`docs/index.html`](docs/index.html)** — how the tool works and how to use it. Open it
+locally or browse it on GitHub Pages.
 
 | | |
 |---|---|
-| [`docs/index.html`](docs/index.html) | Design site — shape, rationale, locked types, open questions |
-| [`docs/specs/`](docs/specs/) | Component specifications. **Authoritative** — interfaces, contracts, citations |
+| [`docs/index.html`](docs/index.html) | The documentation site — concepts, running a mosaic, writing plugins, deployment, reference |
+| [`docs/specs/`](docs/specs/) | Component specifications. **Authoritative** — contracts, invariants, citations |
 | [`docs/decisions/`](docs/decisions/) | Architecture decision records |
-| [`docs/notes/`](docs/notes/) | Meeting notes, with attribution caveats |
+| [`docs/notes/heritage.md`](docs/notes/heritage.md) | Internal: prior art, where the historical code lives, why choices were made |
 | [`refs/`](refs/) | Reference material from the existing pipelines, kept verbatim |
 
-The site is the narrative; the specs are the contract. When they disagree the specs win — they
-carry the citations. Keeping them in step is the first rule in [`CLAUDE.md`](CLAUDE.md).
+The site documents the tool. The specs state the contracts. Heritage and rationale stay in
+`docs/notes/`. Keeping them in step is the first rule in [`CLAUDE.md`](CLAUDE.md).
 
 ## Relationship to existing code
 
 | Repo | Relationship |
 |------|--------------|
 | `SpectralUtil` | **Wrapped, not forked.** Provides the KD-tree GLT build. Two upstream contributions wanted: a pluggable selection seam, and persisting the score band. |
-| `emit-sds-l3` | V002 reference implementation. Julia path stays as reference only. |
+| `emit-sds-l3` | V002 reference implementation, and the parity target for the first slice. |
 | `EMIT-AMD` | Precedent for deferred reduction and for the lumping/colour config. Cluster-specific; not reusable directly. |
-| `tetracorder-lite` | Upstream L2B producer. Its reference matrix is the *source* of the class table each granule embeds — and it is that embedded table, not a checked-in copy, that lumping resolves against. |
+| `tetracorder-lite` | Upstream L2B producer. Its reference matrix is the source of the class table each granule embeds. |
+
+File-level detail — which script does what, and which observations in it drove a design choice —
+is in [`docs/notes/heritage.md`](docs/notes/heritage.md).
 
 ## Not only EMIT
 

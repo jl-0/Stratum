@@ -1,0 +1,219 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Command reference · Stratum</title>
+<link rel="stylesheet" href="../assets/stratum.css">
+</head>
+<body data-page="reference/cli" data-root="../">
+<a class="skip" href="#content">Skip to content</a>
+<header class="masthead">
+  <a class="wordmark" href="../index.html"><span class="glyph"></span>Stratum</a>
+  <span class="stage">Pre-release</span>
+  <span class="spacer"></span>
+  <span class="repo">EMIT Critical Minerals L3</span>
+</header>
+<div class="layout">
+<nav id="sidebar" aria-label="Documentation"></nav>
+<main id="content">
+<div class="prose">
+
+<h1>Command reference</h1>
+<p class="lede">One CLI, shared by the container image and a local install — the same commands run
+on a laptop, on a cluster, and as the worker entrypoint.</p>
+
+<div class="gen">
+  <span class="label">Generated later</span>
+  <p>This page will be generated from the click command tree, so options cannot drift from the
+  implementation.</p>
+</div>
+
+<h2 id="summary">Commands</h2>
+
+<div class="tw">
+<table>
+<thead><tr><th>Command</th><th>Does</th></tr></thead>
+<tbody>
+<tr><td><a href="#plan"><code>stratum plan</code></a></td><td>Resolve a manifest and report what would run. Provisions nothing.</td></tr>
+<tr><td><a href="#submit"><code>stratum submit</code></a></td><td>Start a run</td></tr>
+<tr><td><a href="#status"><code>stratum status</code></a></td><td>Progress of a run in flight</td></tr>
+<tr><td><a href="#report"><code>stratum report</code></a></td><td>Human-readable summary of a finished run</td></tr>
+<tr><td><a href="#approve"><code>stratum approve</code> / <code>reject</code></a></td><td>Release or cancel a run paused at the budget gate</td></tr>
+<tr><td><a href="#render"><code>stratum render</code></a></td><td>Re-render published data with a different mapper</td></tr>
+<tr><td><a href="#cache"><code>stratum cache</code></a></td><td>Inspect, explain and collect the cache</td></tr>
+<tr><td><a href="#index"><code>stratum index</code></a></td><td>Build and verify the granule index</td></tr>
+<tr><td><a href="#plugins"><code>stratum plugins</code></a></td><td>List registered plugins</td></tr>
+<tr><td><a href="#validate"><code>stratum validate</code></a></td><td>Schema-check a manifest without touching the index</td></tr>
+</tbody>
+</table>
+</div>
+
+<h3 id="global">Global options</h3>
+
+<div class="tw">
+<table>
+<thead><tr><th>Option</th><th>Effect</th></tr></thead>
+<tbody>
+<tr><td><code>-m, --manifest PATH</code></td><td>Base manifest</td></tr>
+<tr><td><code>-p, --patch NAME</code></td><td>Patch to merge, repeatable, applied in order</td></tr>
+<tr><td><code>--profile NAME</code></td><td>Deployment profile — endpoints, bucket, region</td></tr>
+<tr><td><code>--log-level LEVEL</code></td><td><code>debug</code> | <code>info</code> | <code>warning</code> | <code>error</code></td></tr>
+<tr><td><code>--json</code></td><td>Machine-readable output instead of formatted text</td></tr>
+</tbody>
+</table>
+</div>
+
+<h2 id="plan">stratum plan</h2>
+
+<pre><code>stratum plan -m manifest.yaml [-p PATCH]... [--json] [--out PATH]</code></pre>
+
+<p>Merges patches, validates the result, queries the index, applies filters, resolves tiles and
+epochs, probes the cache, and prints the fan-out with a cost estimate. Reads the index; provisions
+nothing; writes nothing unless <code>--out</code> is given.</p>
+
+<div class="tw">
+<table>
+<thead><tr><th>Option</th><th>Effect</th></tr></thead>
+<tbody>
+<tr><td><code>--out PATH</code></td><td>Write the resolved plan and frozen candidate set locally</td></tr>
+<tr><td><code>--explain-filters</code></td><td>List the granules each filter removed, not just counts</td></tr>
+<tr><td><code>--no-cache-probe</code></td><td>Skip the cache probe; estimate as if nothing were cached</td></tr>
+</tbody>
+</table>
+</div>
+
+<p>Exit codes: <code>0</code> valid and within budget, <code>2</code> valid but over budget,
+<code>1</code> invalid.</p>
+
+<h2 id="submit">stratum submit</h2>
+
+<pre><code>stratum submit -m manifest.yaml [-p PATCH]... [--wait]
+stratum submit --from-provenance s3://.../provenance.json</code></pre>
+
+<div class="tw">
+<table>
+<thead><tr><th>Option</th><th>Effect</th></tr></thead>
+<tbody>
+<tr><td><code>--wait</code></td><td>Block until the run finishes; exit non-zero on failure</td></tr>
+<tr><td><code>--from-provenance URI</code></td><td>Re-run against a previous run's frozen index rather than re-querying</td></tr>
+<tr><td><code>--dry-run</code></td><td>Equivalent to <code>plan</code></td></tr>
+<tr><td><code>--no-cache</code></td><td>Ignore cache hits and rebuild everything</td></tr>
+<tr><td><code>--no-cache-from STAGE</code></td><td>Rebuild from this stage onward — <code>glt</code>, <code>obs</code>, <code>snapshot</code>, <code>product</code></td></tr>
+<tr><td><code>--tag KEY=VALUE</code></td><td>Extra cost-allocation tags, repeatable</td></tr>
+</tbody>
+</table>
+</div>
+
+<p>A run over budget with <code>on_exceed: require_approval</code> pauses before provisioning
+compute and waits for <code>stratum approve</code>.</p>
+
+<h2 id="status">stratum status</h2>
+
+<pre><code>stratum status --run RUN_ID [--watch] [--failed]</code></pre>
+
+<div class="tw">
+<table>
+<thead><tr><th>Option</th><th>Effect</th></tr></thead>
+<tbody>
+<tr><td><code>--watch</code></td><td>Refresh until the run reaches a terminal state</td></tr>
+<tr><td><code>--failed</code></td><td>List failed work items with their errors</td></tr>
+<tr><td><code>--stage STAGE</code></td><td>Restrict to one stage</td></tr>
+</tbody>
+</table>
+</div>
+
+<h2 id="report">stratum report</h2>
+
+<pre><code>stratum report --run RUN_ID [--diff PREVIOUS_RUN_ID] [--format md|json]</code></pre>
+
+<p>Prints the run summary: granules considered and what each filter removed, cache hit rate by
+artifact type, failed blocks, cost against budget, and the vintage selected.</p>
+
+<p><code>--diff</code> compares against an earlier run of the same manifest lineage. A large change
+in selected granules usually means an upstream reprocessing or an index rebuild, and is worth
+seeing before it becomes a mystery in the product.</p>
+
+<h2 id="approve">stratum approve / reject</h2>
+
+<pre><code>stratum approve --run RUN_ID [--note TEXT]
+stratum reject  --run RUN_ID [--note TEXT]</code></pre>
+
+<p>Releases or cancels a run paused at the budget gate. The note is recorded in provenance.</p>
+
+<h2 id="render">stratum render</h2>
+
+<pre><code>stratum render --run RUN_ID --mapper REF [--params JSON] [--tile TILE]...</code></pre>
+
+<p>Re-renders published data blocks with a different mapper. Does not re-run the pipeline — the
+image is a pure function of the data product and the mapper, so this costs seconds. Writes a new
+image and legend alongside the existing ones; the data product is untouched.</p>
+
+<h2 id="cache">stratum cache</h2>
+
+<pre><code>stratum cache stats   [--run RUN_ID] [--type TYPE]
+stratum cache explain KEY
+stratum cache diff    KEY_A KEY_B
+stratum cache gc      [--dry-run] [--older-than PERIOD]</code></pre>
+
+<div class="tw">
+<table>
+<thead><tr><th>Subcommand</th><th>Does</th></tr></thead>
+<tbody>
+<tr><td><code>stats</code></td><td>Hit rate by artifact type, and what a rerun would cost</td></tr>
+<tr><td><code>explain</code></td><td>Prints the <code>.inputs.json</code> that produced a key, plus who wrote it and who references it</td></tr>
+<tr><td><code>diff</code></td><td>Shows which input differs between two keys. The answer to "why did this miss?"</td></tr>
+<tr><td><code>gc</code></td><td>Removes unreferenced entries past their lifecycle. Always <code>--dry-run</code> first.</td></tr>
+</tbody>
+</table>
+</div>
+
+<p>Artifact types for <code>--type</code>: <code>glt</code>, <code>obs</code>, <code>aux</code>,
+<code>snapshot</code>, <code>product</code>, <code>image</code>.</p>
+
+<h2 id="index">stratum index</h2>
+
+<pre><code>stratum index build  --collection NAME [--since DATE] [--until DATE]
+stratum index verify --collection NAME
+stratum index query  --collection NAME --bbox W,S,E,N --start DATE --end DATE</code></pre>
+
+<div class="tw">
+<table>
+<thead><tr><th>Subcommand</th><th>Does</th></tr></thead>
+<tbody>
+<tr><td><code>build</code></td><td>Populates or refreshes the GeoParquet index from the upstream catalogue. A periodic job, not part of a run.</td></tr>
+<tr><td><code>verify</code></td><td>Checks asset URIs resolve and reports rows not seen since the last build — how an upstream reprocessing is detected</td></tr>
+<tr><td><code>query</code></td><td>Ad-hoc query without writing a manifest</td></tr>
+</tbody>
+</table>
+</div>
+
+<h2 id="plugins">stratum plugins</h2>
+
+<pre><code>stratum plugins list [--kind scorers|reducers|masks|filters|mappers]
+stratum plugins show REF</code></pre>
+
+<p><code>list</code> enumerates what the current image or environment provides.
+<code>show</code> prints a plugin's capability, declared roles and aux, halo, and outputs — useful
+for checking what a manifest must supply before you run it.</p>
+
+<h2 id="validate">stratum validate</h2>
+
+<pre><code>stratum validate -m manifest.yaml [-p PATCH]...</code></pre>
+
+<p>Schema and cross-reference checks only. Does not touch the index or any ancillary source, so it
+works offline and is fast enough for a pre-commit hook. Use <code>plan</code> when you want the
+checks that need real data.</p>
+
+</div>
+<nav class="pager" aria-label="Pagination"></nav>
+<footer class="site">
+  Specified across <a href="../specs/09-run-manifest.md"><code>specs/09</code></a>,
+  <a href="../specs/06-caching.md"><code>06</code></a>,
+  <a href="../specs/02-granule-index.md"><code>02</code></a>
+</footer>
+</main>
+</div>
+<script src="../assets/stratum.js"></script>
+</body>
+</html>

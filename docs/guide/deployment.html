@@ -1,0 +1,201 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Deployment · Stratum</title>
+<link rel="stylesheet" href="../assets/stratum.css">
+</head>
+<body data-page="guide/deployment" data-root="../">
+<a class="skip" href="#content">Skip to content</a>
+<header class="masthead">
+  <a class="wordmark" href="../index.html"><span class="glyph"></span>Stratum</a>
+  <span class="stage">Pre-release</span>
+  <span class="spacer"></span>
+  <span class="repo">EMIT Critical Minerals L3</span>
+</header>
+<div class="layout">
+<nav id="sidebar" aria-label="Documentation"></nav>
+<main id="content">
+<div class="prose">
+
+<h1>Deployment</h1>
+<p class="lede">For whoever operates the platform. Users writing manifests do not need this page.</p>
+
+<h2 id="boundary">What Terraform owns</h2>
+
+<div class="key">
+  <span class="label">The rule</span>
+  <p><strong>Terraform owns the platform. The manifest owns the science.</strong> One deployment
+  serves many concurrent runs; a new experiment is a new manifest, never a new deployment.</p>
+</div>
+
+<div class="tw">
+<table>
+<thead><tr><th>Terraform</th><th>Manifest</th></tr></thead>
+<tbody>
+<tr><td>ECR repositories, image build and push</td><td>Grid, tiling, block size</td></tr>
+<tr><td>Batch compute environments, queues, job definitions</td><td>Area of interest and zones</td></tr>
+<tr><td>Lambda functions, the state machine</td><td>Time range, epoch, cadence</td></tr>
+<tr><td>S3 buckets and lifecycle rules</td><td>Filters, masks, scorer, reducer, mapper</td></tr>
+<tr><td>IAM roles, the Earthdata credential</td><td>Ancillary source declarations</td></tr>
+<tr><td>Account budgets, alarms, dashboards</td><td>Run budget ceilings, output formats</td></tr>
+</tbody>
+</table>
+</div>
+
+<p>Terraform contains no zone names, no dates, no thresholds and no class names. A CI check greps
+for them, because the leak is gradual and worth catching early. If a science parameter needs an
+infrastructure pull request to change, the boundary has moved and should be moved back.</p>
+
+<p>Reach for a second deployment only on a real boundary — a separate account for delivered
+products versus experimentation, or a different region. Never for an experiment.</p>
+
+<h2 id="topology">Where work runs</h2>
+
+<div class="tw">
+<table>
+<thead><tr><th>Plane</th><th>Service</th><th>Stages</th><th>Profile</th></tr></thead>
+<tbody>
+<tr><td><strong>Control</strong></td><td>Step Functions + Lambda</td><td>1, 5, all cache probes</td><td>Seconds, hundreds of MB, thousands of invocations</td></tr>
+<tr><td><strong>Data</strong></td><td>AWS Batch on EC2 Spot</td><td>2, 3, 4 when large</td><td>Minutes to hours, GBs of RAM, GDAL in the image</td></tr>
+<tr><td><strong>Either</strong></td><td>Routed per work item</td><td>2, 3, 4 when small</td><td>Blocks are sized so most work fits Lambda</td></tr>
+</tbody>
+</table>
+</div>
+
+<p>Placement is a routing decision the planner makes from measured properties, not a static
+configuration:</p>
+
+<pre><code><span class="k">def</span> route(item, plan) -&gt; Literal[<span class="k">"lambda"</span>, <span class="k">"batch"</span>]:
+    <span class="k">if</span> plan.capability == <span class="k">"tile"</span>:       <span class="k">return</span> <span class="k">"batch"</span>   <span class="c"># needs a global view</span>
+    <span class="k">if</span> item.est_peak_bytes &gt; 7 * GB:    <span class="k">return</span> <span class="k">"batch"</span>
+    <span class="k">if</span> item.est_seconds    &gt; 600:       <span class="k">return</span> <span class="k">"batch"</span>   <span class="c"># 15-min ceiling, with margin</span>
+    <span class="k">if</span> item.est_bytes_read &gt; 8 * GB:    <span class="k">return</span> <span class="k">"batch"</span>
+    <span class="k">return</span> <span class="k">"lambda"</span></code></pre>
+
+<p>Estimates come from block cell count &times; bands &times; dtype &times; observation count, plus
+per-stage constants refined from previous runs. A small pilot routes almost entirely to Lambda and
+finishes in minutes with nothing to warm up; a global campaign routes to Batch on Spot. Same code,
+same image, same manifest.</p>
+
+<h2 id="image">The container image</h2>
+
+<p>One image, two entrypoints: a Lambda Runtime Interface Client entrypoint and a plain CLI
+entrypoint. Identical code runs on Lambda, on Batch, on a cluster and on a laptop — so a stage can
+be reproduced locally from its <code>.inputs.json</code> with no AWS involvement.</p>
+
+<p>Lambda <strong>container images</strong> are required, not zip layers: layers cap at 250 MB
+unzipped across all layers, which GDAL, netCDF4, scipy and numpy exceed before any project code.
+Container image Lambdas allow 10 GB.</p>
+
+<div class="tw">
+<table>
+<thead><tr><th>Limit</th><th>Value</th></tr></thead>
+<tbody>
+<tr><td>Lambda timeout</td><td>15 minutes</td></tr>
+<tr><td>Lambda memory</td><td>10 GB</td></tr>
+<tr><td>Lambda <code>/tmp</code></td><td>10 GB</td></tr>
+<tr><td>Lambda container image</td><td>10 GB</td></tr>
+</tbody>
+</table>
+</div>
+
+<h2 id="state-machine">The state machine</h2>
+
+<pre><code>Plan                <span class="c"># Lambda: manifest -&gt; frozen index -&gt; work list -&gt; S3</span>
+BudgetGate          <span class="c"># Choice: within budget? else -&gt; ApprovalWait (task token)</span>
+RegridMap           <span class="c"># Distributed Map over (granule x tile), ItemReader = S3 JSONL</span>
+  └─ CacheProbe -&gt; Regrid          <span class="c"># skipped entirely on hit</span>
+EpochMap            <span class="c"># Distributed Map over epochs</span>
+  └─ BlockMap       <span class="c"># nested Distributed Map over (tile x block)</span>
+       └─ Resolve
+ReduceMap           <span class="c"># Distributed Map over (tile x block)</span>
+PublishMap          <span class="c"># Distributed Map over tiles: stitch, COG, render, STAC</span>
+Finalize            <span class="c"># provenance record, run report, notification</span></code></pre>
+
+<p>Distributed Map reads its work list from an S3 object rather than from execution state and fans
+out to 10,000 concurrent children. Nested maps keep payloads small. Variables and JSONata carry the
+manifest hash and cache prefix between states.</p>
+
+<h3 id="constraints">Constraints that shape the deployment</h3>
+
+<div class="tw">
+<table>
+<thead><tr><th>Constraint</th><th>Consequence</th></tr></thead>
+<tbody>
+<tr><td><code>ItemReader</code> and <code>ResultWriter</code> need buckets in the same account and region as the state machine</td><td>Deploy in <code>us-west-2</code>, where the source data lives</td></tr>
+<tr><td>Child execution input caps at 256 KiB</td><td>Work items carry keys and hashes, never geometry or band lists</td></tr>
+<tr><td>Standard workflows bill per state transition</td><td>Use Express child workflows on inner maps — at 100k+ blocks this is a real cost line</td></tr>
+<tr><td>Maximum concurrency is 10,000</td><td>A CONUS run at 1&deg;/512px is roughly 44k blocks: nested maps, or accept waves</td></tr>
+</tbody>
+</table>
+</div>
+
+<h2 id="credentials">Credentials</h2>
+
+<p>Source data sits in <code>lp-prod-protected</code> (us-west-2) behind Earthdata Login, and the
+S3 credentials it issues are temporary — roughly one hour.</p>
+
+<ul>
+<li>The Earthdata credential lives in Secrets Manager and never in the image.</li>
+<li>A refresh wrapper re-fetches before expiry and wraps every long read.</li>
+<li>Batch jobs must assume refresh is needed. Lambda's 15-minute ceiling makes it a non-issue
+there, which is a quiet argument for routing to Lambda wherever it fits.</li>
+</ul>
+
+<h2 id="failures">Failure handling</h2>
+
+<div class="tw">
+<table>
+<thead><tr><th>Mechanism</th><th>Effect</th></tr></thead>
+<tbody>
+<tr><td>Retry with backoff</td><td>Absorbs Spot reclaim, throttling and credential expiry</td></tr>
+<tr><td>Content addressing</td><td>A retried block recomputes to the same key, so retry is safe</td></tr>
+<tr><td>Atomic writes</td><td>An interrupted task cannot leave a truncated artifact that later reads as a hit</td></tr>
+<tr><td><code>ResultWriter</code></td><td>Per-item outcomes land in <code>failures.jsonl</code> — a queryable list, not a log grep</td></tr>
+<tr><td><code>ToleratedFailurePercentage</code></td><td>A run completes and reports a handful of bad blocks rather than failing 44,000 items over one corrupt granule</td></tr>
+<tr><td>Block-level blast radius</td><td>One failure loses one block, which is what makes Spot sensible</td></tr>
+</tbody>
+</table>
+</div>
+
+<p>Set tolerance per deployment: permissive for experimentation, zero for delivered products.</p>
+
+<h2 id="concurrency">Running many runs at once</h2>
+
+<p>One deployment serves many runs. Guard rails:</p>
+
+<ul>
+<li>Tag every job with <code>run_id</code> for cost allocation.</li>
+<li>Set <code>MaxConcurrency</code> per execution so one run cannot starve another.</li>
+<li>Outputs are prefixed by <code>run_id</code>; the cache stays shared, which is the point.</li>
+</ul>
+
+<h2 id="index">The granule index</h2>
+
+<p>The index is a GeoParquet dataset queried with DuckDB directly from S3 over range requests, so
+there is no database to operate — the planner Lambda reads it in place.</p>
+
+<p>Building it is a separate periodic job, deliberately. A run never depends on an upstream
+catalogue being reachable, and stage 1 freezes the granule set it selected into the run prefix so
+the same manifest reproduces the same inputs later.</p>
+
+<pre><code>stratum index build   --collection EMITL2BMIN --since 2026-08-01
+stratum index verify  --collection EMITL2BMIN</code></pre>
+
+<p>The index records when each row was last observed, so a re-index after upstream reprocessing is
+detectable rather than silent.</p>
+
+</div>
+<nav class="pager" aria-label="Pagination"></nav>
+<footer class="site">
+  Specified in <a href="../specs/08-execution.md"><code>specs/08-execution.md</code></a>,
+  <a href="../specs/02-granule-index.md"><code>02</code></a>,
+  <a href="../decisions/ADR-0002-terraform-manifest-boundary.md">ADR-0002</a>
+</footer>
+</main>
+</div>
+<script src="../assets/stratum.js"></script>
+</body>
+</html>
