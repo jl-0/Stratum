@@ -128,6 +128,45 @@ and that is much cheaper to find out now than after orchestration is built on to
 </table>
 </div>
 
+<h2 id="planned">Planned enhancements</h2>
+
+<p>Deliberately deferred rather than undecided. Each has a shape in mind and a reason for waiting.</p>
+
+<div class="tw">
+<table>
+<thead><tr><th>Enhancement</th><th>Why deferred</th><th>Cost of adding it later</th></tr></thead>
+<tbody>
+<tr>
+  <td><strong>Scorer-derived snapshot bands</strong><br><code>Scorer.outputs</code> + <code>emit()</code>, for bands the scorer computes rather than copies — runner-up margin, per-candidate evidence, broadcast timestamps</td>
+  <td>Several motivating bands (<code>source_granule</code>, <code>acquired</code>, <code>runner_up_score</code>) are already known to the selection loop and may belong as framework built-ins instead, which would leave the plugin-facing form much smaller. Per-candidate evidence also needs a representation decision that is premature without a reducer that consumes it.</td>
+  <td><strong>Reprocessing.</strong> Snapshots are cached artifacts; a band that was never emitted cannot be recovered from them. Adding this invalidates and rebuilds stage 3.</td>
+</tr>
+<tr>
+  <td><strong>Classify-last reduction</strong> — aggregate per-candidate evidence across epochs, then classify the aggregate, instead of voting on labels</td>
+  <td>Blocked on the row above: it is the main consumer of derived outputs.</td>
+  <td>Same reprocessing cost. Voting on labels stays the v1 baseline.</td>
+</tr>
+<tr>
+  <td><strong>Stack-level emitted bands</strong> — a <code>stack</code>-capability scorer emitting a property of the whole epoch (a within-epoch median) rather than of one observation</td>
+  <td>Blurs the scorer/reducer split. Current rule is per-observation arrays only, gathered from the winner.</td>
+  <td>Contract change, but additive.</td>
+</tr>
+<tr>
+  <td><strong><code>tile</code> capability</strong> — plugins needing a whole-tile view</td>
+  <td>Nothing needs it yet. It is specified so the escape hatch exists, but building it before a real case would be speculative.</td>
+  <td>Low — it routes to Batch and gives up block parallelism, which is already described.</td>
+</tr>
+</tbody>
+</table>
+</div>
+
+<div class="note">
+  <span class="label">Why this list exists</span>
+  <p>The rows differ in one important way: the first two cost a <strong>reprocessing pass</strong> if
+  adopted after data exists, because they change what stage 3 writes. The others are additive. That
+  distinction is worth weighing before the first production run, not after.</p>
+</div>
+
 <h2 id="scope">Out of scope</h2>
 
 <div class="tw">

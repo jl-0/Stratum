@@ -203,37 +203,21 @@ them into a single cutoff throws that range away.</p>
 <div class="key">
   <span class="label">A snapshot is not a picture</span>
   <p>Nothing renders it and nothing outside the pipeline reads it — it exists only to feed the
-  reducer. So it is <strong>as many bands as the reduction needs</strong>, and your scorer declares
+  reducer. So it is <strong>as many bands as the reduction needs</strong>, and your scorer names
   them.</p>
 </div>
 
 <pre><code><span class="k">class</span> MinViewZenith:
     capability = <span class="k">"streaming"</span>
     required_roles = (<span class="k">"geometry"</span>, <span class="k">"mineral"</span>)
-    outputs = (
-        BandSpec(<span class="k">"mineral_id"</span>,  <span class="k">"uint16"</span>,  <span class="k">"class from the winning observation"</span>),
-        BandSpec(<span class="k">"band_depth"</span>,  <span class="k">"float32"</span>, <span class="k">"depth from the winning observation"</span>),
-        BandSpec(<span class="k">"view_zenith"</span>, <span class="k">"float32"</span>, <span class="k">"geometry of the winner"</span>),
-        BandSpec(<span class="k">"acquired"</span>,    <span class="k">"int64"</span>,   <span class="k">"acquisition time of the winner"</span>),
-    )
+    carry = (<span class="k">"mineral_id"</span>, <span class="k">"band_depth"</span>, <span class="k">"view_zenith"</span>)
 
     <span class="k">def</span> score(self, obs, aux):
         <span class="k">return</span> -obs[<span class="k">"view_zenith"</span>]</code></pre>
 
-<p>Declaring a band is enough — by default each one is taken from the winning observation by alias,
-so a scorer that only wants carry-forward writes no extra code. Override <code>emit()</code> when a
-band is derived rather than passed through:</p>
-
-<pre><code>    <span class="k">def</span> emit(self, obs, aux):
-        <span class="c"># per-observation values; the framework keeps the winner's row</span>
-        <span class="k">return</span> {
-            <span class="k">"mineral_id"</span>:  obs[<span class="k">"mineral_id"</span>],
-            <span class="k">"band_depth"</span>:  obs[<span class="k">"band_depth"</span>],
-            <span class="k">"view_zenith"</span>: obs[<span class="k">"view_zenith"</span>],
-            <span class="k">"acquired"</span>:    np.full(obs.shape, obs.granule.datetime.timestamp()),
-        }</code></pre>
-
-<p>Two bands arrive without being asked for:</p>
+<p>Each name in <code>carry</code> is an alias resolved against the <em>winning</em> observation and
+copied into the snapshot. Dtype and description come from the source band, so you do not declare
+them twice. Two more bands arrive without being asked for:</p>
 
 <div class="tw">
 <table>
@@ -248,12 +232,12 @@ band is derived rather than passed through:</p>
 <h4 id="snapshot-cost">What it costs</h4>
 
 <p>Less than you would expect. In streaming mode the framework holds the running best score plus the
-emitted bands of the current best, so memory is <strong>proportional to band count, not observation
+carried bands of the current best, so memory is <strong>proportional to band count, not observation
 count</strong> — a wide snapshot does not reintroduce the memory profile blocks exist to avoid.</p>
 
-<p>Storage is not free though. These are cached artifacts with a retention policy, so declare what
-the reducer will actually use. And <code>outputs</code> is part of the snapshot cache key: changing
-the schema invalidates the snapshots, as it should.</p>
+<p>Storage is not free though. These are cached artifacts with a retention policy, so carry what the
+reducer will actually use. <code>carry</code> is part of the snapshot cache key: changing the set
+invalidates the snapshots, as it should.</p>
 
 <h4 id="snapshot-useful">Bands worth carrying</h4>
 
@@ -261,18 +245,25 @@ the schema invalidates the snapshots, as it should.</p>
 <table>
 <thead><tr><th>Band</th><th>Lets the reducer</th></tr></thead>
 <tbody>
-<tr><td><code>runner_up_score</code></td><td>Weight by <strong>margin</strong> — how decisively this epoch's winner beat the alternative. An epoch that barely chose is weaker evidence than one that chose clearly.</td></tr>
-<tr><td><code>acquired</code></td><td>Weight by recency, or resolve ties by time without a second pass</td></tr>
-<tr><td><code>source_granule</code></td><td>Trace an output pixel back to the granule behind it</td></tr>
-<tr><td>Uncertainty from the product</td><td>Inverse-variance weight the continuous bands</td></tr>
-<tr><td>Per-candidate evidence</td><td>Aggregate evidence across epochs and classify the aggregate, instead of voting on labels</td></tr>
+<tr><td>Class and continuous bands from the product</td><td>Reduce them, including <a href="#conditional">class-conditionally</a></td></tr>
+<tr><td>Geometry — view zenith, solar zenith</td><td>Weight or filter by the conditions the winner was acquired under</td></tr>
+<tr><td>Uncertainty, where the product ships one</td><td>Inverse-variance weight the continuous bands</td></tr>
 </tbody>
 </table>
 </div>
 
-<p>That last row is the one to decide early. A reducer cannot recover per-candidate evidence from a
-snapshot that only stored the winning label, so <strong>classify-last is a choice about what your
-scorer emits</strong>, made when the scorer is written — not something the reducer can add later.</p>
+<div class="note">
+  <span class="label"><span class="chip chip-open">planned</span> Derived bands — not in v1</span>
+  <p><code>carry</code> copies bands that already exist. A band the scorer <em>computes</em> — a
+  runner-up margin, per-candidate evidence, a broadcast acquisition time — is a planned enhancement
+  (an <code>outputs</code> declaration plus an <code>emit()</code> method) and is
+  <strong>not implemented</strong>.</p>
+  <p>It was deferred on purpose: several of the motivating bands (<code>source_granule</code>,
+  <code>acquired</code>, <code>runner_up_score</code>) are things the selection loop already knows
+  and may belong as framework built-ins rather than plugin output, which would leave the derived
+  form a much smaller job. See <a href="../specs/04-cost-functions.md">spec 04</a> and
+  <a href="../status.html#planned">Status</a>.</p>
+</div>
 
 <h2 id="pixel-mask">PixelMask</h2>
 
@@ -525,11 +516,14 @@ candidate class and classify the aggregate:</p>
 
 <pre><code>per-epoch depth for each candidate  ──▶  median depth per candidate  ──▶  argmax  ──▶  class</code></pre>
 
-<p>This needs your <code>Scorer</code> to declare per-candidate evidence among its
-<a href="#snapshot-schema">snapshot outputs</a> rather than only the winning label, so it is a
-decision about what the snapshot contains, not just about the reducer. The contract is the same
-either way — which is the point of the split — but you cannot bolt it on afterwards if the snapshot
-only ever stored one label.</p>
+<p>This needs the snapshot to hold per-candidate evidence rather than only the winning label,
+which is a decision about what the <code>Scorer</code> emits — not something a reducer can add
+later. <strong>It is not expressible in v1:</strong> <code>carry</code> copies existing bands, and
+per-candidate evidence has to be computed. See
+<a href="#snapshot-schema">what the snapshot carries</a>.</p>
+
+<p>Worth knowing now rather than later, because reaching it means adding derived outputs and
+<em>reprocessing snapshots</em>, not merely writing a new reducer.</p>
 
 <p>Worth knowing the limit: the upstream products are already binarised, so some information is gone
 before Stratum sees anything. Reducing continuously recovers what survived; it does not recover what

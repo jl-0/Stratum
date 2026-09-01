@@ -298,8 +298,9 @@ class BandStack:
 
 ### Snapshot schema
 
-`SnapshotStack.__getitem__` resolves any band the `Scorer` declared in `outputs`
+`SnapshotStack.__getitem__` resolves any band the `Scorer` named in `carry`
 ([04 §4](04-cost-functions.md)), plus `score` and `valid`, which the framework always adds.
+Scorer-*computed* bands are a planned enhancement, not in v1 — see the same section.
 
 A snapshot is an **internal artifact** — nothing renders it and nothing outside the pipeline reads
 it — so its width is a design choice rather than a product constraint. Carrying geometry,

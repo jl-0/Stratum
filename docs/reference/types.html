@@ -233,11 +233,11 @@ Filters take an explicit <code>on_missing</code> policy rather than guessing.</p
     <span class="k">def</span> __getitem__(self, band: str) -&gt; np.ndarray:   <span class="c"># (H, W)</span>
     specs: Sequence[BandSpec]</code></pre>
 
-<p><code>snaps[...]</code> resolves any band the <code>Scorer</code> declared in its
-<code>outputs</code>. A snapshot is an internal artifact rather than a rendered product, so it can
-be as wide as the reduction needs — carried-forward role bands, geometry, acquisition time, margin,
-per-candidate evidence. See <a href="../guide/plugins.html#snapshot-schema">what the snapshot
-carries</a>.</p>
+<p><code>snaps[...]</code> resolves any band the <code>Scorer</code> named in
+<code>carry</code>, plus <code>score</code> and <code>valid</code>. A snapshot is an internal
+artifact rather than a rendered product, so it can be as wide as the reduction needs. Scorer-computed
+bands are <a href="../status.html#planned">planned, not in v1</a>. See
+<a href="../guide/plugins.html#snapshot-schema">what the snapshot carries</a>.</p>
 
 <p>Check <code>snaps.valid</code> rather than testing values against a sentinel. An epoch with no
 observation over a pixel must not count toward an agreement fraction, and
