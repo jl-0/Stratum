@@ -13,13 +13,17 @@ described it.
 | Concern | Component | Runs | Talks to |
 |---|---|---|---|
 | **Discovery** — what granules exist | `GranuleSource` | Index build, a periodic job | A live catalogue: CMR, STAC, a filesystem |
-| **Access** — a URI becomes readable bytes | `AssetStore` | Every worker | Object storage, a credential endpoint |
+| **Access** — a URI becomes readable bytes | `AssetStore` | Every worker, on demand | Object storage, a credential endpoint |
 | **Read** — bytes become arrays | `GranuleReader` | Every worker | Nothing external |
 
 > **A run never queries a catalogue.** Discovery happens ahead of time and lands in the index; a
 > run reads the frozen index and nothing else ([02 §6](02-granule-index.md)). That is not an
 > optimisation. It is what makes a run reproducible, and it is what stops 4,000 concurrent workers
 > rate-limiting a public API at the worst possible moment.
+>
+> **This applies to metadata, not to pixels.** Workers pull granule data straight from S3 when they
+> need it. What is settled ahead of time is *which* granules and *where* they live — the URL list —
+> not the bytes. See §4.
 
 The seam that matters most is between **access** and **read**. Fusing them is the normal mistake:
 a reader that takes a path and opens it can only ever read local files, which is exactly the
@@ -172,7 +176,7 @@ precisely the case the registry exists for, and precisely the case filename disp
 ```python
 class AssetStore:
     def open(self, uri: str, *, etag: str | None = None) -> AssetHandle
-    def stage(self, uri: str) -> Path                       # whole-file copy to scratch
+    def stage(self, uri: str) -> Path                       # this worker, this file, now
     def credentials_for(self, uri: str) -> Credentials
 ```
 
@@ -180,12 +184,46 @@ Schemes: `file://`, `s3://`, and `https://` behind Earthdata Login.
 
 | Mode | How | When |
 |---|---|---|
-| **Stage-in** | Copy the whole asset to local scratch, hand back a path | Default. Works with any code that takes a filename, including unmodified `SpectralUtil` |
+| **Stage-in** | The worker copies that one asset to its own scratch and gets a path back | Default. Works with any code that takes a filename, including unmodified `SpectralUtil` |
 | **Stream** | `/vsis3/` or fsspec; reads become HTTP range requests | Once the reader supports windowed reads. A block touching 170 × 170 of 1664 × 1242 fetches ~1% of the file |
 
 The sequencing is deliberate and already the plan in [03 §4](03-regrid-glt.md): **stage-in first**,
 because it works immediately against code that exists; **streaming second**, because that is where
 the cost is. Both satisfy the same `AssetHandle`, so a reader does not change when the mode does.
+
+### When the fetch happens
+
+**Lazily, inside the worker, on first touch.** Nothing is copied before a run starts.
+
+```
+plan time      index query        -> URLs, footprints, times, vintages   (METADATA ONLY)
+                                     frozen into the run index
+worker starts  nothing fetched
+first block    assets.open(uri)   -> this worker pulls this one asset, now
+later blocks   same worker        -> asset cache hit; no second fetch
+```
+
+> **"Stage-in" is per-asset and just-in-time, not a pre-run copy.** It means *this worker downloads
+> this one granule to its own scratch at the moment it needs it*. There is no bulk copy of the
+> archive into our bucket, no pre-run download pass, and no requirement that anything be resident
+> before `stratum run` is invoked. A worker that never touches a granule never fetches it, and a
+> granule that no block reaches is never downloaded at all.
+
+The line is **metadata versus pixels**, and the two have opposite economics:
+
+| | Resolved ahead of the run | Fetched in the worker, on demand |
+|---|---|---|
+| What | Which granules qualify, their asset URLs, footprints, acquisition times, vintages | The pixels |
+| Size | Kilobytes | Gigabytes |
+| Why there | One query, frozen, so the run is reproducible and CMR sees one caller | Per-block, in thousands of workers, and most of it is never touched |
+
+A CMR query is cheap, returns URLs, and *must* be frozen or the run reproduces nothing — so it
+happens once, ahead of time. Pixel data is large, sparse in access, and needed concurrently
+everywhere — so it is pulled on demand and never centralised.
+
+> Granule pixels are the one thing that is **never** prefetched. Aux rasters are the exception in
+> the other direction: they are small, static, and touched by every block, so they are warped during
+> planning ([05 §5](05-ancillary-data.md)).
 
 ### The asset cache is not the artifact cache
 

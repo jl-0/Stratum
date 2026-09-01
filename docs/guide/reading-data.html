@@ -44,6 +44,10 @@ because they run in different places, at different times, with different failure
   <p>Discovery happens ahead of time and lands in an index. A run reads a frozen copy of that index
   and nothing else. That is what lets a run be reproduced months later &mdash; and it is what stops
   several thousand workers hammering a public API the moment your fan-out gets interesting.</p>
+  <p><strong>This is about metadata, not pixels.</strong> Workers pull granule data straight from
+  S3 when they need it. What is settled ahead of time is <em>which</em> granules and <em>where</em>
+  they live &mdash; the URL list &mdash; not the bytes. See
+  <a href="#when">When the bytes actually move</a>.</p>
 </div>
 
 <p>The seam that matters most is between <em>access</em> and <em>read</em>. A reader that takes a
@@ -272,7 +276,7 @@ modes behind one interface:</p>
 <table>
 <thead><tr><th>Mode</th><th>What happens</th><th>When</th></tr></thead>
 <tbody>
-<tr><td><strong>Stage in</strong></td><td>The whole asset is copied to local scratch and the reader gets a path</td><td>The default. Works with any code that expects a filename</td></tr>
+<tr><td><strong>Stage in</strong></td><td>The worker copies that one asset to its own scratch and gets a path back</td><td>The default. Works with any code that expects a filename</td></tr>
 <tr><td><strong>Stream</strong></td><td>Reads become HTTP range requests; only the touched bytes move</td><td>Once a reader supports windowed reads &mdash; roughly 1% of a file for one block</td></tr>
 </tbody>
 </table>
@@ -280,6 +284,45 @@ modes behind one interface:</p>
 
 <p>Readers do not change when the mode does. Staging is what works today against existing code;
 streaming is where the cost goes.</p>
+
+<h3 id="when">When the bytes actually move</h3>
+
+<p><strong>Lazily, inside the worker, on first touch.</strong> Nothing is copied before a run
+starts.</p>
+
+<pre><code>plan time      index query        <span class="c">-&gt; URLs, footprints, times, vintages</span>
+                                  <span class="c">   METADATA ONLY, frozen into the run index</span>
+worker starts  <span class="c">nothing fetched</span>
+first block    assets.open(uri)   <span class="c">-&gt; this worker pulls this one asset, now</span>
+later blocks   <span class="c">same worker        -&gt; asset cache hit; no second fetch</span></code></pre>
+
+<div class="key">
+  <span class="label">&ldquo;Stage in&rdquo; is just-in-time, not a pre-run copy</span>
+  <p>It means <em>this worker downloads this one granule to its own scratch at the moment it needs
+  it</em>. There is no bulk copy of the archive into your bucket, no pre-run download pass, and
+  nothing has to be resident before you invoke <code>stratum run</code>. A worker that never touches
+  a granule never fetches it, and a granule no block reaches is never downloaded at all.</p>
+</div>
+
+<p>The line is <strong>metadata versus pixels</strong>, and the two have opposite economics:</p>
+
+<div class="tw">
+<table>
+<thead><tr><th></th><th>Resolved ahead of the run</th><th>Fetched in the worker, on demand</th></tr></thead>
+<tbody>
+<tr><td>What</td><td>Which granules qualify, their asset URLs, footprints, times, vintages</td><td>The pixels</td></tr>
+<tr><td>Size</td><td>Kilobytes</td><td>Gigabytes</td></tr>
+<tr><td>Why there</td><td>One query, frozen, so the run reproduces and the archive sees one caller</td><td>Per-block, in thousands of workers &mdash; and most of it is never touched</td></tr>
+</tbody>
+</table>
+</div>
+
+<p>A catalogue query is cheap, returns URLs, and has to be frozen or a rerun reproduces nothing
+&mdash; so it happens once, ahead of time. Pixel data is large, sparsely accessed, and needed
+concurrently everywhere &mdash; so it is pulled on demand and never centralised.</p>
+
+<p>Granule pixels are the one thing never prefetched. Ancillary rasters go the other way: they are
+small, static and touched by every block, so they are warped during planning.</p>
 
 <h3 id="credentials">Credentials</h3>
 
