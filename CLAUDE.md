@@ -178,14 +178,25 @@ like four docs sites.
 
 ### The wordmark
 
-The mark beside "Stratum" is a quartz point drawn as three faces, defined **once** as
-`--crystal` in `stratum.css` and applied to `.glyph` with `mask`. The gaps between the faces are
-what read as facet edges, which is why the artwork can be a single flat colour — that in turn is
-what lets it be a mask and inherit `--accent` in both themes with no second copy.
+The mark beside "Stratum" is an eight-point compass rose with an open centre, defined **once** as
+`--compass` in `stratum.css` and applied to `.glyph` with `mask`. It is a single flat colour, which
+is what lets it be a mask and inherit `--accent` in both themes with no second copy.
 
-Do not inline SVG into the pages, and do not add a per-theme variant. If you redraw it, check it
-at 18px (its real size) as well as large; the first attempt looked like a city skyline at small
-sizes because the termination was too shallow and the prism too wide.
+Do not inline SVG into the pages, and do not add a per-theme variant. If you redraw it, **check it
+at 19px** — its real size — not just large. Two earlier attempts failed there: a quartz crystal
+that read as a city skyline, and a thin-armed rose that vanished. Render candidates side by side at
+140/64/32/19px before choosing; a scratch preview page under `docs/` works, but delete it before
+committing.
+
+### Name a term where it is first used
+
+`halo` is the API field name on `Scorer`, `Reducer` and `PixelMask`, so the docs use that word and
+not a synonym — a doc term that disagrees with the code is worse than an unfamiliar one. What went
+wrong once was **ordering**: "Halo overhead" appeared as a row in the block-size table one section
+before halos were defined.
+
+The rule: if a term appears in a table or list, it is defined before that table, or glossed inside
+it. Prefer reordering the sections over inventing a friendlier synonym.
 
 ### Assume no GIS background — but do not let it take over the page
 

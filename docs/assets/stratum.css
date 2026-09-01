@@ -24,9 +24,10 @@
   --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
   --sidebar: 268px;
 
-  /* Wordmark glyph: a quartz point in three faces. Single-colour so it can
-     be a CSS mask and pick up --accent in either theme. */
-  --crystal: url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2024%2024'%3E%3Cpath%20d='M6%2011%20L9.6%205.12%20V22.4%20H6.9%20Z'/%3E%3Cpath%20d='M10.15%204.22%20L12%201.2%20L13.85%204.22%20V22.4%20H10.15%20Z'/%3E%3Cpath%20d='M14.4%205.12%20L18%2011%20L17.1%2022.4%20H14.4%20Z'/%3E%3C/svg%3E");
+  /* Wordmark glyph: an eight-point compass rose with an open centre.
+     Single flat colour so it works as a CSS mask and picks up --accent
+     in either theme. Checked down to 18px - see CLAUDE.md. */
+  --compass: url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2024%2024'%20fill-rule='evenodd'%3E%3Cpath%20d='M12.00%201.20%20L13.34%208.77%20L16.81%207.19%20L15.23%2010.66%20L22.80%2012.00%20L15.23%2013.34%20L16.81%2016.81%20L13.34%2015.23%20L12.00%2022.80%20L10.66%2015.23%20L7.19%2016.81%20L8.77%2013.34%20L1.20%2012.00%20L8.77%2010.66%20L7.19%207.19%20L10.66%208.77%20ZM12%2010.3%20A1.7%201.7%200%201%200%2012%2013.7%20A1.7%201.7%200%201%200%2012%2010.3%20Z'/%3E%3C/svg%3E");
 }
 
 @media (prefers-color-scheme: dark) {
@@ -87,10 +88,10 @@ a:hover { text-decoration: underline; }
 }
 .masthead .wordmark:hover { text-decoration: none; }
 .masthead .wordmark .glyph {
-  display: inline-block; width: 18px; height: 18px; flex: none;
+  display: inline-block; width: 19px; height: 19px; flex: none;
   background: var(--accent);
-  -webkit-mask: var(--crystal) center / contain no-repeat;
-  mask: var(--crystal) center / contain no-repeat;
+  -webkit-mask: var(--compass) center / contain no-repeat;
+  mask: var(--compass) center / contain no-repeat;
 }
 .masthead .stage {
   font-size: .72rem; text-transform: uppercase; letter-spacing: .07em;

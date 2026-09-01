@@ -180,28 +180,13 @@ degrees confused;</li>
 <p>Tiles need not cover the world. An area of interest resolves to the set of tiles intersecting
 it, so a global EMIT run should clip to the coverage band rather than iterate dead cells.</p>
 
-<h3 id="block-size">Choosing a block size</h3>
-
-<div class="tw">
-<table>
-<thead><tr><th>Pressure</th><th>Direction</th></tr></thead>
-<tbody>
-<tr><td>The materialized observation stack must fit the worker</td><td>smaller</td></tr>
-<tr><td>Halo overhead</td><td>larger</td></tr>
-<tr><td>Per-task fixed cost — cold start, credential fetch, index read</td><td>larger</td></tr>
-<tr><td>Parallelism and retry granularity</td><td>smaller</td></tr>
-<tr><td>Source chunk alignment — COG internal tiling is typically 512</td><td>align to it</td></tr>
-</tbody>
-</table>
-</div>
-
-<p>The default is <strong>512</strong>, aligned with typical COG internal tiling so windowed reads
-do not straddle chunks.</p>
-
 <h3 id="halos">Halos</h3>
 
-<p>Splitting a tile into blocks is only safe when each output cell depends on observations over
-that cell alone. Mode, median, percentile and count all qualify. Anything with spatial extent — a
+<p>A <strong>halo</strong> is a ring of extra pixels a block reads beyond its own edges, so that a
+calculation needing neighbouring pixels still has them at the block boundary.</p>
+
+<p>You need one because splitting a tile into blocks is only safe when each output cell depends on
+observations over that cell alone. Mode, median, percentile and count all qualify. Anything with spatial extent — a
 smoothing filter, a neighbourhood test — does not, and would produce visible seams at block
 boundaries.</p>
 
@@ -217,6 +202,24 @@ one-pixel halo costs 0.8% and a 32-pixel halo 13%.</p>
 <p>A plugin that genuinely needs the whole tile at once declares
 <code>capability = "tile"</code> instead. That gives up block parallelism and routes the work to
 Batch, but it is honest about the cost rather than silently wrong.</p>
+
+<h3 id="block-size">Choosing a block size</h3>
+
+<div class="tw">
+<table>
+<thead><tr><th>Pressure</th><th>Direction</th></tr></thead>
+<tbody>
+<tr><td>The materialized observation stack must fit the worker</td><td>smaller</td></tr>
+<tr><td>Halo overhead — every block re-reads its neighbours' edge pixels</td><td>larger</td></tr>
+<tr><td>Per-task fixed cost — cold start, credential fetch, index read</td><td>larger</td></tr>
+<tr><td>Parallelism and retry granularity</td><td>smaller</td></tr>
+<tr><td>Source chunk alignment — COG internal tiling is typically 512</td><td>align to it</td></tr>
+</tbody>
+</table>
+</div>
+
+<p>The default is <strong>512</strong>, aligned with typical COG internal tiling so windowed reads
+do not straddle chunks.</p>
 
 <h2 id="epoch">Epoch and cadence</h2>
 
