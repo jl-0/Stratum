@@ -1,0 +1,184 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Caching &amp; iteration · Stratum</title>
+<link rel="stylesheet" href="../assets/stratum.css">
+</head>
+<body data-page="design/caching" data-root="../">
+<a class="skip" href="#content">Skip to content</a>
+<header class="masthead">
+  <a class="wordmark" href="../index.html"><span class="glyph"></span>Stratum</a>
+  <span class="stage">Design stage</span>
+  <span class="spacer"></span>
+  <span class="repo">EMIT Critical Minerals L3</span>
+</header>
+<div class="layout">
+<nav id="sidebar" aria-label="Documentation"></nav>
+<main id="content">
+<div class="prose">
+
+<h1>Caching &amp; iteration</h1>
+<p class="lede">The property that decides whether people actually iterate on a cost function, or
+just accept the first one that runs.</p>
+
+<h2 id="asymmetry">The asymmetry</h2>
+
+<div class="key">
+  <span class="label">Why this works at all</span>
+  <p><strong>Stage 2 is expensive and never changes. Stage 3 is cheap and changes hourly.</strong>
+  V002 welds them together, so changing a selection criterion rebuilds all the geometry.
+  Separating them deliberately is what turns &ldquo;try a different cost function&rdquo; from a
+  full rebuild into a re-read.</p>
+</div>
+
+<p>The KD-tree query dominates regrid cost &mdash; roughly 1.6 M granule points against 11 M grid
+cells for a 1&deg; tile at 0.0003&deg;. That work depends on the granule, the grid definition and
+the mask spec. It depends on <em>nothing</em> about the science. So it is computed once and kept.</p>
+
+<p>Scoring, by contrast, is a vectorized pass over a block that is already in memory. It is close
+to free. The design's job is to make sure that changing the cheap thing does not drag the
+expensive thing along with it.</p>
+
+<h2 id="keys">Cache keys</h2>
+
+<p>Every artifact is written to a key derived from a hash of the inputs that <strong>actually
+determine it</strong> &mdash; and nothing else. Get that right and two things follow for free:
+re-running skips completed work, and changing one thing invalidates exactly what depended on it.</p>
+
+<div class="tw">
+<table>
+<thead><tr><th>Artifact</th><th>Key derived from</th><th>New scorer<br>invalidates?</th></tr></thead>
+<tbody>
+<tr><td><strong>GLT</strong><br><span class="chip chip-obs">granule &times; tile</span></td><td><code>granule_id</code>, <code>grid_def</code>, <code>max_distance</code>, <code>regrid_algo_version</code></td><td><strong>No</strong></td></tr>
+<tr><td><strong>Masked observation</strong><br><span class="chip chip-obs">granule &times; tile &times; block</span></td><td><code>glt_key</code>, <code>asset_roles</code>, <code>pixel_mask_spec</code>, <code>mask_plugin_version</code></td><td>No</td></tr>
+<tr><td><strong>Aux warp</strong><br><span class="chip chip-obs">source &times; tile</span></td><td><code>source_uri</code>, <code>source_etag</code>, <code>grid_def</code>, <code>resampling</code></td><td>No</td></tr>
+<tr><td><strong>Epoch snapshot</strong><br><span class="chip chip-obs">tile &times; epoch &times; block</span></td><td><code>obs_keys[]</code>, <code>scorer_ref</code>, <code>scorer_version</code>, <code>scorer_params</code>, <code>epoch_bounds</code></td><td><strong>Yes</strong></td></tr>
+<tr><td><strong>Product block</strong><br><span class="chip chip-obs">tile &times; block</span></td><td><code>snapshot_keys[]</code>, <code>reducer_ref</code>, <code>reducer_version</code>, <code>reducer_params</code></td><td>Yes</td></tr>
+<tr><td><strong>Rendered image</strong><br><span class="chip chip-obs">tile</span></td><td><code>product_keys[]</code>, <code>mapper_ref</code>, <code>mapper_version</code>, <code>mapper_params</code></td><td>No</td></tr>
+</tbody>
+</table>
+</div>
+
+<p>Read down the right-hand column &mdash; that is the entire iteration story:</p>
+
+<div class="tw">
+<table>
+<thead><tr><th>Change</th><th>Re-runs</th><th>Re-uses</th></tr></thead>
+<tbody>
+<tr><td>Scorer</td><td>stages 3&ndash;5</td><td>Every cached GLT and masked observation</td></tr>
+<tr><td>Reducer only</td><td>stages 4&ndash;5</td><td>Every epoch snapshot</td></tr>
+<tr><td>Mapper only</td><td>rendering</td><td>The published data product &mdash; no pipeline run at all</td></tr>
+<tr><td>Mask spec</td><td>stages 2b&ndash;5</td><td>The GLTs &mdash; geometry does not depend on cloudiness</td></tr>
+</tbody>
+</table>
+</div>
+
+<p>The first run over new ground is expensive. The twentieth is not.</p>
+
+<h3 id="construction">Key construction</h3>
+
+<pre><code>{cache_prefix}/{artifact_type}/{grid_id}/{tile}/{sha256(canonical_inputs)[:16]}.tif</code></pre>
+
+<p><code>canonical_inputs</code> is a JSON document with sorted keys, explicit types, and no
+timestamps or environment-varying paths. It is stored <strong>beside the artifact</strong> as
+<code>.inputs.json</code>, so a cache entry can always be explained. That matters the first time
+two keys unexpectedly differ &mdash; and they will.</p>
+
+<h2 id="rules">Rules</h2>
+
+<div class="tw">
+<table>
+<thead><tr><th></th><th>Rule</th><th>Failure mode it prevents</th></tr></thead>
+<tbody>
+<tr><td class="num">1</td><td><strong>Only determining inputs go in the key.</strong></td><td>Extra fields cause spurious misses; a missing one causes silent staleness &mdash; much worse</td></tr>
+<tr><td class="num">2</td><td><strong>Version every algorithm.</strong> <code>regrid_algo_version</code> is bumped by hand when output changes.</td><td>A bug fix silently serves stale geometry forever</td></tr>
+<tr><td class="num">3</td><td><strong>Plugin versions are part of the key</strong> &mdash; wheel path <em>and</em> content hash.</td><td>A mutable S3 object at a stable URI masquerading as the same plugin</td></tr>
+<tr><td class="num">4</td><td><strong>Aux sources are keyed by content</strong>, via ETag or explicit version.</td><td>A DEM swapped in place under a stable URI &mdash; the classic silent-staleness bug</td></tr>
+<tr><td class="num">5</td><td><strong>Undeclared reads are refused.</strong></td><td>A plugin that quietly opens an undeclared raster produces a cache key that <em>lies</em></td></tr>
+<tr><td class="num">6</td><td><strong>Cache writes are atomic</strong> &mdash; temp key, then copy.</td><td>An interrupted Spot task leaving a truncated artifact that later reads as a hit</td></tr>
+</tbody>
+</table>
+</div>
+
+<p>Rule 5 is the one that looks like bureaucracy and is not. It is what makes the reproducibility
+guarantee in <a href="concepts.html#invariants">invariant 4</a> mean anything, and it is enforced
+by the accessor rejecting unknown aliases rather than by trusting plugin authors to remember.</p>
+
+<h2 id="sharing">What sharing buys</h2>
+
+<p>The GLT cache is keyed on <code>(granule, grid, mask)</code> with <strong>no run, project or
+AOI component</strong>. Two consequences, both good:</p>
+
+<ul>
+<li><strong>Across experiments.</strong> Five competing scorers over one zone share one GLT cache.
+The first pays for geometry; the rest skip stages 1&ndash;2 entirely. Comparing cost functions
+becomes the cheapest thing the system does &mdash; which is precisely the behaviour we want to
+encourage.</li>
+<li><strong>Across projects.</strong> If AMD and Critical Minerals adopt the same grid, the second
+project&rsquo;s first run is nearly free over ground the first has already touched. Deriving tile
+bounds from the grid rather than from data extents is what makes a GLT byte-identical between
+them.</li>
+</ul>
+
+<pre><code>s3://{bucket}/cache/...          <span class="c">shared, content-addressed, long-lived</span>
+s3://{bucket}/runs/{run_id}/...  <span class="c">run-scoped: frozen index, work lists, reports</span>
+s3://{bucket}/products/{run_id}/ <span class="c">delivered outputs</span></code></pre>
+
+<h2 id="lifecycle">Lifecycle</h2>
+
+<div class="tw">
+<table>
+<thead><tr><th>Class</th><th>Policy</th><th>Why</th></tr></thead>
+<tbody>
+<tr><td>GLT</td><td>keep indefinitely</td><td>Expensive, immutable, shared, and small relative to the imagery</td></tr>
+<tr><td>Masked observations</td><td>expire ~30 days</td><td>Large; cheap to rebuild from a cached GLT</td></tr>
+<tr><td>Epoch snapshots</td><td>expire ~30 days</td><td>Reproducible, and invalidated by scorer changes anyway</td></tr>
+<tr><td>Product blocks</td><td>keep until the tile publishes</td><td>Superseded by the stitched product</td></tr>
+<tr><td>Frozen index, reports, provenance</td><td>keep indefinitely</td><td>Tiny, and the entire basis of reproducibility</td></tr>
+</tbody>
+</table>
+</div>
+
+<h2 id="ops">Operations</h2>
+
+<pre><code>stratum cache stats  --run &lt;id&gt;     <span class="c"># hit rate by type; what a rerun would cost</span>
+stratum cache explain &lt;key&gt;         <span class="c"># show .inputs.json and what produced it</span>
+stratum cache diff &lt;key-a&gt; &lt;key-b&gt;  <span class="c"># which input differs</span>
+stratum cache gc --dry-run          <span class="c"># unreferenced entries past lifecycle</span></code></pre>
+
+<p><code>cache diff</code> earns its place. The common confusion is a miss nobody expected, and
+the answer is always one field in <code>canonical_inputs</code>.</p>
+
+<h2 id="precedent">This is already done by hand</h2>
+
+<p><code>pipeline.sh</code> carries <code>steps=([query]=1 [apply-glt]=1 [classify]=1
+[stack]=1)</code> so an operator can skip work they believe is still good. That is caching with a
+human as the invalidation logic. Content addressing makes the same judgement automatic and
+correct, rather than depending on someone remembering what changed.</p>
+
+<p>And it removes a specific cost: <code>pipeline.sh</code> unconditionally <code>rm -r</code>s
+<code>glt/</code> and <code>applied/</code> on every run, so AMD has <strong>no resume at
+all</strong>.</p>
+
+<h2 id="tests">The test that guards this</h2>
+
+<div class="key">
+  <span class="label">Non-negotiable from day one</span>
+  <p><strong>Cache-key sensitivity</strong> &mdash; a scorer change invalidates snapshots and does
+  <em>not</em> invalidate GLTs. This is the property the entire iteration story rests on, and it is
+  the kind of thing that breaks quietly during a refactor. It is a test, not a convention.</p>
+</div>
+
+</div>
+<nav class="pager" aria-label="Pagination"></nav>
+<footer class="site">
+  Source: <a href="../specs/06-caching.md"><code>specs/06-caching.md</code></a>,
+  <a href="../specs/05-ancillary-data.md"><code>05-ancillary-data.md</code></a>
+</footer>
+</main>
+</div>
+<script src="../assets/stratum.js"></script>
+</body>
+</html>

@@ -1,0 +1,136 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Decision records · Stratum</title>
+<link rel="stylesheet" href="../assets/stratum.css">
+</head>
+<body data-page="decisions/index" data-root="../">
+<a class="skip" href="#content">Skip to content</a>
+<header class="masthead">
+  <a class="wordmark" href="../index.html"><span class="glyph"></span>Stratum</a>
+  <span class="stage">Design stage</span>
+  <span class="spacer"></span>
+  <span class="repo">EMIT Critical Minerals L3</span>
+</header>
+<div class="layout">
+<nav id="sidebar" aria-label="Documentation"></nav>
+<main id="content">
+<div class="prose">
+
+<h1>Decision records</h1>
+<p class="lede">Choices that were made once, with what they were made over and what would make us
+revisit them.</p>
+
+<div class="note">
+  <span class="label">Convention</span>
+  <p>A new decision that <em>changes</em> an ADR gets a new ADR superseding it, never an edit.
+  Edits are for corrections. The full records live in
+  <a href="../decisions/"><code>docs/decisions/</code></a>; this page is the digest.</p>
+</div>
+
+<h2 id="adr-0001">ADR-0001 &mdash; Technology stack <span class="chip chip-draft">proposed</span></h2>
+
+<p><a href="ADR-0001-tech-stack.md">Full record</a> &middot; 2026-08-28</p>
+
+<div class="tw">
+<table>
+<thead><tr><th>Concern</th><th>Choice</th><th>Chosen over</th></tr></thead>
+<tbody>
+<tr><td>Language</td><td>Python 3.11</td><td>3.12+ &mdash; geospatial wheels lag, and we inherit GDAL from conda-forge</td></tr>
+<tr><td>Environment</td><td>pixi / conda-forge</td><td>pip wheels (fragile GDAL), Poetry/uv alone (same problem)</td></tr>
+<tr><td>Raster IO</td><td>rasterio + rioxarray; <code>osgeo.gdal</code> only at the SpectralUtil boundary</td><td>Raw GDAL throughout &mdash; far worse API for windowed reads and <code>/vsis3/</code></td></tr>
+<tr><td>Data model</td><td>xarray; numpy inside plugins</td><td><strong>Not dask</strong> &mdash; block decomposition is already our parallelism model; dask inside a worker is a second, competing scheduler</td></tr>
+<tr><td>Granule index</td><td>GeoParquet + DuckDB</td><td>pgSTAC (a service to operate; we need a <em>frozen</em> snapshot, not a live catalogue), keeping the GeoJSON (unbounded growth, no index)</td></tr>
+<tr><td>Configuration</td><td>Pydantic v2 + ordered patch merge</td><td>mlky &mdash; AMD uses it and James knows it, but we need typed validation and JSON Schema more than interpolation</td></tr>
+<tr><td>Orchestration</td><td>Step Functions Distributed Map + Lambda + Batch on Spot</td><td>EMR/Spark (wrong shape &mdash; embarrassingly parallel, no shuffle), plain EC2 fleet (rebuilds Batch), Airflow/Dagster (a service to operate)</td></tr>
+<tr><td>Packaging</td><td>Docker &rarr; ECR, one image with two entrypoints</td><td>Zip layers &mdash; 250 MB cap, exceeded by GDAL + netCDF4 + scipy + numpy alone</td></tr>
+<tr><td>IaC</td><td>Terraform</td><td>&mdash;</td></tr>
+<tr><td>CLI</td><td>click</td><td>Typer &mdash; nicer, but consistency with SpectralUtil and tetracorder-lite is worth more</td></tr>
+<tr><td>Tests</td><td>pytest + two mandatory fixtures</td><td>&mdash;</td></tr>
+</tbody>
+</table>
+</div>
+
+<p>Most of these are consistency choices rather than novel ones: a developer who can build
+<code>SpectralUtil</code> or <code>tetracorder-lite</code> can build this. The two that are genuinely
+load-bearing are <strong>GeoParquet + DuckDB</strong> (which is what removes the dependency on a
+viewer service being up) and <strong>container images over layers</strong> (which is not a
+preference &mdash; layers physically cannot hold the dependency set).</p>
+
+<div class="key">
+  <span class="label">Two test fixtures are non-negotiable</span>
+  <p><strong>Seam equivalence</strong> &mdash; block-wise output bit-identical to tile-wise.
+  <strong>Cache-key sensitivity</strong> &mdash; a scorer change invalidates snapshots and does not
+  invalidate GLTs. They guard invariants that fail <em>silently</em>, which is exactly the class of
+  bug a test has to catch because a human will not.</p>
+</div>
+
+<h2 id="adr-0002">ADR-0002 &mdash; The Terraform / manifest boundary <span class="chip chip-draft">proposed</span></h2>
+
+<p><a href="ADR-0002-terraform-manifest-boundary.md">Full record</a> &middot; 2026-08-28</p>
+
+<p><strong>Decision: Terraform owns the platform. The manifest owns the science. Neither owns the
+code.</strong></p>
+
+<p>The failure mode being avoided is well documented across data platforms: science parameters leak
+into HCL, and then changing a cloud-fraction threshold requires an infrastructure pull request, a
+plan review and an apply. The people the platform exists for stop using it directly, and a
+platform-team bottleneck forms around parameter changes.</p>
+
+<p>The specific risk here is that the science is <em>expected</em> to change constantly. The whole
+design is optimized so that changing a cost function is cheap &mdash; if that change also requires
+<code>terraform apply</code>, the optimization is wasted.</p>
+
+<h3 id="corollaries">Corollaries</h3>
+
+<ol>
+<li><strong>A new experiment is a new manifest, not a new deployment.</strong> One deployment serves
+many concurrent runs, distinguished by <code>run_id</code> prefix and execution.</li>
+<li>Terraform contains <strong>no zone names, no dates, no thresholds, no mineral classes.</strong></li>
+<li>Resource <em>sizing</em> is a platform concern, but <em>which</em> resource a work item uses is a
+runtime routing decision from measured properties.</li>
+<li>A second Terraform deployment is justified only by a real boundary &mdash; a separate AWS account
+for delivered products versus experimentation, or a different region &mdash; never by an
+experiment.</li>
+</ol>
+
+<p><strong>Enforced by</strong> a CI check that greps Terraform for zone names, dates and mineral
+identifiers. Crude, but the leak is gradual and a tripwire catches it early.</p>
+
+<p>The honest cost: two configuration systems to learn, and some genuinely ambiguous cases. Is
+<code>block: 512</code> a platform tuning knob or a run parameter? It went in the manifest because it
+must be recorded in provenance and may need to vary per workload &mdash; accepting that most users
+will never touch it.</p>
+
+<h2 id="pending">Decisions not yet recorded</h2>
+
+<p>These are being made implicitly across the specs and should be promoted to ADRs before
+implementation hardens them.</p>
+
+<div class="tw">
+<table>
+<thead><tr><th>Question</th><th>Current leaning</th></tr></thead>
+<tbody>
+<tr><td>Per-granule GLT (AMD) or per-tile-epoch fused GLT (V002) as the default?</td><td>Per-granule &mdash; strictly more general; the fused form is an optimization the planner can choose when the scorer declares <code>streaming</code></td></tr>
+<tr><td>Should the GLT store <code>granule_id</code> directly rather than an index into a file list?</td><td>Unresolved. Indices are compact but make a GLT meaningless without its list &mdash; an unnecessary coupling</td></tr>
+<tr><td>Is <code>regrid_algo_version</code> manual, or derived from a hash of the module?</td><td>Manual is honest but forgettable; derived is automatic but churns on cosmetic edits</td></tr>
+<tr><td>Global GLT cache (one bucket per account) or per-deployment?</td><td>Global maximizes sharing but complicates lifecycle ownership and cost attribution</td></tr>
+<tr><td>Batch on Fargate or EC2?</td><td>Fargate is simpler and now supports Graviton Spot; EC2 gives better instance selection for memory-heavy reduces and local NVMe for staging</td></tr>
+<tr><td>Is <code>tile</code> capability worth supporting in v1?</td><td>Probably defer until something actually needs it</td></tr>
+</tbody>
+</table>
+</div>
+
+</div>
+<nav class="pager" aria-label="Pagination"></nav>
+<footer class="site">
+  Full records: <a href="ADR-0001-tech-stack.md">ADR-0001</a>,
+  <a href="ADR-0002-terraform-manifest-boundary.md">ADR-0002</a>
+</footer>
+</main>
+</div>
+<script src="../assets/stratum.js"></script>
+</body>
+</html>

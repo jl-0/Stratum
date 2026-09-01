@@ -38,7 +38,7 @@ Written by `Finalize`, immutable, kept indefinitely at
     "frozen_index": "s3://.../runs/cm-.../index.parquet",
     "frozen_index_hash": "sha256:...",
     "granule_count": 4127,
-    "reference_matrix": "v6.00a6",
+    "class_tables": {"mineral": "sha256:..."},
     "collections": {"EMITL2BMIN": "001", "EMITL2AMASK": "002"}
   },
 
@@ -104,7 +104,7 @@ legend.
 | `proj` | Grid, transform, shape |
 
 Also non-standard but necessary: links back to the frozen index and the provenance record, and the
-pinned reference-matrix version.
+fingerprint of every input class table the run resolved against.
 
 The class table appearing in the STAC item is what closes the loop on AMD's problem — the meaning
 of a colour travels with the product instead of living in a config on a cluster account.

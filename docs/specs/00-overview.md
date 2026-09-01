@@ -174,8 +174,9 @@ These hold across every stage, and violating any of them breaks something the de
    versions, same aux sources, same result.
 5. **Aux data must be declared** in the manifest. Undeclared reads produce cache keys that lie.
 6. **Data and rendering both ship.** Colour is never the only output.
-7. **Lumping resolves through stable IDs**, never positional indices. A Tetracorder version bump
-   must not silently reassign minerals.
+7. **Categorical classes resolve through attributes**, never positional indices. Products carry
+   their own class tables, and a vintage bump must not silently reassign classes. See
+   [11 §9](11-types.md).
 
 ---
 
@@ -193,4 +194,4 @@ These hold across every stage, and violating any of them breaks something the de
 | [08 — Execution](08-execution.md) | Step Functions, Batch, Lambda, routing, retries |
 | [09 — Run manifest](09-run-manifest.md) | Schema, composition, budget, validation |
 | [10 — Provenance](10-provenance.md) | STAC, run records, reproducibility |
-| [11 — Core types](11-types.md) | Every shared type, fill/nodata rules, mineral identity |
+| [11 — Core types](11-types.md) | Every shared type, fill/nodata rules, class tables |

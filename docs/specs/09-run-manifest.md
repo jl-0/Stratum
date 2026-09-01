@@ -49,10 +49,16 @@ time:
 
 inputs:
   index: s3://emit-l3/index/emit-granules.parquet
-  reference_matrix: tetrapy/data/v6.00a6.csv@v6.00a6    # pinned; see §5
   roles:
     geometry:       {collection: EMITL1BOBS,  var: obs}
-    mineral:        {collection: EMITL2BMIN,  var: group_1_mineral_id}
+    mineral:
+      collection: EMITL2BMIN
+      var: group_1_mineral_id
+      class_table:                        # where this product keeps its own table
+        source: embedded
+        path: /mineral_metadata
+        key: index
+        attributes: [name, record, library, group, url]
     mineral_uncert: {collection: EMITL2BMIN,  var: group_1_band_depth_unc}
     mask:           {collection: EMITL2AMASK, var: mask}
     frcov:          {collection: EMITL2BFRCOV, var: soil}   # already orthorectified
@@ -151,8 +157,11 @@ Everything below fails in stage 1, loudly, while it is cheap:
 - `kind`/`resampling` consistent for each aux source;
 - `capability` and `halo` consistent with `block`;
 - `epoch` divides `deliver` sensibly;
-- every class referenced by a colour table exists in the **pinned reference matrix**, resolved by
-  stable `id` and not positional index ([07 §6](07-output-mapping.md));
+- every `lumping` entry resolves to **exactly one** row in the contributing granules' embedded
+  class tables — matched on attributes, never on positional index — and every class referenced by
+  a colour table exists after lumping ([07 §6](07-output-mapping.md));
+- the contributing granules' class tables **agree by fingerprint**, or a cross-vintage remap is
+  explicitly permitted ([11 §9](11-types.md));
 - filter `on_missing` policy explicit;
 - **a vintage is pinned**, and the frozen index does not span multiple vintages unless explicitly
   permitted ([02 §3](02-granule-index.md));

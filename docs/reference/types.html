@@ -1,0 +1,371 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Core types · Stratum</title>
+<link rel="stylesheet" href="../assets/stratum.css">
+</head>
+<body data-page="reference/types" data-root="../">
+<a class="skip" href="#content">Skip to content</a>
+<header class="masthead">
+  <a class="wordmark" href="../index.html"><span class="glyph"></span>Stratum</a>
+  <span class="stage">Design stage</span>
+  <span class="spacer"></span>
+  <span class="repo">EMIT Critical Minerals L3</span>
+</header>
+<div class="layout">
+<nav id="sidebar" aria-label="Documentation"></nav>
+<main id="content">
+<div class="prose">
+
+<h1>Core types</h1>
+<p class="lede">The concrete objects that cross every interface. Every other page names these; this
+one defines them.</p>
+
+<div class="gen">
+  <span class="label">Generated later</span>
+  <p>Field lists here are hand-written and will be <strong>extracted from the source</strong> once
+  <code>stratum</code> exists &mdash; a field list maintained in two places is a field list that
+  drifts. What stays hand-written is the <em>narrative</em>: why a type is shaped the way it is,
+  and which observed constraint forced it. That is the part a generator cannot produce.</p>
+</div>
+
+<div class="note">
+  <span class="label">Grounding</span>
+  <p>Anything marked <span class="chip chip-obs">observed</span> was read out of a real delivered
+  granule &mdash; <code>EMIT_L2B_MIN_001_20260825T151308_2623710_050.nc</code>, product version
+  <code>V001</code>, <code>software_build_version 010635</code>. Everything else is a design
+  decision. Keeping that distinction visible is what separates a spec from a plausible story.</p>
+</div>
+
+<h2 id="status">What is locked</h2>
+
+<div class="tw">
+<table>
+<thead><tr><th>Type</th><th>Status</th><th>Note</th></tr></thead>
+<tbody>
+<tr><td><code>GridDef</code></td><td><span class="chip chip-locked">locked</span></td><td>Feeds every cache key; changing it invalidates the world</td></tr>
+<tr><td><code>TileRef</code></td><td><span class="chip chip-locked">locked</span></td><td></td></tr>
+<tr><td><code>BlockRef</code></td><td><span class="chip chip-locked">locked</span></td><td>Two windows &mdash; the halo mechanism lives in the type</td></tr>
+<tr><td><code>GranuleRef</code> / <code>GranuleFrame</code></td><td><span class="chip chip-locked">locked</span></td><td>Vintage fields confirmed against a real granule</td></tr>
+<tr><td><code>ObsWindow</code></td><td><span class="chip chip-locked">locked</span></td><td>Shape changes with capability; accessors do not</td></tr>
+<tr><td><code>AuxAccessor</code></td><td><span class="chip chip-locked">locked</span></td><td></td></tr>
+<tr><td><code>GLT</code></td><td><span class="chip chip-locked">locked</span></td><td>Band order inherited from SpectralUtil for interoperability</td></tr>
+<tr><td><code>BandSpec</code></td><td><span class="chip chip-locked">locked</span></td><td></td></tr>
+<tr><td><code>SnapshotStack</code></td><td><span class="chip chip-draft">one open field</span></td><td>Whether <code>score</code> is exposed to reducers &mdash; leaning yes, left available</td></tr>
+<tr><td><code>BandStack</code></td><td><span class="chip chip-locked">locked</span></td><td></td></tr>
+<tr><td><code>ClassTable</code></td><td><span class="chip chip-draft">backing type open</span></td><td>Shape settled; <code>pyarrow.Table</code> vs plain columns undecided</td></tr>
+</tbody>
+</table>
+</div>
+
+<h2 id="grid">Grid, tile, block</h2>
+
+<pre><code>@dataclass(frozen=<span class="k">True</span>)
+<span class="k">class</span> GridDef:
+    crs: str                          <span class="c"># "EPSG:4326"</span>
+    resolution: tuple[float, float]   <span class="c"># (x, y); y negative</span>
+    origin: tuple[float, float]       <span class="c"># cell edges at origin + n*res</span>
+    tile_size: float
+    block: int = 512
+
+    @property
+    <span class="k">def</span> id(self) -&gt; str: ...      <span class="c"># short stable hash; part of every cache key</span>
+
+@dataclass(frozen=<span class="k">True</span>)
+<span class="k">class</span> TileRef:
+    grid: GridDef
+    tx: int
+    ty: int
+    @property
+    <span class="k">def</span> bounds(self) -&gt; tuple[float, float, float, float]: ...
+    @property
+    <span class="k">def</span> shape(self) -&gt; tuple[int, int]: ...
+    @property
+    <span class="k">def</span> name(self) -&gt; str: ...    <span class="c"># "{grid.id}/{tx}_{ty}"</span>
+
+@dataclass(frozen=<span class="k">True</span>)
+<span class="k">class</span> BlockRef:
+    tile: TileRef
+    bx: int
+    by: int
+    halo: int = 0
+    @property
+    <span class="k">def</span> window(self) -&gt; Window: ...        <span class="c"># with halo</span>
+    @property
+    <span class="k">def</span> core_window(self) -&gt; Window: ...   <span class="c"># without - what gets written</span>
+    @property
+    <span class="k">def</span> transform(self) -&gt; Affine: ...</code></pre>
+
+<div class="key">
+  <span class="label">Two windows, deliberately</span>
+  <p>Plugins compute over <code>window</code>; the framework writes only <code>core_window</code>.
+  That is the whole halo mechanism, and keeping it <em>in the type</em> rather than in caller code
+  is what stops a plugin author getting it wrong.</p>
+</div>
+
+<p>Tiles are named by grid indices &mdash; <code>emit30/-111_32</code> &mdash; so a name is a
+position rather than a label. AMD names directories <code>32_33_-111_-110</code>, which is readable
+but redundant with the grid and awkward to sort; bounds belong in metadata, not in the
+identifier.</p>
+
+<div class="note">
+  <span class="label"><span class="chip chip-obs">observed</span> A trap in grid alignment</span>
+  <p>EMIT&rsquo;s native ortho resolution is <code>0.000542232520256367</code>, and V002&rsquo;s
+  <code>0.00055</code> is a rounding of it. But a run grid at exactly the native resolution is
+  <em>not</em> automatically aligned &mdash; origins are per-granule &mdash; so the KD-tree path is
+  still required regardless.</p>
+</div>
+
+<h2 id="granules">Granules</h2>
+
+<pre><code>@dataclass(frozen=<span class="k">True</span>)
+<span class="k">class</span> GranuleRef:
+    granule_id: str               <span class="c"># "001_20260825T151308_2623710_050"</span>
+    collection: str               <span class="c"># "EMITL2BMIN"</span>
+    datetime: datetime            <span class="c"># tz-aware UTC</span>
+    end_datetime: datetime
+    bbox: tuple[float, float, float, float]
+    assets: Mapping[str, str]     <span class="c"># role -&gt; URI</span>
+    build_version: str            <span class="c"># "010635"          [observed]</span>
+    product_version: str          <span class="c"># "V001"            [observed]</span>
+    cloud_fraction: float | <span class="k">None</span>  <span class="c"># None is meaningful</span>
+    day_night: str | <span class="k">None</span>       <span class="c"># "Day"             [observed]</span></code></pre>
+
+<p><code>GranuleFrame</code> is the plural form &mdash; a dataframe with these as columns, which is
+what <code>GranuleFilter.keep()</code> receives.</p>
+
+<p><code>cloud_fraction</code> being nullable is not an oversight: <strong>nullness is
+meaningful</strong>, and conflating &ldquo;no cloud metadata&rdquo; with &ldquo;too cloudy&rdquo; is
+the exact silent-drop bug this design exists partly to fix.</p>
+
+<div class="note">
+  <span class="label"><span class="chip chip-obs">observed</span> Vintage identifiers exist</span>
+  <p>The granule carries <code>software_build_version</code> (<code>010635</code>),
+  <code>software_delivery_version</code> and <code>product_version</code> (<code>V001</code>) as
+  global attributes, and its <code>history</code> names <code>tetracorder5.27c.cmds</code> &mdash;
+  confirming the file predates the Tetracorder 6 reprocessing. So the identifier is unambiguous
+  <em>in the file</em>. <strong>Still open:</strong> whether CMR exposes it <em>before</em> download,
+  which decides whether vintage filtering can be an index predicate.</p>
+</div>
+
+<h2 id="obswindow">ObsWindow</h2>
+
+<p>The type every <code>Scorer</code> and <code>PixelMask</code> receives. It has two forms and the
+difference is one axis.</p>
+
+<pre><code><span class="k">class</span> ObsWindow:
+    space: Literal[<span class="k">"sensor"</span>, <span class="k">"block"</span>]
+    n: int                        <span class="c"># 1 streaming, N stacked</span>
+    block: BlockRef | <span class="k">None</span>        <span class="c"># None in sensor space</span>
+    granule: GranuleRef | <span class="k">None</span>    <span class="c"># None in stack mode</span>
+    granules: Sequence[GranuleRef]
+
+    <span class="k">def</span> __getitem__(self, alias: str) -&gt; np.ndarray:
+        <span class="c">"""Band by alias. (H, W) streaming, (N, H, W) stacked."""</span>
+
+    @property
+    <span class="k">def</span> valid(self) -&gt; np.ndarray:
+        <span class="c">"""Bool. True = observed and unmasked. Same shape as a band."""</span></code></pre>
+
+<div class="tw">
+<table>
+<thead><tr><th></th><th><code>capability = "streaming"</code></th><th><code>capability = "stack"</code></th></tr></thead>
+<tbody>
+<tr><th><code>score()</code> calls</th><td>once per granule</td><td>once per block</td></tr>
+<tr><th>Band shape</th><td><code>(H, W)</code></td><td><code>(N, H, W)</code></td></tr>
+<tr><th><code>granule</code></th><td>the granule</td><td><code>None</code></td></tr>
+<tr><th><code>granules</code></th><td>one element</td><td>all N, ordered by <code>datetime</code></td></tr>
+<tr><th>Memory</th><td>O(block)</td><td>O(block &times; N)</td></tr>
+</tbody>
+</table>
+</div>
+
+<p>Ordering by <code>datetime</code> is guaranteed, so <code>tie_break: earliest</code> is
+meaningful and stack-mode scorers can reason about sequence.</p>
+
+<h2 id="aux">AuxAccessor</h2>
+
+<pre><code><span class="k">class</span> AuxAccessor:
+    <span class="k">def</span> raster(self, alias: str, *, date: datetime | <span class="k">None</span> = <span class="k">None</span>) -&gt; np.ndarray:
+        <span class="c">"""(H, W) on THIS block's grid. Warped, windowed, cached."""</span>
+
+    <span class="k">def</span> vector(self, alias: str) -&gt; np.ndarray:
+        <span class="c">"""Rasterized to this block's grid."""</span>
+
+    <span class="k">def</span> table(self, alias: str) -&gt; AuxTable:
+        <span class="c">""".at(date) -&gt; scalar. No gridding."""</span>
+
+    @property
+    <span class="k">def</span> granule_index(self) -&gt; GranuleFrame: ...</code></pre>
+
+<div class="key">
+  <span class="label">The block grid is the contract</span>
+  <p>Everything <code>AuxAccessor</code> returns is already windowed to the block, already on the
+  block&rsquo;s exact grid and CRS, and already cached. <strong>A scorer never does geometry, never
+  sees a CRS, never resamples anything.</strong> If a plugin author has to think about projections,
+  the framework has failed &mdash; and readable cost functions are the entire point.</p>
+</div>
+
+<p>Sources are addressed by <strong>manifest alias, never URI</strong>. An undeclared alias raises;
+it does not fall back to opening a path. That is what makes the declaration requirement enforceable
+rather than aspirational, and it is what keeps cache keys honest.</p>
+
+<p>Resampling is declared, never defaulted. Bilinear-interpolating a landcover class and
+nearest-neighbouring a DEM are both wrong and <strong>neither raises an error</strong> &mdash; they
+quietly produce a cost surface nobody can explain later. A categorical source with a continuous
+resampling method is a plan-time error.</p>
+
+<h2 id="glt">GLT</h2>
+
+<pre><code>@dataclass
+<span class="k">class</span> GLT:
+    data: np.ndarray              <span class="c"># (H, W, 3) int32</span>
+    grid: GridDef
+    tile: TileRef
+    granules: Sequence[GranuleRef]    <span class="c"># File Index is 1-based into this</span>
+    score: np.ndarray | <span class="k">None</span>      <span class="c"># (H, W) float32 - the winning score</span></code></pre>
+
+<p>Bands are <code>(GLT X, GLT Y, File Index)</code>, 1-based, <code>0</code> = nodata, negatives =
+interpolated. The format matches the existing convention so artifacts interoperate.</p>
+
+<p><code>score</code> is typed optional only because a GLT read back from a V002-era file will not
+have one. In practice it is required &mdash; persisting it is what makes &ldquo;why did this pixel
+win?&rdquo; answerable from the artifact.</p>
+
+<div class="note">
+  <span class="label"><span class="chip chip-obs">observed</span> The granule ships its own GLT</span>
+  <p><code>location/glt_x</code> and <code>location/glt_y</code> (<code>int32</code>,
+  <code>_FillValue = 0</code>, observed range 1&ndash;1242) map the granule&rsquo;s own ortho grid
+  (2363 &times; 2309) back to sensor space. This is <em>not</em> our tile grid &mdash; the origin is
+  per-granule &mdash; so it cannot substitute for the KD-tree regrid. It is worth knowing for two
+  reasons: it is what <code>load_data(..., load_glt=True)</code> returns, and it is a ready-made
+  fixture for testing GLT application without building one.</p>
+</div>
+
+<h2 id="stacks">Snapshots, bands, outputs</h2>
+
+<pre><code>@dataclass(frozen=<span class="k">True</span>)
+<span class="k">class</span> BandSpec:
+    name: str
+    dtype: str
+    description: str
+    units: str = <span class="k">"unitless"</span>
+    nodata: float | int | <span class="k">None</span> = <span class="k">None</span>
+
+<span class="k">class</span> SnapshotStack:
+    <span class="c">"""Reducer input. Epoch-major."""</span>
+    epochs: Sequence[Epoch]                           <span class="c"># ordered, ascending</span>
+    <span class="k">def</span> __getitem__(self, band: str) -&gt; np.ndarray:   <span class="c"># (n_epochs, H, W)</span>
+    @property
+    <span class="k">def</span> valid(self) -&gt; np.ndarray:                    <span class="c"># (n_epochs, H, W) bool</span>
+    @property
+    <span class="k">def</span> score(self) -&gt; np.ndarray:                    <span class="c"># (n_epochs, H, W) float32</span>
+
+<span class="k">class</span> BandStack:
+    <span class="c">"""OutputMapper input. Finished bands for one tile."""</span>
+    <span class="k">def</span> __getitem__(self, band: str) -&gt; np.ndarray:   <span class="c"># (H, W)</span>
+    specs: Sequence[BandSpec]</code></pre>
+
+<p><code>SnapshotStack.valid</code> is what keeps <code>min_count</code> honest: an epoch with no
+observation over a pixel must not count toward agreement. Exposing <code>score</code> lets a
+reducer weight by confidence rather than treating every epoch equally &mdash; an open question,
+left available in the type so it stays cheap to answer later rather than awkward.</p>
+
+<h2 id="classtable">ClassTable</h2>
+
+<p>Some bands are categorical: their integer values index a table of classes. The framework needs a
+generic way to carry that table around, and <strong>it must not know what the classes mean.</strong></p>
+
+<pre><code>@dataclass(frozen=<span class="k">True</span>)
+<span class="k">class</span> ClassTable:
+    key: str                              <span class="c"># column whose values appear in pixels</span>
+    entries: pa.Table                     <span class="c"># key + arbitrary attribute columns</span>
+    source: str                           <span class="c"># provenance: URI + path, or file</span>
+    <span class="k">def</span> attrs(self) -&gt; Sequence[str]: ...
+    <span class="k">def</span> fingerprint(self) -&gt; str: ...     <span class="c"># content hash; enters cache keys</span></code></pre>
+
+<p>Where to find it is <strong>configuration</strong>, declared per role, so the framework never
+hard-codes a path and products that do <em>not</em> embed a table are equally expressible:</p>
+
+<pre><code>inputs:
+  roles:
+    mineral:
+      collection: EMITL2BMIN
+      var: group_1_mineral_id
+      class_table:
+        source: embedded          <span class="c"># embedded | file</span>
+        path: /mineral_metadata   <span class="c"># group within the product</span>
+        key: index                <span class="c"># column matching pixel values</span>
+        attributes: [name, record, library, group, url]</code></pre>
+
+<div class="key">
+  <span class="label">Self-describing products are the good case</span>
+  <p><span class="chip chip-obs">observed</span> The L2B granule embeds its class table at
+  <code>/mineral_metadata</code> &mdash; 294 entries. This is the arrangement to prefer wherever a
+  product offers it, because <strong>the authority travels with the data</strong>: no external CSV
+  to drift, no vintage to pin by hand, and no way for the table to disagree with the pixels it
+  describes. A reader that pulls the table out of the granule it is currently processing is
+  correct by construction.</p>
+</div>
+
+<h3 id="agreement">The residual problem, and why it is tractable</h3>
+
+<p>A mosaic spans many granules, and their class tables must agree &mdash; a pixel value of
+<code>15</code> has to mean the same thing in every granule contributing to a cell, or the reduction
+is nonsense.</p>
+
+<p><span class="chip chip-obs">observed</span> <code>index</code> is 1&hellip;294, contiguous and
+positional. <code>v6.00a6.csv</code> has 312 entries. So the index space genuinely does differ
+between vintages, and during the reprocessing window a run can span both.</p>
+
+<p>The embedded table does not make that go away. What it does is make it <strong>detectable and
+mechanically solvable</strong>, where an external table would have made it silent:</p>
+
+<ol>
+<li><strong>Fingerprint every granule&rsquo;s table</strong> at plan time.</li>
+<li><strong>All identical</strong> &rarr; the common case. Proceed; record the fingerprint in
+provenance.</li>
+<li><strong>They differ</strong> &rarr; the run spans vintages. Either fail loudly, or remap through
+the attribute columns, which carry enough identity to compute the correspondence. Measured on the
+delivered file, <code>(library, record, group)</code> resolves 292 of 294 entries &mdash; so a remap
+is computable, with a short list of genuine ambiguities surfaced for a human rather than
+guessed.</li>
+</ol>
+
+<p>That check is generic: it is <em>&ldquo;do these class tables agree&rdquo;</em>, not
+<em>&ldquo;do these minerals agree&rdquo;</em>, which is why it belongs in the core.</p>
+
+<p>And output products carry their own table. A mosaic&rsquo;s classes are its own &mdash;
+post-lumping, they are not the input classes &mdash; so stage 5 publishes a <code>ClassTable</code>
+alongside the product, which is the legend requirement arrived at from the other direction.</p>
+
+<h2 id="oddities">Observed oddities</h2>
+
+<p>Recorded so nobody re-derives them.</p>
+
+<ul>
+<li><code>bands = 4</code> is declared but <strong>unused</strong> by any root variable in the L2B
+MIN file. Presumably for the MINUNCERT companion. Do not assume it means four spectral bands.</li>
+<li>Only <strong>two mineral groups</strong> exist (<code>group_1_*</code>,
+<code>group_2_*</code>), matching AMD&rsquo;s config.</li>
+<li>The delivered GLT contains <strong>no negative values</strong>, so the interpolated-cell
+convention is Stratum/SpectralUtil-internal, not something read from granules.</li>
+<li>Global attributes carry <code>geotransform</code> and <code>spatial_ref</code> (WKT) directly,
+so granule-ortho georeferencing needs no reconstruction.</li>
+<li>Conventions are <code>CF-1.13</code> / <code>NCEI_NetCDF_Swath_Template_v2.0</code> &mdash;
+worth matching in our own NetCDF output.</li>
+</ul>
+
+</div>
+<nav class="pager" aria-label="Pagination"></nav>
+<footer class="site">
+  Source: <a href="../specs/11-types.md"><code>specs/11-types.md</code></a> &mdash; the
+  authoritative version, with per-field detail and open questions
+</footer>
+</main>
+</div>
+<script src="../assets/stratum.js"></script>
+</body>
+</html>

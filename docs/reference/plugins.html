@@ -1,0 +1,419 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Plugin contracts · Stratum</title>
+<link rel="stylesheet" href="../assets/stratum.css">
+</head>
+<body data-page="reference/plugins" data-root="../">
+<a class="skip" href="#content">Skip to content</a>
+<header class="masthead">
+  <a class="wordmark" href="../index.html"><span class="glyph"></span>Stratum</a>
+  <span class="stage">Design stage</span>
+  <span class="spacer"></span>
+  <span class="repo">EMIT Critical Minerals L3</span>
+</header>
+<div class="layout">
+<nav id="sidebar" aria-label="Documentation"></nav>
+<main id="content">
+<div class="prose">
+
+<h1>Plugin contracts</h1>
+<p class="lede">Five hooks. The first four decide which observation wins; the fifth decides what it
+looks like.</p>
+
+<div class="gen">
+  <span class="label">Generated later</span>
+  <p>The <code>Protocol</code> definitions on this page are hand-written for now. Once
+  <code>stratum</code> exists they will be extracted from the source so signatures cannot drift
+  from the implementation. The prose and the worked examples stay hand-written &mdash; those are
+  design, not API surface.</p>
+</div>
+
+<h2 id="why-five">Why five and not one</h2>
+
+<p>The decisions a mosaic makes have wildly different cost profiles and run at different stages.
+Collapsing them into one interface forces the cheapest to pay the price of the most expensive.</p>
+
+<div class="tw">
+<table>
+<thead><tr><th>Hook</th><th>Stage</th><th>Granularity</th><th>Cost</th><th>Status</th></tr></thead>
+<tbody>
+<tr><td><code>GranuleFilter</code></td><td>1 plan</td><td>per granule</td><td>&micro;s, no IO</td><td><span class="chip chip-locked">locked</span></td></tr>
+<tr><td><code>PixelMask</code></td><td>2 regrid</td><td>granule &times; block</td><td>vectorized</td><td><span class="chip chip-locked">locked</span></td></tr>
+<tr><td><code>Scorer</code></td><td>3 resolve</td><td>tile &times; epoch &times; block</td><td>vectorized</td><td><span class="chip chip-locked">locked</span></td></tr>
+<tr><td><code>Reducer</code></td><td>4 reduce</td><td>tile &times; block</td><td>N = #epochs</td><td><span class="chip chip-draft">one open field</span></td></tr>
+<tr><td><code>OutputMapper</code></td><td>5 publish</td><td>per tile</td><td>presentation</td><td><span class="chip chip-locked">locked</span></td></tr>
+</tbody>
+</table>
+</div>
+
+<p>Two consequences worth stating outright:</p>
+
+<ul>
+<li><strong>Rejecting early is free.</strong> A <code>GranuleFilter</code> prunes before a byte is
+read. The same predicate applied at pixel level costs a download, a regrid, and a scoring pass.</li>
+<li><strong>Masking is not ranking.</strong> <code>PixelMask</code> returns a boolean; it never
+expresses preference. Mixing the two is how &ldquo;this pixel is unusable&rdquo; quietly becomes
+&ldquo;this pixel is merely worse&rdquo;.</li>
+</ul>
+
+<h2 id="granule-filter">GranuleFilter</h2>
+
+<pre><code><span class="k">class</span> GranuleFilter(Protocol):
+    <span class="k">def</span> keep(self, granules: GranuleFrame) -&gt; BoolArray:
+        <span class="c">"""Vectorized over the whole candidate frame. True = keep."""</span>
+
+    <span class="k">def</span> describe(self) -&gt; str:
+        <span class="c">"""One line for the run report, e.g. 'cloud_fraction &lt;= 0.5'."""</span></code></pre>
+
+<p>Filters are vectorized over the index as a dataframe and never see individual granules.</p>
+
+<h3 id="temporal">Temporal range is a filter, and it is not just start/end</h3>
+
+<p>&ldquo;Limit the temporal range&rdquo; belongs here rather than in pipeline code. EMIT-AMD
+applies none at all and hands every observation ever acquired to the stacker; for a versioned
+annual product the range must be declared, pinned and recorded.</p>
+
+<div class="tw">
+<table>
+<thead><tr><th>Filter</th><th>Expresses</th></tr></thead>
+<tbody>
+<tr><td><code>start</code> / <code>end</code></td><td>An absolute interval &mdash; the mission window, or one delivery year</td></tr>
+<tr><td><code>month_in: [8, 9, 10, 11]</code></td><td>A <strong>recurring seasonal</strong> window</td></tr>
+</tbody>
+</table>
+</div>
+
+<p>The seasonal form is the one that is easy to miss. The useful window recurs annually &mdash;
+taking August-to-November scenes over the Western US avoids peak vegetation without discarding
+whole years &mdash; and a start/end range cannot express that. Building it out of many disjoint
+intervals is miserable.</p>
+
+<h3 id="reporting">Exclusions must be reported by reason</h3>
+
+<div class="warn">
+  <span class="label">Requirement</span>
+  <p>The filter chain records, per filter, how many granules it removed and why, into the run
+  report. Missing metadata is an explicit policy in the manifest &mdash;
+  <code>on_missing: reject | keep | fail</code> &mdash; never the accidental result of a truth
+  test. Default is <code>fail</code> at plan time, loudly, while it is cheap to fix.</p>
+</div>
+
+<p>The precedent is V002&rsquo;s cloud filter, where a granule whose record lacks the key is
+dropped silently, indistinguishable from &ldquo;too cloudy&rdquo;. A run that quietly discarded 812
+granules should say so where someone will see it.</p>
+
+<h3 id="vintage">Vintage pinning is mandatory</h3>
+
+<p>Reprocessing of the entire catalog begins ~September 2026, runs ~75 days, and regenerates every
+mineral map against Tetracorder 6 &mdash; <strong>and the mineral classes shift</strong>. For that
+window the archive is mixed-vintage, and an unpinned run will silently blend two incompatible
+products into a result that looks entirely plausible.</p>
+
+<p><code>build_version</code> is therefore a required filter, and plan-time validation fails if a
+run&rsquo;s frozen index spans more than one vintage unless the manifest explicitly opts in.</p>
+
+<h2 id="pixel-mask">PixelMask</h2>
+
+<p>Runs during regrid, so masked pixels never enter the observation stack. Masks compose by
+conjunction: a pixel is eligible only if every mask in the chain admits it.</p>
+
+<pre><code><span class="k">class</span> PixelMask(Protocol):
+    space: Literal[<span class="k">"map"</span>, <span class="k">"sensor"</span>] = <span class="k">"map"</span>
+    required_roles: tuple[str, ...] = ()
+
+    <span class="k">def</span> valid(self, obs: ObsWindow, aux: AuxAccessor) -&gt; BoolArray:
+        <span class="c">"""(H, W) bool. True = usable.
+        space="map"    -&gt; obs is on the block grid, post-GLT.
+        space="sensor" -&gt; obs is in raw (downtrack, crosstrack) geometry, pre-GLT.
+        """</span></code></pre>
+
+<p>The <code>space</code> field exists because some masks are naturally expressed in map geometry
+(this location is water) and some in sensor geometry (this detector column is unreliable). The
+second <em>cannot</em> be expressed after regridding has discarded the source column, so
+sensor-space masks are applied to the raw array before the GLT is built.</p>
+
+<div class="note">
+  <span class="label">A trick we are not using</span>
+  <p>A column mask could be evaluated in map space by thresholding GLT band 1, which holds the
+  source column. But it fails for any mask needing raw <em>values</em> rather than raw indices.
+  Applying them in raw space is honest and simpler.</p>
+</div>
+
+<h3 id="emit-masks">Built-in EMIT masks</h3>
+
+<p>Instrument knowledge belongs in <code>stratum_emit</code>, not in user config.</p>
+
+<div class="tw">
+<table>
+<thead><tr><th>Mask</th><th>Space</th><th>Behaviour</th></tr></thead>
+<tbody>
+<tr><td><code>EdgeTrim</code></td><td>sensor</td><td>Drop the outer <strong>7 columns</strong> each side (5 minimum). Every column is a different detector; the outermost are unreliable.</td></tr>
+<tr><td><code>SlitDust</code></td><td>sensor</td><td>Drop 2&ndash;3 columns at cross-track centre. Mostly cleaned up upstream; off by default.</td></tr>
+<tr><td><code>L2AStandard</code></td><td>map</td><td>Cloud, cirrus, water, spacecraft flags &mdash; AMD&rsquo;s <code>filter-clouds-1-4</code> semantics</td></tr>
+<tr><td><code>SoilFraction</code></td><td>map</td><td>Require soil fraction &ge; threshold from the <code>frcov</code> role</td></tr>
+</tbody>
+</table>
+</div>
+
+<div class="key">
+  <span class="label">No along-track trimming</span>
+  <p>EMIT is a push-broom collecting one continuous strip. Granule boundaries in the along-track
+  direction are a download convenience with no physical meaning, so top and bottom edges are sound.
+  Trimming them would discard good data.</p>
+</div>
+
+<h2 id="scorer">Scorer &mdash; the cost function proper</h2>
+
+<pre><code><span class="k">class</span> Scorer(Protocol):
+    capability: Literal[<span class="k">"streaming"</span>, <span class="k">"stack"</span>, <span class="k">"tile"</span>]
+    halo: int = 0
+    required_roles: tuple[str, ...] = ()
+    required_aux:   tuple[str, ...] = ()
+
+    <span class="k">def</span> score(self, obs: ObsWindow, aux: AuxAccessor) -&gt; FloatArray:
+        <span class="c">"""Higher wins. NaN marks a cell this observation may not occupy."""</span></code></pre>
+
+<h3 id="capabilities">Execution modes</h3>
+
+<p><code>capability</code> is a promise about what the scorer needs to see, and it determines both
+memory behaviour and where the work runs.</p>
+
+<div class="tw">
+<table>
+<thead><tr><th>Capability</th><th>Called</th><th>Band shape</th><th>Memory</th><th>Example</th></tr></thead>
+<tbody>
+<tr><td><code>streaming</code></td><td>once per granule</td><td><code>(H, W)</code></td><td>O(block)</td><td>min view zenith</td></tr>
+<tr><td><code>stack</code></td><td>once with all observations</td><td><code>(N, H, W)</code></td><td>O(block &times; N)</td><td>median, consensus</td></tr>
+<tr><td><code>tile</code></td><td>once per whole tile</td><td><code>(N, H, W)</code></td><td>O(tile &times; N)</td><td>segmentation</td></tr>
+</tbody>
+</table>
+</div>
+
+<p><code>streaming</code> is the V002 shape: a running best-score array updated granule by granule,
+with memory independent of how many observations exist. That property is worth preserving and the
+framework keeps it available. <code>stack</code> is the AMD shape: nothing is discarded, so any
+reduction is expressible &mdash; it is what mode-through-time needs, and block decomposition is
+what keeps it affordable. <code>tile</code> is the escape hatch; it routes to Batch and gives up
+block parallelism.</p>
+
+<p>In stack mode observations are ordered by <code>datetime</code>, guaranteed, so that
+<code>tie_break: earliest</code> is meaningful and stack-mode scorers can reason about sequence.</p>
+
+<h3 id="aliases">Bands by alias, never by index</h3>
+
+<pre><code>obs[<span class="k">"view_zenith"</span>]        <span class="c"># (H, W) float, this block only</span>
+obs.granule.datetime      <span class="c"># metadata</span>
+obs.grid                  <span class="c"># this block's transform and CRS</span>
+obs.n                     <span class="c"># 1 when streaming, N when stacked</span></code></pre>
+
+<p>The manifest maps aliases to <code>(role, band)</code> per collection, so the same scorer works
+across instruments &mdash; which matters now that Mines makes multi-instrument a live requirement.
+Requesting an alias the manifest does not define is an error at <strong>plan time</strong>, via
+<code>required_roles</code>, not at runtime in 4,000 workers.</p>
+
+<h3 id="examples">Worked examples</h3>
+
+<pre><code><span class="k">class</span> MinViewZenith:
+    <span class="c">"""V002 parity: the most nadir look wins."""</span>
+    capability = <span class="k">"streaming"</span>
+    required_roles = (<span class="k">"geometry"</span>,)
+
+    <span class="k">def</span> score(self, obs, aux):
+        <span class="k">return</span> -obs[<span class="k">"view_zenith"</span>]</code></pre>
+
+<pre><code><span class="k">class</span> PreferBareEarth:
+    <span class="c">"""Prefer the observation that actually sees ground.
+
+    Given several observations of a pixel, most of which are vegetation,
+    take the one that isn't. Soil fraction comes from the already-
+    orthorectified L2B FRCOV product, so this costs nothing to regrid.
+    """</span>
+    capability = <span class="k">"streaming"</span>
+    required_roles = (<span class="k">"frcov"</span>,)
+
+    <span class="k">def</span> __init__(self, min_soil=0.80, hard_floor=0.65):
+        self.min_soil, self.hard_floor = min_soil, hard_floor
+
+    <span class="k">def</span> score(self, obs, aux):
+        soil = obs[<span class="k">"soil_fraction"</span>]
+        s = soil.copy()
+        s[soil &lt; self.hard_floor] = np.nan     <span class="c"># unrecoverable; V002 used 0.65</span>
+        <span class="k">return</span> s</code></pre>
+
+<p>The two thresholds are deliberate. <code>hard_floor=0.65</code> is V002&rsquo;s cutoff, chosen
+because grain-size retrieval falls apart below it; <code>min_soil=0.80</code> is the higher bar
+recommended for mosaicking. Keeping them separate lets the scorer <em>rank</em> between 0.65 and
+0.80 rather than discarding that range outright &mdash; which is the &ldquo;don&rsquo;t destroy
+information&rdquo; principle applied at the smallest possible scale.</p>
+
+<div class="note">
+  <span class="label">Caveat to carry</span>
+  <p>The current FRCOV is reportedly NPV-false-positive-prone &mdash; it reads some bare soil as
+  non-photosynthetic vegetation &mdash; so this scorer is conservative in a way that will improve
+  when FRCOV does.</p>
+</div>
+
+<h3 id="score-band">The score band is persisted</h3>
+
+<div class="warn">
+  <span class="label">Requirement</span>
+  <p>Stage 3 writes the winning score alongside the winning value. For a product whose premise is
+  defensible selection, <strong>&ldquo;why did this pixel win?&rdquo; must be answerable from the
+  artifact.</strong> The existing regrid computes the criteria array and discards it.</p>
+</div>
+
+<h2 id="reducer">Reducer</h2>
+
+<pre><code><span class="k">class</span> Reducer(Protocol):
+    outputs: tuple[BandSpec, ...]
+    halo: int = 0
+
+    <span class="k">def</span> reduce(self, snaps: SnapshotStack, aux: AuxAccessor) -&gt; dict[str, Array]:
+        <span class="c">"""snaps[name] is (n_epochs, H, W). One array per declared output."""</span></code></pre>
+
+<p>Outputs are declared up front so the COG/NetCDF schema, the STAC item and the
+<code>OutputMapper</code> contract can all be derived without running anything.</p>
+
+<pre><code><span class="k">class</span> ModeThroughTime:
+    outputs = (
+        BandSpec(<span class="k">"mineral_id"</span>,   <span class="k">"uint16"</span>,  <span class="k">"most frequent class across epochs"</span>),
+        BandSpec(<span class="k">"agreement"</span>,    <span class="k">"float32"</span>, <span class="k">"modal count / valid epochs"</span>),
+        BandSpec(<span class="k">"n_epochs"</span>,     <span class="k">"uint8"</span>,   <span class="k">"epochs contributing"</span>),
+        BandSpec(<span class="k">"runner_up_id"</span>, <span class="k">"uint16"</span>,  <span class="k">"second most frequent class"</span>),
+    )</code></pre>
+
+<div class="tw">
+<table>
+<thead><tr><th>Parameter</th><th>Meaning</th><th>AMD equivalent</th></tr></thead>
+<tbody>
+<tr><td><code>min_count</code></td><td>Suppress pixels whose modal class has too few votes</td><td><code>stack.mincount: 3</code></td></tr>
+<tr><td><code>ignore</code></td><td>Classes excluded from the tally</td><td><code>stack.ignore: [0, -4]</code></td></tr>
+<tr><td><code>tie_break</code></td><td><code>earliest</code> | <code>latest</code> | <code>highest_score</code> | <code>nodata</code></td><td><em>absent</em></td></tr>
+</tbody>
+</table>
+</div>
+
+<h3 id="continuous">Reduce continuously where possible</h3>
+
+<p>Tetracorder&rsquo;s output is already binarized, so information has been lost before we see it.
+That argues for <strong>reducing the continuous quantities &mdash; band depth, fit, uncertainty
+&mdash; and classifying at the end</strong>, rather than voting over labels that have already
+thrown information away.</p>
+
+<p>Two consequences. <code>ModeThroughTime</code> over labels stays as the baseline, because it is
+what AMD does and what we can validate against &mdash; but it should not be the only reducer we
+ship. And a <code>ConsensusDepth</code>-style reducer that aggregates band depths per candidate
+mineral and classifies the aggregate is the more principled version, which the design must not make
+awkward. That is why <code>Reducer</code> receives the full snapshot stack rather than a single
+band; both are the same contract, differing only in which bands the <code>Scorer</code> was asked
+to carry forward.</p>
+
+<h3 id="pluggable">Why this is pluggable at all</h3>
+
+<div class="key">
+  <span class="label">The reason, stated plainly</span>
+  <p>Temporal stability is an open geological hypothesis, and the right assumption depends on the
+  question being asked. If you are making a base map you probably do not care much; if you are
+  looking at sand dunes you care a lot. No single temporal algorithm is correct for both &mdash;
+  which is precisely why the reducer is a plugin and not a setting.</p>
+</div>
+
+<p>And the honesty check: passing a single epoch through unchanged gives V002 semantics exactly.
+The old behaviour must be a <em>configuration</em> of the new system, not a special case beside
+it.</p>
+
+<h2 id="mapper">OutputMapper</h2>
+
+<pre><code><span class="k">class</span> OutputMapper(Protocol):
+    outputs: tuple[ImageSpec, ...]
+
+    <span class="k">def</span> render(self, bands: BandStack, aux: AuxAccessor) -&gt; RGBAArray:
+        <span class="c">"""(H, W, 4) uint8. Free to consult any finished band, and aux."""</span>
+
+    <span class="k">def</span> legend(self) -&gt; Legend:
+        <span class="c">"""Class table or ramp stops. Sidecar + STAC. Not optional."""</span></code></pre>
+
+<div class="key">
+  <span class="label">The rule</span>
+  <p>The mapper is a <strong>presentation layer over a data product that still ships.</strong>
+  Stage 5 writes both, from the same block, in the same run.</p>
+</div>
+
+<p>The failure mode being avoided is concrete. AMD&rsquo;s delivered rasters are RGBA with the class
+already rendered, and the colormap lives only in a cluster config. Nothing downstream can restyle;
+nothing can recount; and the <code>counts</code> product was dropped entirely because the coastal
+mask burns band 4 &mdash; alpha &mdash; which a single-band raster does not have. A whole product
+was lost to an RGBA assumption baked into a pipeline.</p>
+
+<p>Most mappings are a lookup table or a ramp and must never require code, so
+<code>categorical</code>, <code>continuous</code>, <code>threshold</code> and <code>composite</code>
+mappers are configured in the manifest and validated at plan time. <code>on_unmapped: fail</code>
+is the default deliberately: a class that appears in the data but not the colormap is a real error,
+and silently rendering it grey is how a mineral goes missing from a map without anyone noticing.</p>
+
+<p>One generalization worth calling out &mdash; <strong>confidence-driven alpha</strong>. Deriving
+opacity from the agreement band means low-agreement pixels fade rather than asserting a confident
+colour they have not earned. For a mode-through-time product where support varies enormously with
+revisit, that is close to a requirement, and it is painful to retrofit once rendering is
+hard-coded.</p>
+
+<h3 id="rerender">Rendering is derived, not authoritative</h3>
+
+<p>Because the image is a pure function of the data product plus the mapper,
+<code>stratum render --run &lt;id&gt; --mapper &lt;ref&gt;</code> reads published data blocks and
+writes a new image without re-running the pipeline. Colour debates cost seconds. MMGIS can be given
+a different rendering of the same archival product without forking it. And the mapper version is
+part of the <em>image&rsquo;s</em> identity, not the data&rsquo;s, so restyling does not invalidate
+the data cache.</p>
+
+<h2 id="registration">Registration and delivery</h2>
+
+<pre><code>[project.entry-points.<span class="k">"stratum.scorers"</span>]
+min_view_zenith = <span class="k">"stratum_emit.scorers:MinViewZenith"</span>
+
+[project.entry-points.<span class="k">"stratum.reducers"</span>]
+mode_through_time = <span class="k">"stratum_emit.reducers:ModeThroughTime"</span></code></pre>
+
+<div class="tw">
+<table>
+<thead><tr><th>Path</th><th>Mechanism</th><th>For</th></tr></thead>
+<tbody>
+<tr><td><strong>Iteration</strong></td><td>Wheel URI in the manifest, fetched to <code>/tmp</code> at cold start</td><td>Experiments &mdash; edit, publish, rerun in ~90 s</td></tr>
+<tr><td><strong>Production</strong></td><td>Pinned in the container image, wheel-fetch disabled by policy</td><td>Delivered products &mdash; reproducibility from an immutable digest</td></tr>
+</tbody>
+</table>
+</div>
+
+<p>Both are recorded in provenance. The iteration path is what the original &ldquo;custom cost
+functions as Lambda layers&rdquo; idea was reaching for; entry points plus a wheel deliver the same
+ergonomics without the 250 MB layer ceiling.</p>
+
+<h2 id="validation">Everything fails at plan time</h2>
+
+<p>Each of these is detected in stage 1, before compute is provisioned:</p>
+
+<ul>
+<li>the named plugin resolves, and its version is recordable;</li>
+<li><code>required_roles</code> are all present in the manifest&rsquo;s <code>inputs.roles</code>;</li>
+<li><code>required_aux</code> are all declared &mdash; an undeclared read is refused, because it
+produces a cache key that lies;</li>
+<li><code>capability</code> and <code>halo</code> are consistent with the configured block size;</li>
+<li>declared <code>outputs</code> are non-empty, uniquely named, and have a mapper if rendering is
+requested;</li>
+<li>filter <code>on_missing</code> policy is explicit.</li>
+</ul>
+
+</div>
+<nav class="pager" aria-label="Pagination"></nav>
+<footer class="site">
+  Source: <a href="../specs/04-cost-functions.md"><code>specs/04-cost-functions.md</code></a>,
+  <a href="../specs/07-output-mapping.md"><code>07-output-mapping.md</code></a>
+</footer>
+</main>
+</div>
+<script src="../assets/stratum.js"></script>
+</body>
+</html>

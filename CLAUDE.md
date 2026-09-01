@@ -8,10 +8,20 @@ it fixes the vocabulary the rest of the repo assumes.
 
 ---
 
-## The prime directive: specs and code stay in sync
+## The prime directive: specs, docs and code stay in sync
 
 This repo's whole value right now is that the specs are accurate. They are read by people who are
 not going to check them against the code.
+
+There are now **three** places a design fact can live, and a change to one that misses the others
+is worse than not writing it down at all &mdash; a confidently wrong document outlives a missing
+one.
+
+| Layer | Where | Role |
+|---|---|---|
+| **Specs** | `docs/specs/*.md` | The contract. Carries citations, invariants, open questions. **Authoritative.** |
+| **Design site** | `docs/*.html` | The narrative. Explains shape and rationale to someone new. |
+| **Code** | *(none yet)* | Authoritative for signatures once it exists. |
 
 **When you make a design decision, record it in the same commit that makes it.**
 
@@ -24,10 +34,33 @@ not going to check them against the code.
 | Fill/nodata handling anywhere | [`11-types.md` §2](docs/specs/11-types.md) — the single source of truth |
 | A dependency, or how it's packaged | [`ADR-0001`](docs/decisions/ADR-0001-tech-stack.md) |
 | Anything that moves a boundary between platform and science config | [`ADR-0002`](docs/decisions/ADR-0002-terraform-manifest-boundary.md) |
+| Anything a reader of the design site would now find **wrong** | the matching HTML page — see the map below |
 
 Once code exists, `11-types.md` describes the types **and the code is authoritative**. Keep the
 spec as the narrative — why the type is shaped that way, what the observed constraints are — and
 do not duplicate field lists that will drift.
+
+### Spec → site map
+
+Not every spec edit needs a site edit. The site carries the *shape* of a decision; the spec carries
+its detail. Update the site when the shape changes, a name changes, or a claim on the page becomes
+false.
+
+| Spec | Site page |
+|---|---|
+| `00-overview`, `01-grid-tiling`, `11-types` §1–2, §9 | [`docs/design/concepts.html`](docs/design/concepts.html) |
+| `01` §3, `02`, `03` | [`docs/design/architecture.html`](docs/design/architecture.html) |
+| `05`, `06` | [`docs/design/caching.html`](docs/design/caching.html) |
+| `08`, `09` §4 | [`docs/design/execution.html`](docs/design/execution.html) |
+| `04`, `07` | [`docs/reference/plugins.html`](docs/reference/plugins.html) |
+| `11-types` | [`docs/reference/types.html`](docs/reference/types.html) |
+| `09`, `10` | [`docs/reference/manifest.html`](docs/reference/manifest.html) |
+| Any ADR | [`docs/decisions/index.html`](docs/decisions/index.html) |
+| Any spec's **open questions** | [`docs/status.html`](docs/status.html) |
+
+The last row is the one most easily forgotten. `status.html` rolls up every spec's open questions,
+so resolving one means striking it there too — otherwise the page slowly fills with questions
+that were answered months ago and nobody trusts it.
 
 A **new decision that changes an ADR** gets a new ADR superseding it, not an edit. Edits are for
 corrections.
@@ -85,12 +118,86 @@ several agree. Everything domain-specific lives in `stratum_emit`. If you find y
 ## Repo layout
 
 ```
-docs/design/     the architecture proposal (HTML) - the "why"
-docs/specs/      00-11, numbered by dependency order
-docs/decisions/  ADRs
-docs/notes/      meeting notes, with attribution caveats
-refs/            verbatim external artifacts - do not edit
+docs/index.html    design site landing page (GitHub Pages serves docs/)
+docs/design/       concepts, architecture, caching, execution + the original proposal
+docs/reference/    plugins, types, manifest
+docs/decisions/    ADR digest (HTML) + the ADRs themselves (Markdown)
+docs/status.html   rolled-up open questions and the first slice
+docs/assets/       stratum.css, stratum.js - the only shared chrome
+docs/specs/        00-11, numbered by dependency order   <- authoritative
+docs/notes/        meeting notes, with attribution caveats
+refs/              verbatim external artifacts - do not edit
 ```
+
+---
+
+## Working on the design site
+
+**There is no build step and there must not be one.** Plain HTML, one stylesheet, one script.
+It has to open correctly from `file://` as well as from Pages, so: no ES modules, no `fetch`, no
+CDN dependencies, relative links only.
+
+`docs/.nojekyll` is there on purpose. Without it GitHub Pages runs Jekyll, which would rewrite
+`specs/*.md` to `.html` and break every link from the site into the specs.
+
+**The nav model lives in exactly one place** — `PAGES` in `docs/assets/stratum.js`. The sidebar,
+the active-page highlight and the prev/next pager all derive from it. Adding a page means one
+entry there plus the file; do not hand-write a sidebar into a page.
+
+Each page sets two attributes on `<body>`:
+
+```html
+<body data-page="design/concepts" data-root="../">
+```
+
+`data-page` must match a nav `id`. `data-root` is `""` at the top level and `"../"` one level
+down. Getting either wrong breaks the highlight or every link on the page, silently — so after
+adding or moving a page, run the link check:
+
+```bash
+python3 - <<'EOF'
+import pathlib, re
+root = pathlib.Path('docs')
+for f in sorted(root.rglob('*.html')):
+    for m in re.finditer(r'(?:href|src)="([^"#]+)"', f.read_text()):
+        u = m.group(1)
+        if u.startswith(('http', 'mailto:')): continue
+        if not (f.parent / u.split('#')[0]).resolve().exists():
+            print('BROKEN', f, u)
+EOF
+```
+
+**Use the existing components.** `stratum.css` has `.key` / `.note` / `.warn` callouts,
+`.chip-locked|draft|open|obs` status pills, `.gen` for generated-later regions, `.cards`,
+`.stages`, and `.tw > table` for scrollable tables. Reach for one of those before inventing a
+class; a one-off style in one page is how a docs site starts looking like four docs sites.
+
+### The generation boundary
+
+Some of this will be generated from code later. The dividing line:
+
+> **Anything with a signature is a generation candidate. Anything that explains a choice is not.**
+
+| Will be generated | Stays hand-written |
+|---|---|
+| Type field lists (from the dataclasses) | Why the type is shaped that way |
+| Manifest field reference (from the Pydantic models) | The worked example manifest |
+| `Protocol` blocks (from the protocol definitions) | The worked plugin examples and their rationale |
+| Plugin registry listing (from entry points) | Which plugin to reach for and when |
+
+Mark any region that will later be generated with a `.gen` block, so a future generator author
+knows what it is allowed to overwrite — and so a reader knows which parts to trust less once code
+exists. **Do not** add a generator now; the pages have to survive being hand-edited until there is
+something to generate them from.
+
+### Style on the site
+
+The same rules as the specs, plus two:
+
+- **Every claim about existing code names its source.** The site is where a claim gets read
+  without the spec beside it, so an unattributed assertion here does more damage.
+- **Status chips are load-bearing.** `locked` means someone may now build on it. Do not mark
+  something locked to look decisive.
 
 `refs/` holds things we did not write: a real L2B granule, AMD's `config.yml`, a meeting
 transcript. **Never edit them.** They are evidence.

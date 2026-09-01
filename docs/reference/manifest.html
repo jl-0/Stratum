@@ -1,0 +1,260 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Run manifest · Stratum</title>
+<link rel="stylesheet" href="../assets/stratum.css">
+</head>
+<body data-page="reference/manifest" data-root="../">
+<a class="skip" href="#content">Skip to content</a>
+<header class="masthead">
+  <a class="wordmark" href="../index.html"><span class="glyph"></span>Stratum</a>
+  <span class="stage">Design stage</span>
+  <span class="spacer"></span>
+  <span class="repo">EMIT Critical Minerals L3</span>
+</header>
+<div class="layout">
+<nav id="sidebar" aria-label="Documentation"></nav>
+<main id="content">
+<div class="prose">
+
+<h1>Run manifest</h1>
+<p class="lede">One declarative document is the entire interface for driving a run.</p>
+
+<div class="gen">
+  <span class="label">Generated later</span>
+  <p>The field reference will be generated from the Pydantic v2 models, so the schema on this page
+  cannot diverge from the validator. The example below and the rationale stay hand-written.</p>
+</div>
+
+<h2 id="principle">The boundary</h2>
+
+<div class="key">
+  <span class="label">Principle</span>
+  <p><strong>Terraform owns the platform. The manifest owns the science.</strong></p>
+</div>
+
+<p>Confusing the two is how platforms become unusable by the people they were built for: science
+parameters leak into HCL, and then every experiment needs an infrastructure pull request. The
+manifest is versioned in git, reviewed like code, and hashed into provenance.</p>
+
+<div class="tw">
+<table>
+<thead><tr><th>Terraform</th><th>Manifest</th><th>Neither &mdash; just code</th></tr></thead>
+<tbody>
+<tr><td>ECR, image build/push</td><td>Grid, tiling, blocks</td><td>The framework package</td></tr>
+<tr><td>Batch compute environments, queues</td><td>AOI and zones</td><td>The plugin package</td></tr>
+<tr><td>Lambda functions, state machine</td><td>Time range, epoch, cadence</td><td>Contracts, aux accessor</td></tr>
+<tr><td>S3 buckets + lifecycle</td><td>Filters, masks, scorer, reducer, mapper</td><td>Tests and fixtures</td></tr>
+<tr><td>IAM roles, EDL secret</td><td>Aux sources</td><td></td></tr>
+<tr><td>Budgets, alarms</td><td>Budget ceilings, output formats</td><td></td></tr>
+</tbody>
+</table>
+</div>
+
+<h2 id="example">A complete manifest</h2>
+
+<pre><code>run_id: cm-zones-2026-annual-r3
+description: Critical Minerals annual mineral ID, 4 pilot zones
+
+grid:
+  crs: EPSG:4326
+  resolution: [0.0003, -0.0003]
+  tile_size: 1.0
+  origin: [-180, -90]
+  block: 512
+
+aoi:
+  zones: [bingham-canyon, cuprite-nv, leadville-co, south-central-az]
+
+time:
+  start: 2022-08-01
+  end:   2026-07-31
+  epoch: P1M              <span class="c"># monthly snapshots (the voting population)</span>
+  deliver: P1Y            <span class="c"># annual product (the delivery cadence)</span>
+
+inputs:
+  index: s3://emit-l3/index/emit-granules.parquet
+  roles:
+    geometry:       {collection: EMITL1BOBS,  var: obs}
+    mineral:
+      collection: EMITL2BMIN
+      var: group_1_mineral_id
+      class_table:                        <span class="c"># where this product keeps its own table</span>
+        source: embedded
+        path: /mineral_metadata
+        key: index
+        attributes: [name, record, library, group, url]
+    mineral_uncert: {collection: EMITL2BMIN,  var: group_1_band_depth_unc}
+    mask:           {collection: EMITL2AMASK, var: mask}
+    frcov:          {collection: EMITL2BFRCOV, var: soil}   <span class="c"># already orthorectified</span>
+  band_aliases:
+    view_zenith:  {role: geometry, band: 5}
+    solar_zenith: {role: geometry, band: 4}
+
+aux:
+  slope: {uri: "s3://.../slope.tif", kind: continuous,  resampling: bilinear}
+  snow:  {uri: "s3://.../snow/{date}.tif", kind: categorical, resampling: nearest,
+          temporal: nearest, max_age: P3D}
+
+granule_filter:
+  - {build_version: b0107_v02}          <span class="c"># REQUIRED - vintage pinning</span>
+  - {max_cloud_fraction: 0.5, on_missing: fail}
+  - {max_solar_zenith: 70}
+  - {month_in: [8, 9, 10, 11]}          <span class="c"># recurring seasonal window</span>
+
+pixel_mask:
+  - {ref: emit.masks:EdgeTrim, columns: 7}     <span class="c"># sensor-space; detector edges</span>
+  - {ref: emit.masks:L2AStandard, flags: [cloud, cirrus, water, spacecraft]}
+  - {ref: emit.masks:SoilFraction, min_soil: 0.65}
+
+scorer:
+  ref: cleanest_nadir
+  params: {slope_penalty: 0.5}
+
+reducer:
+  ref: mode_through_time
+  params: {min_count: 3, ignore: [0, -4], tie_break: highest_score}
+
+outputs:
+  bucket: s3://emit-l3-products
+  formats: [cog, netcdf]
+  stac: true
+  render:
+    mineral_id:
+      mapper: categorical
+      classes: "@ref:lumping/cm-v1.yaml"
+      on_unmapped: fail
+      alpha_from: {band: agreement, domain: [0.3, 0.8], range: [60, 255]}
+
+plugins:
+  wheel: s3://emit-l3/plugins/stratum_emit-0.4.2-py3-none-any.whl
+
+budget:
+  max_tiles: 64
+  max_granules: 12000
+  max_vcpu_hours: 400
+  on_exceed: require_approval</code></pre>
+
+<h2 id="lumping">Lumping resolves through the product&rsquo;s own class table</h2>
+
+<p>AMD&rsquo;s <code>hashmap</code> keys on raw position &mdash; <code>goethite: [3, 5, 6, 7,
+8]</code>. Positions shift when the reference matrix gains, loses or deduplicates rows, so a table
+keyed on them <strong>silently reassigns minerals on a version bump</strong>, with no error.</p>
+
+<p>The fix is not a better external table. It is to stop maintaining an external table at all: every
+delivered granule embeds its own, so lumping is expressed against <strong>semantic
+attributes</strong> and resolved to integers per granule at plan time.</p>
+
+<pre><code>lumping:
+  match_on: [library, record, group]     <span class="c"># attributes from the embedded table</span>
+  classes:
+    goethite:
+      - {library: sprlb06, record: 882,  group: 1}
+      - {library: splib06, record: 5736, group: 1}
+    pyrite:
+      - {library: splib06, record: 2568, group: 1}</code></pre>
+
+<p>Nothing here names a positional index, so the same lumping file survives a vintage change. What
+changes between vintages is which integers those attributes resolve <em>to</em>, and that resolution
+is recomputed per run from the granules actually being read. An entry matching zero or multiple rows
+is a <strong>plan-time error</strong>, not a runtime surprise.</p>
+
+<p>None of this is Tetracorder-specific: the framework matches attributes it was told to match, and
+<code>stratum_emit</code> supplies only the knowledge that <code>/mineral_metadata</code> is where
+EMIT keeps its table.</p>
+
+<h2 id="composition">Composition</h2>
+
+<p>AMD&rsquo;s layered config is a good idea and we keep it. It composes a base plus an ordered patch
+chain, so a variant is a patch rather than a copied file that drifts.</p>
+
+<pre><code>stratum plan -m base.yaml -p zones-pilot -p scorer-v3</code></pre>
+
+<p>Implemented as an explicit ordered dict-merge <strong>before</strong> validation, so the merged
+document is what gets validated and hashed. Lists replace rather than append &mdash; appending is
+convenient once and confusing forever.</p>
+
+<h2 id="budget">Budget is a first-class field</h2>
+
+<p>Not decoration. The planner computes the real fan-out &mdash; tiles &times; epochs &times; blocks
+&times; granules &mdash; before any compute is provisioned, compares it to the ceiling, and on
+exceedance parks the execution on a task token awaiting human approval.</p>
+
+<div class="warn">
+  <span class="label">Why this is not optional</span>
+  <p>The difference between one zone and the globe is <strong>one line of YAML</strong>. A typo in a
+  date range is otherwise a five-figure mistake, and this pipeline actively invites that mistake.</p>
+</div>
+
+<h2 id="validation">Validation at plan time</h2>
+
+<p>Everything below fails in stage 1, loudly, while it is cheap:</p>
+
+<ul>
+<li>schema validity (Pydantic v2) with precise error locations;</li>
+<li>named scorer / reducer / mapper / mask plugins resolve, and versions are recordable;</li>
+<li>every plugin&rsquo;s <code>required_roles</code> present in <code>inputs.roles</code>;</li>
+<li>every plugin&rsquo;s <code>required_aux</code> declared in <code>aux</code> &mdash; undeclared
+reads are refused;</li>
+<li>aux sources exist, are readable, and have consistent <code>kind</code> / <code>resampling</code>;</li>
+<li><code>capability</code> and <code>halo</code> consistent with <code>block</code>;</li>
+<li><code>epoch</code> divides <code>deliver</code> sensibly;</li>
+<li>every <code>lumping</code> entry resolves to <strong>exactly one</strong> row in the contributing
+granules&rsquo; embedded class tables, and every class referenced by a colour table exists after
+lumping;</li>
+<li>the contributing granules&rsquo; class tables <strong>agree by fingerprint</strong>, or a
+cross-vintage remap is explicitly permitted;</li>
+<li>filter <code>on_missing</code> policy explicit;</li>
+<li><strong>a vintage is pinned</strong>, and the frozen index does not span multiple vintages
+unless explicitly allowed;</li>
+<li>budget present and non-infinite.</li>
+</ul>
+
+<h2 id="provenance">What the run records about itself</h2>
+
+<div class="key">
+  <span class="label">The claim we have to be able to make</span>
+  <p>A run is reproducible <strong>from its manifest hash alone.</strong> Same frozen index, same
+  plugin versions, same aux content, same result.</p>
+</div>
+
+<p>Neither existing pipeline can make that claim: both query a coverage file refreshed on a 24-hour
+timer, so the same inputs select different granules on different days and nothing records which.
+This is not ceremony &mdash; the product will be regenerated across Tetracorder versions,
+reprocessing campaigns and years, and someone will need to explain why two versions of the same tile
+differ.</p>
+
+<p>Three parts of the immutable run record carry the weight:</p>
+
+<div class="tw">
+<table>
+<thead><tr><th>Section</th><th>Pins</th></tr></thead>
+<tbody>
+<tr><td><code>inputs</code></td><td>Exactly what was read &mdash; frozen index URI and hash, granule count, class-table fingerprints, collection versions</td></tr>
+<tr><td><code>code</code></td><td>Exactly what ran &mdash; by image <em>digest</em> rather than tag, plus plugin wheel hash and <code>regrid_algo_version</code></td></tr>
+<tr><td><code>filters</code></td><td>What was excluded and why, with counts. A run that quietly discarded 812 granules should say so where someone will see it.</td></tr>
+</tbody>
+</table>
+</div>
+
+<p>Alongside it, a human-readable run report answers, without anyone opening JSON: how many granules
+each filter removed; cache hit rate by artifact type and what a rerun would cost; which blocks
+failed and why; cost against budget; and <strong>a diff against the previous run of the same
+manifest lineage</strong>. That last one matters most in practice &mdash; &ldquo;this run selected
+812 fewer granules than the last one&rdquo; is the signal that catches an upstream reprocessing
+before it becomes a mystery in the product.</p>
+
+</div>
+<nav class="pager" aria-label="Pagination"></nav>
+<footer class="site">
+  Source: <a href="../specs/09-run-manifest.md"><code>specs/09-run-manifest.md</code></a>,
+  <a href="../specs/10-provenance.md"><code>10-provenance.md</code></a>,
+  <a href="../specs/07-output-mapping.md"><code>07-output-mapping.md</code></a>
+</footer>
+</main>
+</div>
+<script src="../assets/stratum.js"></script>
+</body>
+</html>

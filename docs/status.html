@@ -1,0 +1,206 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Status &amp; open questions · Stratum</title>
+<link rel="stylesheet" href="assets/stratum.css">
+</head>
+<body data-page="status" data-root="">
+<a class="skip" href="#content">Skip to content</a>
+<header class="masthead">
+  <a class="wordmark" href="index.html"><span class="glyph"></span>Stratum</a>
+  <span class="stage">Design stage</span>
+  <span class="spacer"></span>
+  <span class="repo">EMIT Critical Minerals L3</span>
+</header>
+<div class="layout">
+<nav id="sidebar" aria-label="Documentation"></nav>
+<main id="content">
+<div class="prose">
+
+<h1>Status &amp; open questions</h1>
+<p class="lede">What is settled, what is still moving, and what is waiting on someone else.</p>
+
+<h2 id="clock">The clock</h2>
+
+<div class="warn">
+  <span class="label">Time-critical</span>
+  <p>Reprocessing of the <strong>entire EMIT catalog</strong> begins around <strong>September
+  2026</strong> and takes roughly <strong>75 days</strong>, regenerating every mineral map against
+  Tetracorder 6 with updated reflectance. <strong>The mineral classes shift.</strong></p>
+  <p>For those ~10 weeks the archive is <strong>mixed-vintage</strong>. Any run that does not pin a
+  vintage will silently blend two incompatible products into a plausible-looking result. Nothing in
+  the data announces the problem.</p>
+</div>
+
+<p>This is why vintage pinning is mandatory rather than advisory, why <code>build_version</code> is
+an indexed first-class column, and why plan-time validation refuses a frozen index spanning
+multiple vintages unless the manifest explicitly opts in.</p>
+
+<h2 id="locked">Settled</h2>
+
+<div class="tw">
+<table>
+<thead><tr><th>Area</th><th>Decision</th></tr></thead>
+<tbody>
+<tr><td>Overall shape</td><td>Five stages, five plugin hooks. Geometry cached and independent of science.</td></tr>
+<tr><td>Compute unit</td><td>Block, distinct from tile. Halos declared by plugins. Block size never changes output.</td></tr>
+<tr><td>Core types</td><td>All of <a href="reference/types.html">Core types</a> except two open fields, grounded in a real delivered granule.</td></tr>
+<tr><td>Class identity</td><td>Products carry their own class tables; lumping matches on attributes, resolved per granule at plan time.</td></tr>
+<tr><td>Nodata</td><td><code>-9999</code> &ne; <code>0</code>. Internal convention is explicit validity masks; sentinels re-applied only on write.</td></tr>
+<tr><td>Execution</td><td>Split plane &mdash; Step Functions + Lambda control, Batch/Spot data, routed per work item from measured estimates.</td></tr>
+<tr><td>Packaging</td><td>Container image Lambdas, one image with Lambda and CLI entrypoints. Not zip layers.</td></tr>
+<tr><td>Config boundary</td><td>Terraform owns the platform; the manifest owns the science.</td></tr>
+<tr><td>Tech stack</td><td><a href="decisions/index.html">ADR-0001</a> &mdash; Python 3.11, pixi, xarray, DuckDB, Pydantic v2, click, pytest.</td></tr>
+<tr><td>Relationship to SpectralUtil</td><td>Wrap, never fork. Two contributions to send upstream: a pluggable selection seam and a persisted score band.</td></tr>
+</tbody>
+</table>
+</div>
+
+<h2 id="blocking">Open, and blocking</h2>
+
+<p>These change the design if answered one way rather than another.</p>
+
+<div class="tw">
+<table>
+<thead><tr><th>Question</th><th>Why it matters</th><th>Who</th></tr></thead>
+<tbody>
+<tr>
+  <td>Is <code>freq-N</code> in EMIT-AMD a frequency <em>rank</em> or a time <em>period</em>?</td>
+  <td>Decides how much of mode-through-time is genuinely new work versus a port</td>
+  <td>James</td>
+</tr>
+<tr>
+  <td>Are <code>software_build_version</code> / <code>product_version</code> exposed by CMR <strong>before download</strong>?</td>
+  <td>If not, vintage filtering cannot be an index predicate and must be recorded at index-build time. Time-critical.</td>
+  <td>Phil</td>
+</tr>
+<tr>
+  <td>Mode over mineral ID directly, or over something continuous first?</td>
+  <td>The direction is clear &mdash; reduce continuous quantities, classify at the end &mdash; but the delivered product is categorical, so the shape of the baseline reducer depends on it</td>
+  <td>Phil</td>
+</tr>
+<tr>
+  <td>AWS account, quota, and Earthdata credential path</td>
+  <td>The long pole for anything cloud. Blocks nothing in the first slice.</td>
+  <td>&mdash;</td>
+</tr>
+<tr>
+  <td>Zone selection for the pilot</td>
+  <td>Determines the first real fixtures and the V002 comparison target</td>
+  <td>Dana</td>
+</tr>
+<tr>
+  <td>Confirm the 7-column edge trim and 2&ndash;3-column slit-dust numbers</td>
+  <td>Ships as a built-in default in <code>stratum_emit</code>, so the number matters</td>
+  <td>Phil</td>
+</tr>
+</tbody>
+</table>
+</div>
+
+<h2 id="design-open">Open, but not blocking</h2>
+
+<p>Real questions with a working default. Each is recorded at the end of its spec.</p>
+
+<div class="tw">
+<table>
+<thead><tr><th>Area</th><th>Question</th><th>Working answer</th></tr></thead>
+<tbody>
+<tr><td>Grid</td><td>Do we need a second, coarser grid for the ASA-style 0.5&deg; aggregate?</td><td>Probably a separate product built from these outputs</td></tr>
+<tr><td>Grid</td><td>Should block size be per-stage &mdash; larger for regrid, smaller for a materialized reduce?</td><td>One size until a pilot is measured</td></tr>
+<tr><td>Index</td><td>Build from CMR, CMR-STAC, or <code>earthaccess</code>?</td><td><code>earthaccess</code> &mdash; already a SpectralUtil dependency and it handles EDL</td></tr>
+<tr><td>Index</td><td>Index SDS-internal collections as well as DAAC ones?</td><td>DAAC, since L3 must touch every delivered file &mdash; but reprocessing may need internal builds</td></tr>
+<tr><td>Regrid</td><td>Sub-pixel / area-weighted resampling, or is nearest-neighbour sufficient?</td><td>Nearest &mdash; both existing pipelines use it</td></tr>
+<tr><td>Scorer</td><td>Does a <code>Scorer</code> need to see the previous epoch's snapshot?</td><td>No &mdash; it would break epoch independence and therefore parallelism</td></tr>
+<tr><td>Reducer</td><td>Should a <code>Reducer</code> see per-epoch <em>scores</em> as well as values?</td><td>Leaning yes; cheap now, awkward later. Left available in <code>SnapshotStack</code>.</td></tr>
+<tr><td>Types</td><td>Should <code>ClassTable</code> be <code>pyarrow.Table</code> or plain columns?</td><td>Arrow &mdash; makes fingerprinting and attribute matching easy, and is implied by GeoParquet</td></tr>
+<tr><td>Types</td><td>Is fingerprint-and-assert enough for class-table agreement, or is cross-vintage remapping needed in v1?</td><td>Assert first; verify on a real multi-granule set spanning the reprocessing boundary before deciding</td></tr>
+<tr><td>Aux</td><td>Remote HTTP sources, or require staging into our bucket first?</td><td>Staging &mdash; more reproducible, avoids third-party uptime mid-run, costs a copy</td></tr>
+<tr><td>Aux</td><td>Do we need vector&rarr;vector spatial joins, e.g. "distance to nearest mine"?</td><td>Plausible near-term ask; not expressible as a burn</td></tr>
+<tr><td>Output</td><td>Does MMGIS want RGBA COGs, or single-band-plus-colour-table it styles itself?</td><td>Materially changes what stage 5 emits &mdash; worth asking before we build it</td></tr>
+<tr><td>Output</td><td>Is the legend a STAC <code>classification</code> entry, a GDAL colour table, or standalone JSON?</td><td>Probably all three; the authoritative one should be named</td></tr>
+<tr><td>Execution</td><td>Should <code>Plan</code> itself be a Batch job for global runs?</td><td>Enumerating 44k blocks may exceed Lambda's 15 minutes</td></tr>
+<tr><td>Execution</td><td>Is <code>ToleratedFailurePercentage</code> acceptable for a delivered product?</td><td>Tolerate in experiments; zero tolerance for delivery</td></tr>
+<tr><td>Manifest</td><td>YAML or TOML?</td><td>YAML with a strict loader (no implicit typing)</td></tr>
+<tr><td>Manifest</td><td>Is <code>run_id</code> user-supplied or derived from the manifest hash?</td><td>Possibly both &mdash; <code>{user_label}-{hash[:8]}</code></td></tr>
+</tbody>
+</table>
+</div>
+
+<h2 id="slice">The first implementation slice</h2>
+
+<p>Deliberately narrow, and chosen so that finishing it proves the abstraction rather than the
+plumbing.</p>
+
+<div class="key">
+  <span class="label">Scope</span>
+  <p>One tile, one epoch, <code>MinViewZenith</code>, staged granules on local disk, output diffed
+  against a V002 cell. <strong>No</strong> blocks, caching, Step Functions, Batch, or manifest
+  patching.</p>
+</div>
+
+<p>Build order within it: <strong>types &rarr; L2B reader &rarr; regrid wrapper &rarr; resolve
+&rarr; publish.</strong></p>
+
+<p>The success criterion is parity, not novelty. If a <code>streaming</code> scorer with a single
+epoch and a no-op reducer does not reproduce V002 exactly, the abstraction is wrong &mdash; and it
+is far cheaper to discover that now than after the orchestration is built on top of it.</p>
+
+<p>The first concrete deliverable inside that slice is the <strong>L2B mineral reader</strong>.
+<code>spec_io.open_netcdf</code> dispatches on filename substrings and has readers for EMIT
+<code>rdn</code>, <code>rfl</code>, <code>obs</code> and <code>l2a_mask</code> plus airborne sensors
+&mdash; but none for the L2B mineral products, which are the primary Critical Minerals input. An
+<code>EMIT_L2B_MIN_*.nc</code> currently raises <code>ValueError: Unknown file type</code>.</p>
+
+<h2 id="not-scope">Explicitly out of scope</h2>
+
+<div class="tw">
+<table>
+<thead><tr><th>Thing</th><th>Why not here</th></tr></thead>
+<tbody>
+<tr><td>The <strong>reclaimer</strong> algorithm &mdash; subtracting vegetation components before mineral mapping</td><td>Folded in <em>upstream</em> of mineral mapping, not in the mosaicking process. Recorded so it is not mistaken for a gap.</td></tr>
+<tr><td>Rewriting <code>SpectralUtil</code>'s regrid</td><td>It is good code. Wrap it; contribute the two changes upstream.</td></tr>
+<tr><td>A live STAC catalogue service</td><td>L3 needs a <em>frozen</em> snapshot. We can populate our index from CMR/STAC without depending on one at run time.</td></tr>
+<tr><td>dask</td><td>Block decomposition is already the parallelism model; a second scheduler inside a worker competes with it.</td></tr>
+</tbody>
+</table>
+</div>
+
+<h2 id="second-consumer">A second consumer already exists</h2>
+
+<p>Colorado School of Mines &mdash; with CMU and U. Wisconsin&rsquo;s Macrostrat &mdash; is
+independently building the same thing: tiling Tetracorder mineral maps into state- and country-wide
+mosaics, with a GUI and a QGIS data stream, moving to AVIRIS-5, and running Tetracorder on a
+supercomputer via a CMU wrapper. Their cross-scale ambition runs from EMIT&rsquo;s 60 m through
+AVIRIS at ~60 cm to UAV imagery at 6&ndash;10 cm.</p>
+
+<p>That makes &ldquo;a framework, not an EMIT program&rdquo; a present requirement rather than an
+aspiration, and it is why input roles and band aliases resolve per collection rather than being
+hard-coded. They independently confirmed two of our findings: QGIS is the working visualization
+path, and <code>earthaccess</code> is the access mechanism.</p>
+
+<p>One open question from their side worth carrying: <em>why does NASA distribute ten per-mineral
+abundance maps rather than a single classified map?</em> That is the collection-layout question
+arriving from outside, and it suggests both representations have real users.</p>
+
+<div class="note">
+  <span class="label">Attribution caveat</span>
+  <p>The tag-up record is voice-derived and speaker attribution is unreliable. Claims in
+  <a href="notes/2026-08-28-mines-tagup.md">the notes</a> are attributed by <em>content</em> rather
+  than by transcript headers, timestamps are given so each can be checked, and anything
+  load-bearing should be confirmed before it is acted on.</p>
+</div>
+
+</div>
+<nav class="pager" aria-label="Pagination"></nav>
+<footer class="site">
+  Rolled up from the open-questions section at the end of each
+  <a href="specs/00-overview.md">component spec</a>
+</footer>
+</main>
+</div>
+<script src="assets/stratum.js"></script>
+</body>
+</html>

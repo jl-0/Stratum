@@ -1,0 +1,235 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Why this architecture · Stratum</title>
+<link rel="stylesheet" href="../assets/stratum.css">
+</head>
+<body data-page="design/architecture" data-root="../">
+<a class="skip" href="#content">Skip to content</a>
+<header class="masthead">
+  <a class="wordmark" href="../index.html"><span class="glyph"></span>Stratum</a>
+  <span class="stage">Design stage</span>
+  <span class="spacer"></span>
+  <span class="repo">EMIT Critical Minerals L3</span>
+</header>
+<div class="layout">
+<nav id="sidebar" aria-label="Documentation"></nav>
+<main id="content">
+<div class="prose">
+
+<h1>Why this architecture</h1>
+<p class="lede">Every choice here was forced by something read out of an existing pipeline or a
+delivered file. This page is the evidence, and what it ruled out.</p>
+
+<h2 id="reframing">The reframing that makes everything else possible</h2>
+
+<p>V002 and EMIT-AMD use the same GLT machinery in <em>opposite</em> ways. Understanding why is the
+single most useful thing in the prior art.</p>
+
+<div class="tw">
+<table>
+<thead><tr><th></th><th>V002</th><th>EMIT-AMD</th></tr></thead>
+<tbody>
+<tr><th>GLTs per tile</th><td>one, for all granules</td><td>one <strong>per granule</strong></td></tr>
+<tr><th>Selection</th><td>fused into regrid, streaming argmin</td><td>deferred to a post-apply reduction</td></tr>
+<tr><th>Criterion</th><td><code>--criteria_band 5 --criteria_mode min</code> (view zenith)</td><td>none at regrid</td></tr>
+<tr><th>Memory</th><td>O(grid)</td><td>O(grid &times; N)</td></tr>
+<tr><th>Temporal integration</th><td><strong>impossible</strong> &mdash; observations discarded</td><td>yes, the whole point</td></tr>
+</tbody>
+</table>
+</div>
+
+<p>They look like different architectures. They are the same one:</p>
+
+<div class="key">
+  <span class="label">The unification</span>
+  <p>Both are <strong>reductions over an observation stack</strong>. V002&rsquo;s reducer happens to
+  be decomposable &mdash; a running argmin &mdash; so it can be fused into the regrid loop for
+  free. AMD&rsquo;s is not, so it must materialize. The difference is an optimization, not a
+  design.</p>
+</div>
+
+<p>Which yields the statement the rest of the system is built on:</p>
+
+<div class="key">
+  <span class="label">Consequence</span>
+  <p>The GLT is a <strong>regrid operator</strong>, not the mosaic. Selection is a separate
+  reduction that <em>may or may not</em> be fused into it.</p>
+</div>
+
+<p>That is what makes temporal aggregation expressible at all, and it is why stage 2 carries no
+science. It also means both existing behaviours survive as configurations rather than as special
+cases: a <code>streaming</code> scorer with a single epoch and a no-op reducer reproduces V002
+exactly. That parity check is how we know the abstraction is honest rather than merely general.</p>
+
+<h2 id="selection-seam">The seam itself</h2>
+
+<p>The entire selection decision in V002 lives in about eight lines of
+<code>spectral_util/mosaic/mosaic.py</code>:</p>
+
+<pre><code><span class="c"># obs value at the cell, and what is already there</span>
+ob = raw_ob[np.abs(sub_glt[...,1])-1, np.abs(sub_glt[...,0])-1]
+existing_crit = criteria[sub_glt_insert_idx[...,0], sub_glt_insert_idx[...,1]]
+valid = np.logical_and(sub_glt[...,0] != nodata, ob != local_nodata)
+
+<span class="k">if</span> criteria_mode == <span class="k">"min"</span>:
+    crit_mask = np.logical_and(ob &lt; existing_crit, valid)
+<span class="k">elif</span> criteria_mode == <span class="k">"max"</span>:
+    crit_mask = np.logical_and(ob &gt; existing_crit, valid)</code></pre>
+
+<p>This is good code. It is also the only place a science team can express a preference, and the
+vocabulary available to them is one band index and the word <code>min</code> or <code>max</code>.
+Replacing that comparison with a callable is roughly a fifteen-line change, and it is one of two
+contributions worth making upstream to SpectralUtil rather than vendoring.</p>
+
+<p>The other is small and consequential: <code>build_obs_nc</code> declares four band names
+&mdash; <code>GLT X</code>, <code>GLT Y</code>, <code>File Index</code>, <code>OBS val</code>
+&mdash; and allocates three. The criteria array is computed and thrown away. For a product whose
+premise is defensible selection, <strong>&ldquo;why did this pixel win?&rdquo; must be answerable
+from the artifact</strong>, so Stratum persists the score band.</p>
+
+<div class="note">
+  <span class="label">Wrap, never fork</span>
+  <p>EMIT-AMD depends on a <em>personal fork</em> of SpectralUtil for a CLI that upstream now
+  ships. That is a trap worth naming explicitly so it is not repeated: contributions go upstream,
+  everything else is built alongside.</p>
+</div>
+
+<h2 id="blocks">Why blocks exist</h2>
+
+<p>EMIT-AMD asks Slurm for 32&nbsp;GB, 4 CPUs and up to 24 hours per 1&deg; bin, because a
+materialized observation stack over a whole tile is enormous. Ported naively to the cloud that is a
+large, long, expensive Batch job where one late failure discards everything.</p>
+
+<div class="tw">
+<table>
+<thead><tr><th>Materialized stack</th><th class="num">1&deg; tile</th><th class="num">512&times;512 block</th></tr></thead>
+<tbody>
+<tr><td>Cells</td><td class="num">11.1 M</td><td class="num">0.26 M</td></tr>
+<tr><td>&times; 100 obs &times; 10 bands &times; float32</td><td class="num">~44 GB</td><td class="num">~1.0 GB</td></tr>
+<tr><td>Observations intersecting the unit</td><td class="num">all</td><td class="num">a subset</td></tr>
+<tr><td>Fits a 10 GB Lambda</td><td class="num">no</td><td class="num"><strong>yes</strong></td></tr>
+<tr><td>Blast radius of one failure</td><td class="num">whole tile</td><td class="num">1/42 of a tile</td></tr>
+</tbody>
+</table>
+</div>
+
+<p>Three things follow. The materialized reduction fits a serverless worker. Parallelism rises
+roughly 40&times;, which matters against a 10,000-child Distributed Map. And retries get cheap
+enough to make Spot instances economically sensible rather than merely cheaper-on-paper.</p>
+
+<p>There is a second, independent argument. <code>write_cog</code> builds the whole output through
+GDAL&rsquo;s in-memory <code>MEM</code> driver, plus overviews, before writing &mdash; so peak
+memory scales with <strong>tile area regardless of observation count</strong>. Blocks attack the
+term that actually dominates.</p>
+
+<h2 id="pushback">Where the original sketch met the service limits</h2>
+
+<p>The proposal that started this work sketched AWS Step Functions with Lambda as the main engine
+and custom cost functions delivered as Lambda layers. Two of those three survive; the reasoning
+matters because the replacements preserve the intent.</p>
+
+<div class="tw">
+<table>
+<thead><tr><th>Sketch</th><th>Finding</th><th>What replaced it</th></tr></thead>
+<tbody>
+<tr>
+  <td>Lambda is the main engine</td>
+  <td>Lambda caps at 15 min / 10 GB / 10 GB <code>/tmp</code>. AMD needs 32 GB and hours <em>per tile</em>.</td>
+  <td><strong>A router, not a choice.</strong> Block decomposition shrinks the unit until Lambda fits for most work; the planner routes the rest to Batch from measured estimates.</td>
+</tr>
+<tr>
+  <td>Cost functions are Lambda invocations</td>
+  <td>A per-pixel decision cannot pay an invocation each. It must run in-process, vectorized.</td>
+  <td><strong>In-process plugins</strong> resolved by entry point. A wheel fetched from S3 at cold start delivers the <em>ergonomics</em> the layer idea was reaching for &mdash; edit, publish, rerun in ~90 s.</td>
+</tr>
+<tr>
+  <td>Dependencies ship as Lambda layers</td>
+  <td>Zip layers cap at 250 MB unzipped across all layers. GDAL + netCDF4 + scipy + numpy exceeds that before any of our code.</td>
+  <td><strong>Container image Lambdas</strong> (10 GB). One image carries both a Lambda entrypoint and a CLI entrypoint, so identical code runs on Lambda, Batch, the cluster and a laptop.</td>
+</tr>
+<tr>
+  <td>Stateful workflow orchestration</td>
+  <td>Confirmed &mdash; Distributed Map reads its work list from S3 and fans out to 10,000 children.</td>
+  <td><strong>Kept as sketched.</strong> See <a href="execution.html">Execution</a>.</td>
+</tr>
+<tr>
+  <td>Terraform generates the infrastructure</td>
+  <td>Confirmed, with a boundary worth naming.</td>
+  <td><strong>Terraform owns the platform; the manifest owns the science.</strong> <a href="../decisions/index.html">ADR-0002</a>.</td>
+</tr>
+</tbody>
+</table>
+</div>
+
+<h2 id="prior-art">What the existing pipelines get right</h2>
+
+<p>Most of this design is prior art rearranged, and it is worth being explicit about what is
+inherited rather than invented.</p>
+
+<div class="tw">
+<table>
+<thead><tr><th>From</th><th>Kept</th></tr></thead>
+<tbody>
+<tr><td>SpectralUtil</td><td>The KD-tree regrid itself, the 3-band GLT format, the sign convention marking interpolated cells, and the <code>build_obs_nc</code> guard rails that already refuse a positive <em>y</em> resolution and metres-in-degrees confusion.</td></tr>
+<tr><td>EMIT-AMD</td><td>Deferred reduction. Layered config composition (<code>base &larr; patch &larr; patch</code>), which is a genuinely good idea. The <code>stack.mincount</code> / <code>stack.ignore</code> parameters, which are the only working precedent for mode-through-time.</td></tr>
+<tr><td>V002</td><td>Streaming argmin as a first-class execution mode, not a legacy path. Its memory profile &mdash; independent of observation count &mdash; is worth preserving.</td></tr>
+<tr><td>The operators</td><td><code>pipeline.sh</code>&rsquo;s <code>steps=([query]=1 [apply-glt]=1 ...)</code> switches are hand-rolled caching. Content addressing makes that judgement automatic and correct.</td></tr>
+</tbody>
+</table>
+</div>
+
+<h2 id="fixed">And what it fixes</h2>
+
+<div class="tw">
+<table>
+<thead><tr><th>Observed</th><th>Consequence</th><th>Addressed by</th></tr></thead>
+<tbody>
+<tr><td>Granule selection scans <code>coverage_pub.json</code> fetched from the <strong>MMGIS load balancer</strong>, refreshed whenever it is over 24 h old</td><td>The archival L3 product&rsquo;s inputs depend on a viewer service being up, and the same manifest selects different granules on different days with nothing recording which</td><td>Indexed GeoParquet + a <strong>frozen</strong> per-run candidate set</td></tr>
+<tr><td><code>if 'Total Cloud Fraction' in feat['properties'] and ... &lt;= max</code></td><td>A granule whose record <em>lacks</em> the key is dropped silently, indistinguishable from &ldquo;too cloudy&rdquo;</td><td>Explicit <code>on_missing: reject | keep | fail</code>, defaulting to <code>fail</code>, with per-filter removal counts in the run report</td></tr>
+<tr><td><code>pipeline.sh</code> unconditionally <code>rm -r</code>s <code>glt/</code> and <code>applied/</code></td><td>No resume at all &mdash; a re-run rebuilds every GLT</td><td>Content-addressed cache, shared across runs and projects</td></tr>
+<tr><td><code>--n_cores 1</code> hardcoded while requesting <code>--cpus-per-task=4</code></td><td>Three of four CPUs idle through the compute-bound KD-tree phase</td><td><code>n_cores</code> set from the actual worker allocation</td></tr>
+<tr><td><code>watch.sh</code> greps stderr for <code>error|fail|oom</code> and matches <code>*Finished*</code> against a last line that reads <code>Done</code></td><td>Any library warning containing &ldquo;error&rdquo; reads as failure; an OOM-killed task that wrote no stderr reads as success. Broken as written.</td><td>Step Functions <code>ResultWriter</code> per-item outcomes &mdash; failures are a queryable list, not a log grep</td></tr>
+<tr><td>Delivered rasters are <code>*.colors.tiff</code> RGBA; the colormap lives only in a cluster config</td><td>Nothing downstream can restyle or recount. The <code>counts</code> product was <em>dropped entirely</em> because the coastal mask burns band 4 &mdash; alpha &mdash; which a single-band raster does not have.</td><td>Data and image both ship, legend as sidecar and STAC entry</td></tr>
+<tr><td><code>spec_io.open_netcdf</code> dispatches on filename substrings and has no L2B mineral reader</td><td>The primary Critical Minerals input raises <code>ValueError: Unknown file type</code>. AMD sidestepped it by reading cluster ENVI files.</td><td>An L2B reader is the first concrete deliverable; product type is passed explicitly from the role declaration rather than sniffed from a path</td></tr>
+<tr><td>EDL S3 credentials last roughly one hour</td><td>AMD&rsquo;s 24-hour jobs would fail partway through if ported naively</td><td>Refresh wrapper around long reads; Lambda&rsquo;s 15-minute ceiling makes it a non-issue there</td></tr>
+</tbody>
+</table>
+</div>
+
+<h2 id="constraints">Constraints that are not ours to choose</h2>
+
+<div class="tw">
+<table>
+<thead><tr><th>Constraint</th><th>Where it binds</th></tr></thead>
+<tbody>
+<tr><td>EMIT data lives in <code>lp-prod-protected</code>, us-west-2, behind Earthdata Login</td><td>Pins the deployment region; Step Functions <code>ItemReader</code> needs buckets in the same account and region</td></tr>
+<tr><td>EMIT is a push-broom: every column is a different detector</td><td>Cross-track edges need trimming (7 columns each side); along-track granule boundaries are a download artifact and need nothing</td></tr>
+<tr><td>Catalog reprocessing begins ~Sept 2026 and runs ~75 days</td><td>The archive is <strong>mixed-vintage</strong> throughout, so vintage pinning is mandatory rather than advisory</td></tr>
+<tr><td>Tetracorder output is binarized</td><td>Information is already lost before we see it &mdash; which argues for reducing over continuous quantities and classifying at the end</td></tr>
+<tr><td>Colorado School of Mines is building the same thing for AVIRIS-5 and UAV imagery</td><td>Multi-instrument support is a present requirement, not a someday-feature</td></tr>
+</tbody>
+</table>
+</div>
+
+<div class="note">
+  <span class="label">Full write-up</span>
+  <p>The original research proposal &mdash; longer, with the complete service-limit analysis and
+  more of the source reading &mdash; is preserved at
+  <a href="Cloud-Mosaic-Architecture.html">Cloud-Mosaic-Architecture.html</a>.</p>
+</div>
+
+</div>
+<nav class="pager" aria-label="Pagination"></nav>
+<footer class="site">
+  Source: <a href="../specs/03-regrid-glt.md"><code>specs/03-regrid-glt.md</code></a>,
+  <a href="../specs/01-grid-tiling.md"><code>01-grid-tiling.md</code></a>,
+  <a href="../specs/02-granule-index.md"><code>02-granule-index.md</code></a>
+</footer>
+</main>
+</div>
+<script src="../assets/stratum.js"></script>
+</body>
+</html>

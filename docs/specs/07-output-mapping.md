@@ -73,7 +73,7 @@ provisioned.
 outputs:
   mineral_id:
     mapper: categorical
-    classes: "@ref:lumping/cm-v1.yaml"     # id-keyed, see §6
+    classes: "@ref:lumping/cm-v1.yaml"     # attribute-matched, see §6
     colors:
       pyrite:   [220,   5,  12]
       goethite: [174, 118, 163]
