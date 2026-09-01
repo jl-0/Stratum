@@ -32,8 +32,8 @@
 <tr><td><strong>Grid</strong></td><td>CRS + resolution + origin. A rule for where cell edges fall, with no extent of its own.</td></tr>
 <tr><td><strong>Tile</strong></td><td>A bounded rectangle of the grid. What you download.</td></tr>
 <tr><td><strong>Block</strong></td><td>A subdivision of a tile. What a worker processes. Never appears in outputs.</td></tr>
-<tr><td><strong>Epoch</strong></td><td>One time window, e.g. a month. Granules within it produce one snapshot.</td></tr>
-<tr><td><strong>Cadence</strong></td><td>The delivered temporal unit, e.g. a year. One or more epochs reduce into it.</td></tr>
+<tr><td><strong>Epoch</strong></td><td><strong>The unit of one vote</strong>, e.g. a month. Granules within it resolve to exactly one snapshot, however many there are.</td></tr>
+<tr><td><strong>Delivery period</strong></td><td>One output product, e.g. a year. Reduced from the epochs in its <em>window</em>, which need not equal the period.</td></tr>
 <tr><td><strong>GLT</strong></td><td>Geographic lookup table. Maps a grid cell to (granule, raw row, raw col).</td></tr>
 <tr><td><strong>Role</strong></td><td>A logical input name — <code>geometry</code>, <code>mineral</code>, <code>mask</code> — resolved to a collection and variable per run.</td></tr>
 <tr><td><strong>Observation</strong></td><td>One granule's contribution to one block, after regrid and masking.</td></tr>
@@ -221,21 +221,82 @@ Batch, but it is honest about the cost rather than silently wrong.</p>
 <p>The default is <strong>512</strong>, aligned with typical COG internal tiling so windowed reads
 do not straddle chunks.</p>
 
-<h2 id="epoch">Epoch and cadence</h2>
+<h2 id="epoch">Epochs and delivery</h2>
 
-<p>Epochs are the <strong>voting population</strong>. Cadence is the <strong>delivery unit</strong>.</p>
+<p>Temporal reduction happens in <strong>two stages</strong>, and the reason for that is the thing
+worth understanding before you configure it.</p>
+
+<div class="tw">
+<table>
+<thead><tr><th>Stage</th><th>Unit</th><th>What happens</th><th>Decided by</th></tr></thead>
+<tbody>
+<tr><td>3 · Resolve</td><td>one <strong>epoch</strong></td><td>Every observation overlapping a cell in that epoch competes; one wins. Result is a <strong>snapshot</strong>.</td><td>Your <code>Scorer</code></td></tr>
+<tr><td>4 · Reduce</td><td>one <strong>delivery period</strong></td><td>The snapshots in that period are combined into the delivered bands.</td><td>Your <code>Reducer</code></td></tr>
+</tbody>
+</table>
+</div>
+
+<div class="key">
+  <span class="label">The point of the intermediate stage</span>
+  <p><strong>An epoch is one vote.</strong> Not one observation — one epoch. A month with twenty
+  overpasses and a month with one each contribute exactly one snapshot to the reduction.</p>
+</div>
+
+<p>That is what the two stages buy you. If you pooled a whole year of observations and took the
+most frequent class directly, a densely revisited month would outvote the rest of the year, and the
+result would describe the satellite's schedule as much as the ground. Resolving each month first
+normalises that away.</p>
+
+<p>So <code>epoch: P1M</code> with <code>deliver: P1Y</code> means: within each month the scorer
+picks a winner per cell, and the year's twelve snapshots then vote. You do not vote "on the month
+level" — <em>the month is the vote.</em></p>
+
+<p>Setting <code>epoch</code> equal to the delivery period collapses this to one stage: a single
+snapshot, no reduction, and the scorer alone decides from all observations pooled.</p>
+
+<h3 id="window">Delivering more often than the window slides</h3>
+
+<p>By default each product is built from the epochs inside its own period — consecutive products
+share nothing. That is often not what you want. A rolling composite delivers frequently while each
+output still draws on a longer span:</p>
 
 <pre><code>time:
   start: 2022-08-01
   end:   2026-07-31
-  epoch: P1M              <span class="c"># monthly snapshots — the voting population</span>
-  deliver: P1Y            <span class="c"># annual product — the delivery cadence</span></code></pre>
+  epoch: P1M              <span class="c"># the voting unit - one snapshot per month</span>
+  deliver:
+    every: P1M            <span class="c"># one product per month</span>
+    window: P13M          <span class="c"># each draws on 13 months of epochs</span>
+    align: center         <span class="c"># centred on the month being delivered</span></code></pre>
 
-<p>Monthly epochs delivered annually means up to twelve votes per output pixel. Set
-<code>epoch</code> equal to <code>deliver</code> and each product is built from a single snapshot,
-with no temporal reduction.</p>
+<p>The July 2024 product is then reduced from the thirteen monthly snapshots spanning January 2024
+through January 2025 — thirteen votes, centred on July. The August 2024 product uses twelve of the
+same snapshots plus one more.</p>
 
-<p>Rules that decide edge cases:</p>
+<div class="tw">
+<table>
+<thead><tr><th><code>align</code></th><th>The window sits</th><th>Use for</th></tr></thead>
+<tbody>
+<tr><td><code>exact</code></td><td>Exactly the delivery period. <strong>Default.</strong></td><td>Non-overlapping products — "the 2024 mosaic"</td></tr>
+<tr><td><code>center</code></td><td>Centred on the delivery period</td><td>Smoothed time series where each output is best-supported</td></tr>
+<tr><td><code>trailing</code></td><td>Ending at the end of the delivery period</td><td>"Best estimate as of now", using only past data</td></tr>
+<tr><td><code>leading</code></td><td>Starting at the start of the delivery period</td><td>Forward-looking composites</td></tr>
+</tbody>
+</table>
+</div>
+
+<p>The shorthand <code>deliver: P1Y</code> is exactly
+<code>{every: P1Y, window: P1Y, align: exact}</code>.</p>
+
+<div class="note">
+  <span class="label">Overlapping windows are nearly free</span>
+  <p>A snapshot is cached per <code>(tile, epoch, block, scorer)</code> — <strong>the delivery
+  period is not part of its key</strong>. So in the example above each monthly snapshot is computed
+  once and read by thirteen different products. Rolling windows cost you stage-4 reductions, not
+  stage-3 scoring.</p>
+</div>
+
+<h3 id="epoch-rules">Rules that decide edge cases</h3>
 
 <ul>
 <li>A granule belongs to the epoch containing its <strong>acquisition start</strong>, regardless of
@@ -243,6 +304,13 @@ end time.</li>
 <li>Epoch bounds are <strong>half-open</strong>, <code>[start, end)</code>, in UTC.</li>
 <li>Epochs are generated from <code>time.start</code> by the <code>epoch</code> period, not aligned
 to the calendar, unless you set <code>align: calendar</code>.</li>
+<li><code>window</code> must be a whole multiple of <code>epoch</code>, and at least
+<code>every</code>. Both are checked at plan time.</li>
+<li>Near <code>time.start</code> and <code>time.end</code> a window is <strong>truncated</strong>,
+so the first and last products are built from fewer epochs. That is visible in the
+<code>n_epochs</code> band, and <code>min_count</code> on the reducer is the lever for suppressing
+pixels that end up under-supported. The plan report lists the epoch count for every delivery
+period, so short ones are obvious before you run.</li>
 <li>A granule falling outside every epoch is an error at plan time, not a silent drop.</li>
 </ul>
 

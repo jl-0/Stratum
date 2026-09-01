@@ -17,8 +17,8 @@ Fixing these now, because three existing pipelines use the same words differentl
 | **Grid** | CRS + resolution + origin. A rule for where cell edges fall; has no extent of its own. |
 | **Tile** | A bounded rectangle of the grid. The unit of *product* delivery. |
 | **Block** | A subdivision of a tile. The unit of *compute*. Never appears in outputs. |
-| **Epoch** | One time window (e.g. a month). Granules within it produce one snapshot. |
-| **Cadence** | The delivered temporal unit (e.g. a year). One or more epochs reduce into it. |
+| **Epoch** | The unit of one vote. Granules within it resolve to exactly one snapshot. |
+| **Delivery period** | One output product. Reduced from the epochs in its *window*, which need not equal the period. |
 | **GLT** | Geographic lookup table. Maps a grid cell → (granule, raw row, raw col). |
 | **Role** | A logical input name (`geometry`, `mineral`, `mask`) resolved per collection. |
 | **Observation** | One granule's contribution to one block, after regrid and masking. |
@@ -29,8 +29,10 @@ Two distinctions that matter and are easy to lose:
 
 - **Tile ≠ block.** Tiles are a product decision (what a consumer downloads). Blocks are a
   compute decision (what fits in a worker). Changing block size must never change output.
-- **Epoch ≠ cadence.** Epochs are the voting population; cadence is the delivery unit. Monthly
-  epochs reduced to an annual product means twelve votes per output pixel.
+- **Epoch ≠ delivery period.** An epoch is one vote, however many observations fall in it — this
+  is what stops a densely revisited month outvoting a sparse one. A delivery period is one
+  product, reduced from the epochs in its window. Monthly epochs delivered annually gives twelve
+  votes per output pixel; a 13-month window delivered monthly gives thirteen, overlapping.
 
 ---
 
@@ -112,7 +114,7 @@ For each (tile, block): collapse the epoch snapshots through time via `Reducer`.
 Minerals this is mode-through-time, emitting the modal class, an agreement measure, an epoch
 count, and a runner-up.
 
-The stack here is *epochs*, not granules — small and bounded by the cadence. A no-op reducer
+The stack here is *epochs*, not granules — small and bounded by the delivery window. A no-op reducer
 reproduces V002 semantics exactly.
 
 ### Stage 5 — Publish

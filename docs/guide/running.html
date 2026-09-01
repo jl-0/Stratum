@@ -59,8 +59,8 @@ aoi:
 time:
   start: 2024-01-01
   end:   2024-12-31
-  epoch: P1Y
-  deliver: P1Y
+  epoch: P1Y              <span class="c"># one epoch = one vote; here there is only one</span>
+  deliver: P1Y            <span class="c"># so no temporal reduction happens at all</span>
 
 inputs:
   index: s3://emit-l3/index/emit-granules.parquet

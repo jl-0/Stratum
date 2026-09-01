@@ -18,7 +18,7 @@ versioned in git, reviewed like code, and hashed into provenance.
 |---|---|---|
 | ECR, image build/push | Grid, tiling, blocks | The framework package |
 | Batch compute envs, queues | AOI and zones | The plugin package |
-| Lambda functions, SFN definition | Time range, epoch, cadence | Contracts, aux accessor |
+| Lambda functions, SFN definition | Time range, epochs, delivery windows | Contracts, aux accessor |
 | S3 buckets + lifecycle | Filters, masks, scorer, reducer, mapper | Tests and fixtures |
 | IAM roles, EDL secret | Aux sources | |
 | Budgets, alarms | Budget ceilings, output formats | |
@@ -44,8 +44,14 @@ aoi:
 time:
   start: 2022-08-01
   end:   2026-07-31
-  epoch: P1M              # monthly snapshots (the voting population)
-  deliver: P1Y            # annual product (the delivery cadence)
+  epoch: P1M              # the voting unit - one snapshot per epoch
+  deliver: P1Y            # == {every: P1Y, window: P1Y, align: exact}
+
+# Long form, for a rolling composite delivered more often than the window slides:
+#
+# time:
+#   epoch: P1M
+#   deliver: {every: P1M, window: P13M, align: center}
 
 inputs:
   index: s3://emit-l3/index/emit-granules.parquet
@@ -156,7 +162,8 @@ Everything below fails in stage 1, loudly, while it is cheap:
 - aux sources exist and are readable;
 - `kind`/`resampling` consistent for each aux source;
 - `capability` and `halo` consistent with `block`;
-- `epoch` divides `deliver` sensibly;
+- `deliver.every` and `deliver.window` are whole multiples of `epoch`, and
+  `window >= every`; `deliver.align` is `exact` only when `window == every`;
 - every `lumping` entry resolves to **exactly one** row in the contributing granules' embedded
   class tables — matched on attributes, never on positional index — and every class referenced by
   a colour table exists after lumping ([07 §6](07-output-mapping.md));

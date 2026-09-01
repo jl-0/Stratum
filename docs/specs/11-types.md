@@ -150,6 +150,30 @@ Not previously specified anywhere:
   unless `align: calendar` is set.
 - A granule outside every epoch is an error at plan time, not a silent drop.
 
+### Epoch vs delivery period
+
+An **epoch** is the unit of one vote: stage 3 resolves it to exactly one snapshot per cell, however
+many observations fell in it. This is what normalises for revisit density — without it, a densely
+revisited month outvotes a sparse one and the reduction partly describes the acquisition schedule.
+
+A **delivery period** is one output product. It draws on the epochs inside its *window*, which need
+not equal the period itself:
+
+| `deliver` | Meaning |
+|---|---|
+| `P1Y` | Shorthand for `{every: P1Y, window: P1Y, align: exact}` — non-overlapping annual products |
+| `{every: P1M, window: P13M, align: center}` | One product a month, each reduced from 13 monthly snapshots centred on it |
+
+`align` is one of `exact`, `center`, `trailing`, `leading`. `window` must be a whole multiple of
+`epoch` and at least `every`; both are plan-time checks.
+
+Windows truncate at `time.start` / `time.end`, so edge products carry fewer epochs. That surfaces in
+`n_epochs` rather than being hidden, and `min_count` on the reducer is the suppression lever.
+
+**Snapshots do not key on the delivery period** ([06 §2](06-caching.md)), so overlapping windows
+re-run stage 4 only — a 13-month window delivered monthly computes each snapshot once and reads it
+thirteen times.
+
 ---
 
 ## 5. `ObsWindow`

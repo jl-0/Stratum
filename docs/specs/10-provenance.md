@@ -93,7 +93,7 @@ still leads back to its run.
 
 ## 4. STAC
 
-One item per (tile, cadence period), with assets for the data product, the rendered image, and the
+One item per (tile, delivery period), with assets for the data product, the rendered image, and the
 legend.
 
 | Extension | Carries |

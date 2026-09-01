@@ -40,7 +40,7 @@
 <tr><td><code>schema_version</code></td><td>no</td><td>Manifest schema version; defaults to current</td></tr>
 <tr><td><a href="#grid"><code>grid</code></a></td><td>yes</td><td>CRS, resolution, origin, tile and block size</td></tr>
 <tr><td><a href="#aoi"><code>aoi</code></a></td><td>yes</td><td>Area of interest</td></tr>
-<tr><td><a href="#time"><code>time</code></a></td><td>yes</td><td>Range, epoch period, delivery cadence</td></tr>
+<tr><td><a href="#time"><code>time</code></a></td><td>yes</td><td>Range, epoch period, delivery period and window</td></tr>
 <tr><td><a href="#inputs"><code>inputs</code></a></td><td>yes</td><td>Index location, role resolution, band aliases</td></tr>
 <tr><td><a href="#aux"><code>aux</code></a></td><td>no</td><td>Ancillary sources available to plugins</td></tr>
 <tr><td><a href="#granule-filter"><code>granule_filter</code></a></td><td>yes</td><td>Which granules are candidates</td></tr>
@@ -101,19 +101,43 @@ to the set of tiles intersecting it.</p>
   start: 2022-08-01
   end:   2026-07-31
   epoch: P1M
-  deliver: P1Y
-  align: calendar          <span class="c"># optional</span></code></pre>
+  deliver: P1Y             <span class="c"># shorthand for {every: P1Y, window: P1Y, align: exact}</span>
+  align: calendar          <span class="c"># optional - epoch generation, not window placement</span></code></pre>
+
+<p>Or the long form, when products should be delivered more often than the input window slides:</p>
+
+<pre><code>time:
+  start: 2022-08-01
+  end:   2026-07-31
+  epoch: P1M
+  deliver:
+    every: P1M             <span class="c"># one product per month</span>
+    window: P13M           <span class="c"># each built from 13 months of epochs</span>
+    align: center</code></pre>
 
 <div class="tw">
 <table>
 <thead><tr><th>Field</th><th>Type</th><th>Default</th><th>Notes</th></tr></thead>
 <tbody>
 <tr><td><code>start</code>, <code>end</code></td><td>date</td><td>—</td><td>UTC. Bounds are half-open, <code>[start, end)</code>.</td></tr>
-<tr><td><code>epoch</code></td><td>ISO 8601 period</td><td>—</td><td>The voting population — one snapshot per epoch</td></tr>
-<tr><td><code>deliver</code></td><td>ISO 8601 period</td><td><code>epoch</code></td><td>The delivery cadence. Must be a whole multiple of <code>epoch</code>.</td></tr>
-<tr><td><code>align</code></td><td><code>calendar</code></td><td>unset</td><td>Align epochs to calendar boundaries instead of counting from <code>start</code></td></tr>
+<tr><td><code>epoch</code></td><td>ISO 8601 period</td><td>—</td><td><strong>The voting unit.</strong> One snapshot per epoch, regardless of how many observations fall in it.</td></tr>
+<tr><td><code>deliver</code></td><td>period, or object</td><td><code>epoch</code></td><td>A bare period is shorthand for <code>{every: &lt;period&gt;, window: &lt;same&gt;, align: exact}</code></td></tr>
+<tr><td><code>deliver.every</code></td><td>ISO 8601 period</td><td>—</td><td>How often a product is emitted. Must be a whole multiple of <code>epoch</code>.</td></tr>
+<tr><td><code>deliver.window</code></td><td>ISO 8601 period</td><td><code>every</code></td><td>Span of epochs feeding each product. Must be ≥ <code>every</code> and a whole multiple of <code>epoch</code>.</td></tr>
+<tr><td><code>deliver.align</code></td><td>enum</td><td><code>exact</code></td><td><code>exact</code> | <code>center</code> | <code>trailing</code> | <code>leading</code> — where the window sits relative to the delivery period</td></tr>
+<tr><td><code>align</code></td><td><code>calendar</code></td><td>unset</td><td>Align <em>epoch generation</em> to calendar boundaries instead of counting from <code>start</code>. Unrelated to <code>deliver.align</code>.</td></tr>
 </tbody>
 </table>
+</div>
+
+<p>Windows are truncated at <code>start</code> and <code>end</code>, so the first and last products
+draw on fewer epochs. The count reaching each product appears in the <code>n_epochs</code> band and
+in the plan report.</p>
+
+<div class="note">
+  <span class="label">Cost of overlapping windows</span>
+  <p>An epoch snapshot is cached per <code>(tile, epoch, block, scorer)</code>; the delivery period
+  is not in its key. Overlapping windows therefore re-run stage 4 only, and re-read stage 3.</p>
 </div>
 
 <h2 id="inputs">inputs</h2>

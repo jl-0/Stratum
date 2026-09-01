@@ -19,7 +19,7 @@ shared stylesheet and one shared nav script.
 ```
 index.html                what it does, the pipeline, where you plug in
 guide/
-  concepts.html           grid/tile/block, epoch/cadence, roles, spaces, nodata, class tables
+  concepts.html           grid/tile/block, epochs & delivery, roles, spaces, nodata, class tables
   running.html            write a manifest, dry-run it, submit it, read the output
   plugins.html            authoring guide for all five hooks
   caching.html            what invalidates what; inspecting the cache
