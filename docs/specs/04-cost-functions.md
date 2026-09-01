@@ -344,6 +344,52 @@ information away. Two consequences:
 Both are the same contract; the difference is which bands the `Scorer` was asked to carry forward.
 That is the abstraction earning its keep.
 
+### Continuous bands
+
+Mode applies to classes. A continuous band — band depth, fit, uncertainty — needs a summary
+statistic, and the choice is a science decision, not a default:
+
+| Aggregation | Use when |
+|---|---|
+| `median` | Safe default; robust to a single bad epoch |
+| `mean` | Outliers already excluded |
+| Score-weighted mean | The scorer's ordering is trusted |
+| Inverse-variance weighted mean | An uncertainty band exists — `group_N_band_depth_unc` does |
+| `max` / high percentile | Strongest expression rather than typical |
+| Std / IQR | Emitted *alongside* the estimate as a quality band |
+
+Two requirements hold regardless of choice:
+
+1. **Mask on `valid` before aggregating.** Cells an epoch never observed carry undefined values;
+   a statistic over the raw stack silently folds them in.
+2. **Publish the support count.** An estimate from two epochs and one from twelve must be
+   distinguishable downstream.
+
+#### Class-conditional aggregation
+
+A band depth is the depth *of a specific mineral's absorption feature*. Averaging it across epochs
+that identified **different** minerals produces a number with no meaning.
+
+> **Requirement.** Where a continuous band is conditional on a categorical one, the reducer resolves
+> the class first and aggregates the continuous band **only over concordant epochs** — those whose
+> class matches the winner. `n_concordant` and `n_epochs` are different numbers and both are
+> published.
+
+#### Classify last, where the snapshot allows it
+
+Voting on labels discards information before the reduction begins: a class that placed second in
+every epoch loses to one that placed first in a bare majority, leaving no trace. The better shape is
+to reduce continuous evidence per candidate and classify the aggregate.
+
+That requires the `Scorer` to carry per-candidate depths into the snapshot rather than only the
+winning label — a decision about snapshot contents, not about the `Reducer`. The contract is
+unchanged either way, which is the abstraction earning its keep, but it cannot be retrofitted onto
+snapshots that only ever stored one label.
+
+Limit worth stating: the upstream product is already binarised, so information is lost before
+Stratum sees it. Reducing continuously recovers what survived; it does not recover what the
+classifier discarded.
+
 ### Why this is pluggable at all
 
 The clearest statement of the reason came from Phil at the Mines tag-up: temporal stability is an

@@ -377,12 +377,92 @@ value straight through:</p>
 One bad epoch that happened to score well takes the cell outright, with no corroboration. Mode is
 the more defensive choice, which is why it is the baseline.</p>
 
-<div class="note">
-  <span class="label">Reduce continuous quantities where you can</span>
-  <p>Voting over class labels discards information that voting over band depths or fit values
-  keeps. If your product allows it, aggregate the continuous bands and classify at the end. Both
-  approaches use the same contract — the difference is which bands your scorer carried forward.</p>
+<h3 id="continuous">Reducing continuous bands</h3>
+
+<p>Mode is for classes. For a continuous band — band depth, fit, uncertainty, reflectance — you are
+choosing a summary statistic, and averaging is rarely the best one.</p>
+
+<div class="tw">
+<table>
+<thead><tr><th>Aggregation</th><th>Use when</th></tr></thead>
+<tbody>
+<tr><td><code>median</code></td><td><strong>The safe default.</strong> One bad epoch cannot move it far.</td></tr>
+<tr><td><code>mean</code></td><td>You have already excluded outliers. A single bad epoch shifts the result in proportion to how bad it is.</td></tr>
+<tr><td>Mean weighted by <code>snaps.score</code></td><td>You trust the scorer's own ordering — better-scoring epochs should count for more</td></tr>
+<tr><td>Inverse-variance weighted mean</td><td>The product ships an uncertainty band. Statistically the principled choice, and EMIT L2B does carry <code>group_N_band_depth_unc</code>.</td></tr>
+<tr><td><code>max</code> or a high percentile</td><td>You want the strongest expression seen, not the typical one</td></tr>
+<tr><td>Standard deviation or IQR</td><td>Emit it <em>alongside</em> the estimate as a quality band, not instead of it</td></tr>
+<tr><td>Slope over time</td><td>You are measuring change rather than compositing</td></tr>
+</tbody>
+</table>
 </div>
+
+<div class="warn">
+  <span class="label">Mask before you aggregate</span>
+  <p>Never run a statistic over the raw stack. Cells an epoch never observed carry undefined values,
+  and <code>np.mean</code> will happily fold them in.</p>
+</div>
+
+<pre><code>d = np.where(snaps.valid, snaps[<span class="k">"band_depth"</span>], np.nan)
+out = np.nanmedian(d, axis=0)                  <span class="c"># not np.median(snaps["band_depth"])</span>
+n   = snaps.valid.sum(axis=0)                  <span class="c"># always emit the support count</span></code></pre>
+
+<h4 id="conditional">Continuous bands are usually conditional on a class</h4>
+
+<div class="key">
+  <span class="label">The trap</span>
+  <p>A band depth is the depth <em>of a particular mineral's absorption feature</em>. Averaging
+  depth across epochs that identified <strong>different</strong> minerals averages goethite's depth
+  with hematite's, which is a number that means nothing.</p>
+</div>
+
+<p>So when a continuous band is conditional on a categorical one, decide the class first and
+aggregate only over the epochs that <strong>agreed</strong> with it:</p>
+
+<pre><code><span class="k">class</span> ModeAndDepth:
+    outputs = (
+        BandSpec(<span class="k">"mineral_id"</span>, <span class="k">"uint16"</span>,  <span class="k">"modal class across epochs"</span>),
+        BandSpec(<span class="k">"band_depth"</span>, <span class="k">"float32"</span>, <span class="k">"median depth over concordant epochs"</span>),
+        BandSpec(<span class="k">"agreement"</span>,  <span class="k">"float32"</span>, <span class="k">"modal count / valid epochs"</span>),
+        BandSpec(<span class="k">"n_concordant"</span>, <span class="k">"uint8"</span>, <span class="k">"epochs behind the depth estimate"</span>),
+    )
+
+    <span class="k">def</span> reduce(self, snaps, aux):
+        cls, agree = modal_class(snaps[<span class="k">"mineral_id"</span>], snaps.valid,
+                                 ignore=self.ignore, min_count=self.min_count)
+
+        <span class="c"># only epochs that identified the winning class may inform its depth</span>
+        concordant = snaps.valid &amp; (snaps[<span class="k">"mineral_id"</span>] == cls[np.newaxis])
+        depth = np.where(concordant, snaps[<span class="k">"band_depth"</span>], np.nan)
+
+        <span class="k">return</span> {
+            <span class="k">"mineral_id"</span>:   cls,
+            <span class="k">"band_depth"</span>:   np.nanmedian(depth, axis=0),
+            <span class="k">"agreement"</span>:    agree,
+            <span class="k">"n_concordant"</span>: concordant.sum(axis=0),
+        }</code></pre>
+
+<p>Note that <code>n_concordant</code> and <code>n_epochs</code> are different numbers and both are
+worth publishing. A cell can be observed twelve times, be assigned goethite on a bare majority of
+five, and have its depth estimated from only those five.</p>
+
+<h4 id="classify-last">Or: aggregate the evidence, classify at the end</h4>
+
+<p>Voting on labels throws information away before the reduction even starts — a class that came
+second in every single epoch loses to one that came first in a bare majority, and the near-miss
+leaves no trace. The more principled shape is to reduce the <em>continuous evidence</em> per
+candidate class and classify the aggregate:</p>
+
+<pre><code>per-epoch depth for each candidate  ──▶  median depth per candidate  ──▶  argmax  ──▶  class</code></pre>
+
+<p>This needs your <code>Scorer</code> to carry forward per-candidate depths rather than only the
+winning label, so it is a decision about what the snapshot contains, not just about the reducer. The
+contract is the same either way — which is the point of the split — but you cannot bolt it on
+afterwards if the snapshot only ever stored one label.</p>
+
+<p>Worth knowing the limit: the upstream products are already binarised, so some information is gone
+before Stratum sees anything. Reducing continuously recovers what survived; it does not recover what
+the classifier discarded.</p>
 
 <h2 id="mapper">OutputMapper</h2>
 
