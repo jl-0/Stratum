@@ -7,8 +7,11 @@
 
 ## 1. Grid
 
-A grid is CRS + resolution + origin. It is global and infinite; it defines cell boundaries
-everywhere, so any tile derived from it aligns with any other tile from the same grid.
+A grid is CRS + resolution + origin. **It has no extent of its own.** Cell edges fall at
+`origin + n × resolution`, which fixes cell boundaries anywhere within the CRS's valid domain
+without requiring an extent to be declared. Tiles have extents; the grid does not.
+
+Consequently any tile derived from a grid aligns with any other tile from the same grid.
 
 ```yaml
 grid:

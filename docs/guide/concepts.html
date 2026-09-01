@@ -29,7 +29,7 @@
 <thead><tr><th>Term</th><th>Meaning</th></tr></thead>
 <tbody>
 <tr><td><strong>Granule</strong></td><td>One acquisition from one instrument. The atom of input. EMIT: ~75&nbsp;&times;&nbsp;75&nbsp;km at 60&nbsp;m.</td></tr>
-<tr><td><strong>Grid</strong></td><td>CRS + resolution + origin. Global and infinite; defines cell boundaries everywhere.</td></tr>
+<tr><td><strong>Grid</strong></td><td>CRS + resolution + origin. A rule for where cell edges fall, with no extent of its own.</td></tr>
 <tr><td><strong>Tile</strong></td><td>A bounded rectangle of the grid. What you download.</td></tr>
 <tr><td><strong>Block</strong></td><td>A subdivision of a tile. What a worker processes. Never appears in outputs.</td></tr>
 <tr><td><strong>Epoch</strong></td><td>One time window, e.g. a month. Granules within it produce one snapshot.</td></tr>
@@ -45,9 +45,14 @@
 
 <h2 id="grid">Grid</h2>
 
-<p>A grid is CRS, resolution and origin. It is global and infinite, so any tile derived from it
-aligns with any other tile from the same grid — which is what lets cached geometry be shared
-between runs and between projects.</p>
+<p>A grid is CRS, resolution and origin. <strong>It has no extent.</strong> It is a rule — cell
+edges fall at <code>origin + n &times; resolution</code> — which fixes where cell boundaries lie
+anywhere in the CRS's domain, without anyone having to say where the data is.</p>
+
+<p>That is what makes tiles align. Tile bounds are derived from the grid, never from the extent of
+your granules, so two runs over the same ground at the same grid produce identical tile bounds and
+can share cached geometry. A grid that took its bounds from data would give every run subtly
+different tiles.</p>
 
 <pre><code>grid:
   crs: EPSG:4326
@@ -55,9 +60,6 @@ between runs and between projects.</p>
   origin: [-180, -90]
   tile_size: 1.0
   block: 512</code></pre>
-
-<p>Cell edges fall at <code>origin + n &times; resolution</code>. Tile bounds are derived from the
-grid, never from the extent of your data.</p>
 
 <p>Stratum refuses three configurations at plan time because they are almost always mistakes:</p>
 

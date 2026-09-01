@@ -14,7 +14,7 @@ Fixing these now, because three existing pipelines use the same words differentl
 | Term | Meaning here |
 |------|--------------|
 | **Granule** | One acquisition from one instrument. The atom of input. EMIT: ~75 × 75 km, 60 m. |
-| **Grid** | CRS + resolution + origin. Global and infinite; defines cell boundaries everywhere. |
+| **Grid** | CRS + resolution + origin. A rule for where cell edges fall; has no extent of its own. |
 | **Tile** | A bounded rectangle of the grid. The unit of *product* delivery. |
 | **Block** | A subdivision of a tile. The unit of *compute*. Never appears in outputs. |
 | **Epoch** | One time window (e.g. a month). Granules within it produce one snapshot. |
