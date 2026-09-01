@@ -176,6 +176,17 @@ further-reading blocks, `.cards`, `.stages`, and `.tw > table` for scrollable ta
 of those before inventing a class; a one-off style in one page is how a docs site starts looking
 like four docs sites.
 
+### The wordmark
+
+The mark beside "Stratum" is a quartz point drawn as three faces, defined **once** as
+`--crystal` in `stratum.css` and applied to `.glyph` with `mask`. The gaps between the faces are
+what read as facet edges, which is why the artwork can be a single flat colour — that in turn is
+what lets it be a mask and inherit `--accent` in both themes with no second copy.
+
+Do not inline SVG into the pages, and do not add a per-theme variant. If you redraw it, check it
+at 18px (its real size) as well as large; the first attempt looked like a city skyline at small
+sizes because the termination was too shallow and the prism too wide.
+
 ### Assume no GIS background
 
 Readers include software engineers with no geospatial training. A section that leans on a domain
