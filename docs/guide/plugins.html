@@ -198,11 +198,81 @@ them into a single cutoff throws that range away.</p>
   ref: prefer_bare_earth
   params: {min_soil: 0.85, hard_floor: 0.7}</code></pre>
 
-<h3 id="score-band">The score is kept</h3>
+<h3 id="snapshot-schema">What the snapshot carries</h3>
 
-<p>Stage 3 writes the winning score alongside the winning value, so <em>"why did this pixel
-win?"</em> is answerable from the artifact afterwards. You get this for free; there is nothing to
-declare.</p>
+<div class="key">
+  <span class="label">A snapshot is not a picture</span>
+  <p>Nothing renders it and nothing outside the pipeline reads it — it exists only to feed the
+  reducer. So it is <strong>as many bands as the reduction needs</strong>, and your scorer declares
+  them.</p>
+</div>
+
+<pre><code><span class="k">class</span> MinViewZenith:
+    capability = <span class="k">"streaming"</span>
+    required_roles = (<span class="k">"geometry"</span>, <span class="k">"mineral"</span>)
+    outputs = (
+        BandSpec(<span class="k">"mineral_id"</span>,  <span class="k">"uint16"</span>,  <span class="k">"class from the winning observation"</span>),
+        BandSpec(<span class="k">"band_depth"</span>,  <span class="k">"float32"</span>, <span class="k">"depth from the winning observation"</span>),
+        BandSpec(<span class="k">"view_zenith"</span>, <span class="k">"float32"</span>, <span class="k">"geometry of the winner"</span>),
+        BandSpec(<span class="k">"acquired"</span>,    <span class="k">"int64"</span>,   <span class="k">"acquisition time of the winner"</span>),
+    )
+
+    <span class="k">def</span> score(self, obs, aux):
+        <span class="k">return</span> -obs[<span class="k">"view_zenith"</span>]</code></pre>
+
+<p>Declaring a band is enough — by default each one is taken from the winning observation by alias,
+so a scorer that only wants carry-forward writes no extra code. Override <code>emit()</code> when a
+band is derived rather than passed through:</p>
+
+<pre><code>    <span class="k">def</span> emit(self, obs, aux):
+        <span class="c"># per-observation values; the framework keeps the winner's row</span>
+        <span class="k">return</span> {
+            <span class="k">"mineral_id"</span>:  obs[<span class="k">"mineral_id"</span>],
+            <span class="k">"band_depth"</span>:  obs[<span class="k">"band_depth"</span>],
+            <span class="k">"view_zenith"</span>: obs[<span class="k">"view_zenith"</span>],
+            <span class="k">"acquired"</span>:    np.full(obs.shape, obs.granule.datetime.timestamp()),
+        }</code></pre>
+
+<p>Two bands arrive without being asked for:</p>
+
+<div class="tw">
+<table>
+<thead><tr><th>Band</th><th>Content</th></tr></thead>
+<tbody>
+<tr><td><code>score</code></td><td>The score that won. Always written, so "why did this pixel win?" stays answerable.</td></tr>
+<tr><td><code>valid</code></td><td>Whether any observation occupied the cell at all</td></tr>
+</tbody>
+</table>
+</div>
+
+<h4 id="snapshot-cost">What it costs</h4>
+
+<p>Less than you would expect. In streaming mode the framework holds the running best score plus the
+emitted bands of the current best, so memory is <strong>proportional to band count, not observation
+count</strong> — a wide snapshot does not reintroduce the memory profile blocks exist to avoid.</p>
+
+<p>Storage is not free though. These are cached artifacts with a retention policy, so declare what
+the reducer will actually use. And <code>outputs</code> is part of the snapshot cache key: changing
+the schema invalidates the snapshots, as it should.</p>
+
+<h4 id="snapshot-useful">Bands worth carrying</h4>
+
+<div class="tw">
+<table>
+<thead><tr><th>Band</th><th>Lets the reducer</th></tr></thead>
+<tbody>
+<tr><td><code>runner_up_score</code></td><td>Weight by <strong>margin</strong> — how decisively this epoch's winner beat the alternative. An epoch that barely chose is weaker evidence than one that chose clearly.</td></tr>
+<tr><td><code>acquired</code></td><td>Weight by recency, or resolve ties by time without a second pass</td></tr>
+<tr><td><code>source_granule</code></td><td>Trace an output pixel back to the granule behind it</td></tr>
+<tr><td>Uncertainty from the product</td><td>Inverse-variance weight the continuous bands</td></tr>
+<tr><td>Per-candidate evidence</td><td>Aggregate evidence across epochs and classify the aggregate, instead of voting on labels</td></tr>
+</tbody>
+</table>
+</div>
+
+<p>That last row is the one to decide early. A reducer cannot recover per-candidate evidence from a
+snapshot that only stored the winning label, so <strong>classify-last is a choice about what your
+scorer emits</strong>, made when the scorer is written — not something the reducer can add later.</p>
 
 <h2 id="pixel-mask">PixelMask</h2>
 
@@ -455,10 +525,11 @@ candidate class and classify the aggregate:</p>
 
 <pre><code>per-epoch depth for each candidate  ──▶  median depth per candidate  ──▶  argmax  ──▶  class</code></pre>
 
-<p>This needs your <code>Scorer</code> to carry forward per-candidate depths rather than only the
-winning label, so it is a decision about what the snapshot contains, not just about the reducer. The
-contract is the same either way — which is the point of the split — but you cannot bolt it on
-afterwards if the snapshot only ever stored one label.</p>
+<p>This needs your <code>Scorer</code> to declare per-candidate evidence among its
+<a href="#snapshot-schema">snapshot outputs</a> rather than only the winning label, so it is a
+decision about what the snapshot contains, not just about the reducer. The contract is the same
+either way — which is the point of the split — but you cannot bolt it on afterwards if the snapshot
+only ever stored one label.</p>
 
 <p>Worth knowing the limit: the upstream products are already binarised, so some information is gone
 before Stratum sees anything. Reducing continuously recovers what survived; it does not recover what

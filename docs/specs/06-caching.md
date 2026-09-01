@@ -27,7 +27,7 @@ a full rebuild into a re-read.
 | **GLT**<br>granule × tile | `granule_id`, `grid_def`, `max_distance`, `regrid_algo_version` | **No** |
 | **Masked observation**<br>granule × tile × block | `glt_key`, `asset_roles`, `pixel_mask_spec`, `mask_plugin_version` | No |
 | **Aux warp**<br>source × tile | `source_uri`, `source_etag`, `grid_def`, `resampling` | No |
-| **Epoch snapshot**<br>tile × epoch × block | `obs_keys[]`, `scorer_ref`, `scorer_version`, `scorer_params`, `epoch_bounds` | **Yes** |
+| **Epoch snapshot**<br>tile × epoch × block | `obs_keys[]`, `scorer_ref`, `scorer_version`, `scorer_params`, `scorer_outputs`, `epoch_bounds` | **Yes** |
 | **Product block**<br>tile × block | `snapshot_keys[]`, `reducer_ref`, `reducer_version`, `reducer_params` | Yes |
 | **Rendered image**<br>tile | `product_keys[]`, `mapper_ref`, `mapper_version`, `mapper_params` | No — see [07](07-output-mapping.md) |
 

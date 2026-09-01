@@ -296,6 +296,16 @@ class BandStack:
     specs: Sequence[BandSpec]
 ```
 
+### Snapshot schema
+
+`SnapshotStack.__getitem__` resolves any band the `Scorer` declared in `outputs`
+([04 §4](04-cost-functions.md)), plus `score` and `valid`, which the framework always adds.
+
+A snapshot is an **internal artifact** — nothing renders it and nothing outside the pipeline reads
+it — so its width is a design choice rather than a product constraint. Carrying geometry,
+acquisition time, runner-up margin or per-candidate evidence costs `O(block × n_bands)` in a
+streaming worker, independent of observation count. Storage is the real limit, not memory.
+
 `SnapshotStack.valid` is what keeps `min_count` honest: an epoch with no observation over a pixel
 must not count toward agreement. And exposing `score` lets a reducer weight by confidence rather
 than treating every epoch equally — the open question in [04 §9](04-cost-functions.md), left

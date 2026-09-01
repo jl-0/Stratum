@@ -155,8 +155,79 @@ class Scorer(Protocol):
     required_roles: tuple[str, ...] = ()
     required_aux:   tuple[str, ...] = ()
 
+    # Snapshot schema. The framework always adds `score` and `valid`.
+    outputs: tuple[BandSpec, ...] = ()
+
     def score(self, obs: ObsWindow, aux: AuxAccessor) -> FloatArray:
         """Higher wins. NaN marks a cell this observation may not occupy."""
+
+    def emit(self, obs: ObsWindow, aux: AuxAccessor) -> Mapping[str, Array]:
+        """Per-observation values for each declared output. The framework keeps
+        the row belonging to the winning observation.
+
+        Default: pass through the declared roles by alias, so a scorer that only
+        wants carry-forward bands names them in `outputs` and implements nothing."""
+
+### The snapshot is a multi-band intermediate
+
+A snapshot is **not** a displayable product — nothing renders it, and nothing outside the pipeline
+reads it. It is the reducer's input. So it carries whatever bands the reduction will need, declared
+by the scorer:
+
+```python
+class MinViewZenith:
+    capability = "streaming"
+    required_roles = ("geometry", "mineral")
+    outputs = (
+        BandSpec("mineral_id",   "uint16",  "class from the winning observation"),
+        BandSpec("band_depth",   "float32", "depth from the winning observation"),
+        BandSpec("view_zenith",  "float32", "geometry of the winner"),
+        BandSpec("acquired",     "int64",   "acquisition time of the winner"),
+    )
+
+    def score(self, obs, aux):
+        return -obs["view_zenith"]
+```
+
+The framework adds two bands to every snapshot without being asked:
+
+| Band | Content |
+|---|---|
+| `score` | The winning score. Non-optional — "why did this pixel win?" must be answerable ([03 §2](03-regrid-glt.md)). |
+| `valid` | Whether any observation occupied the cell at all ([11 §2](11-types.md)) |
+
+**Selection semantics are unchanged.** `score()` ranks, the framework takes the argmax, `emit()`
+supplies the per-observation values and the framework gathers the winner's row. In `stack` mode both
+return `(N, H, W)` and the gather is along axis 0.
+
+**Cost is in band count, not observation count.** In streaming mode the framework holds the running
+best score plus the emitted bands of the current best, so memory is `O(block × n_bands)` and
+independent of how many observations overlap. Snapshot width is cheap; it does not reintroduce the
+memory profile that block decomposition exists to avoid. Storage is not free, though — these are
+cached artifacts, so declare what the reducer needs and not more.
+
+`outputs` enters the snapshot cache key ([06 §2](06-caching.md)): changing the declared schema
+changes the artifact.
+
+#### Bands worth carrying
+
+Beyond the obvious carry-forward of role bands:
+
+| Band | Lets the reducer |
+|---|---|
+| `runner_up_score` | Weight by **margin** — how decisively this epoch's winner beat the alternative |
+| `acquired` | Weight by recency, or implement `tie_break: latest` without a second pass |
+| `source_granule` | Trace an output pixel to the granule that produced it |
+| Per-candidate evidence | Aggregate evidence across epochs and classify the aggregate, rather than voting on labels |
+
+That last row is what makes classify-last expressible, and it is a decision about **snapshot
+contents**, not about the reducer. A reducer cannot recover per-candidate evidence from a snapshot
+that only stored the winning label, so the choice has to be made when the scorer is written.
+
+> **Open.** Whether a `stack`-capability scorer may emit a band that is a property of the whole
+> stack rather than of one observation — a within-epoch median, say — is unresolved. It blurs the
+> scorer/reducer split, and the current rule is that `emit()` returns per-observation arrays only.
+
 ```
 
 ### Execution modes
