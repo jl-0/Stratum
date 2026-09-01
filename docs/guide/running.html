@@ -97,6 +97,13 @@ unchanged. Add one when you want to combine epochs; see
 
 <p>The full field list is in the <a href="../reference/manifest.html">manifest reference</a>.</p>
 
+<div class="reading">
+  <span class="label">Further reading</span>
+  <ul>
+    <li><a href="https://en.wikipedia.org/wiki/ISO_8601#Durations">ISO 8601 durations</a> <span class="what">— the P1M / P1Y syntax used by epoch and deliver</span></li>
+  </ul>
+</div>
+
 <h2 id="dry-run">Check before you run</h2>
 
 <p><code>stratum plan</code> resolves everything and provisions nothing. It reports the real
@@ -243,6 +250,15 @@ s3://{bucket}/runs/{run_id}/
 do not need to re-run anything:</p>
 
 <pre><code>stratum render --run cuprite-2024 --mapper my_colours</code></pre>
+
+<div class="reading">
+  <span class="label">Further reading</span>
+  <ul>
+    <li><a href="https://www.cogeo.org/">Cloud Optimized GeoTIFF</a> <span class="what">— the default output format</span></li>
+    <li><a href="https://stacspec.org/">STAC</a> <span class="what">— the catalogue item written alongside each tile</span></li>
+    <li><a href="https://geoparquet.org/">GeoParquet</a> <span class="what">— the format of the granule index and the frozen per-run index</span></li>
+  </ul>
+</div>
 
 <h2 id="report">Reading the report</h2>
 

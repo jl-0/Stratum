@@ -161,6 +161,14 @@ aux.vector(<span class="k">"claims"</span>)                       <span class="c
 aux.table(<span class="k">"climate_index"</span>).at(date)         <span class="c"># scalar, no gridding</span>
 aux.granule_index                          <span class="c"># the frozen index</span></code></pre>
 
+<div class="reading">
+  <span class="label">Further reading</span>
+  <ul>
+    <li><a href="https://gdal.org/en/stable/programs/gdalwarp.html#cmdoption-gdalwarp-r">gdalwarp resampling methods</a> <span class="what">— what nearest, bilinear, cubic, mode and average actually do, and when each is wrong</span></li>
+    <li><a href="https://rasterio.readthedocs.io/en/stable/">rasterio</a> <span class="what">— the library behind windowed reads and warping, if you need to reason about what aux does</span></li>
+  </ul>
+</div>
+
 <h3 id="worked">A worked example</h3>
 
 <p>Given several observations of a pixel, most of which see vegetation, prefer the one that sees

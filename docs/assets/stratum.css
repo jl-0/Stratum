@@ -235,6 +235,30 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
 }
 .gen p { margin: 0; }
 
+/* ---------- further reading ---------- */
+
+.reading {
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--muted);
+  border-radius: 0 7px 7px 0;
+  background: var(--surface);
+  padding: .8rem 1.1rem .9rem;
+  margin: 1.4rem 0 1.5rem;
+}
+.reading .label {
+  display: block; font-size: .7rem; text-transform: uppercase;
+  letter-spacing: .08em; font-weight: 650; color: var(--muted);
+  margin-bottom: .45rem;
+}
+.reading ul { margin: 0; padding: 0; list-style: none; }
+.reading li { margin: .3rem 0; font-size: .875rem; line-height: 1.5; }
+.reading li a { font-weight: 550; }
+.reading li a[href^="http"]::after {
+  content: "\2197"; font-size: .8em; margin-left: .15em;
+  color: var(--muted); vertical-align: baseline;
+}
+.reading .what { color: var(--muted); }
+
 /* ---------- cards ---------- */
 
 .cards { display: grid; gap: .9rem; grid-template-columns: repeat(auto-fit, minmax(238px, 1fr)); margin: 0 0 1.6rem; }

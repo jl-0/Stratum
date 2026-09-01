@@ -144,6 +144,14 @@ S3 credentials it issues are temporary — roughly one hour.</p>
 there, which is a quiet argument for routing to Lambda wherever it fits.</li>
 </ul>
 
+<div class="reading">
+  <span class="label">Further reading</span>
+  <ul>
+    <li><a href="https://docs.aws.amazon.com/step-functions/latest/dg/use-dist-map-orchestrate-large-scale-parallel-workloads.html">Step Functions Distributed Map</a> <span class="what">— the fan-out primitive, its ItemReader and ResultWriter, and its concurrency limits</span></li>
+    <li><a href="https://docs.aws.amazon.com/lambda/latest/dg/gettingstarted-limits.html">Lambda quotas</a> <span class="what">— the 15-minute, 10 GB memory and 10 GB /tmp ceilings the router works around</span></li>
+  </ul>
+</div>
+
 <h2 id="failures">Failure handling</h2>
 
 <div class="tw">
@@ -161,6 +169,15 @@ there, which is a quiet argument for routing to Lambda wherever it fits.</li>
 </div>
 
 <p>Set tolerance per deployment: permissive for experimentation, zero for delivered products.</p>
+
+<div class="reading">
+  <span class="label">Further reading</span>
+  <ul>
+    <li><a href="https://urs.earthdata.nasa.gov/">Earthdata Login</a> <span class="what">— the credential system guarding the source data</span></li>
+    <li><a href="https://lpdaac.usgs.gov/">LP DAAC</a> <span class="what">— the archive the granules are distributed from</span></li>
+    <li><a href="https://earth.jpl.nasa.gov/emit/">EMIT mission</a> <span class="what">— background on the instrument and its products</span></li>
+  </ul>
+</div>
 
 <h2 id="concurrency">Running many runs at once</h2>
 

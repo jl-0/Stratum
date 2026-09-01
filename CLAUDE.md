@@ -171,9 +171,52 @@ EOF
 ```
 
 **Use the existing components.** `stratum.css` has `.key` / `.note` / `.warn` callouts,
-`.chip-locked|draft|open|obs` status pills, `.gen` for generated-later regions, `.cards`,
-`.stages`, and `.tw > table` for scrollable tables. Reach for one of those before inventing a
-class; a one-off style in one page is how a docs site starts looking like four docs sites.
+`.chip-locked|draft|open|obs` status pills, `.gen` for generated-later regions, `.reading` for
+further-reading blocks, `.cards`, `.stages`, and `.tw > table` for scrollable tables. Reach for one
+of those before inventing a class; a one-off style in one page is how a docs site starts looking
+like four docs sites.
+
+### Assume no GIS background
+
+Readers include software engineers with no geospatial training. A section that leans on a domain
+concept — CRS, EPSG, resampling kernels, push-broom geometry, COG internal tiling, ISO 8601
+durations — either explains it inline or ends with a `.reading` block pointing somewhere
+authoritative.
+
+```html
+<div class="reading">
+  <span class="label">Further reading</span>
+  <ul>
+    <li><a href="https://epsg.org/">EPSG Geodetic Parameter Dataset</a>
+        <span class="what">— the authoritative registry, maintained by IOGP</span></li>
+  </ul>
+</div>
+```
+
+Rules for these:
+
+- **Prefer the standard body or the maintainer** — IOGP for EPSG, OGC for COG, PROJ/GDAL for
+  transforms, CF for NetCDF metadata. Where a convenience site is genuinely more useful (epsg.io),
+  link it *and say it is not authoritative*.
+- **Say what the reader will get**, not just the title. "— what nearest, bilinear and mode actually
+  do, and when each is wrong" earns the link; a bare URL does not.
+- **Verify every URL before committing.** Dead links in docs are worse than no links:
+
+  ```bash
+  python3 - <<'EOF' | while IFS= read -r u; do
+    printf "%-4s %s\n" "$(curl -sL -o /dev/null -w '%{http_code}' --max-time 15 "$u")" "$u"
+  done
+  import pathlib, re
+  print("\n".join(sorted({m.group(1)
+      for f in pathlib.Path('docs').rglob('*.html')
+      for m in re.finditer(r'href="(https?://[^"]+)"', f.read_text())})))
+  EOF
+  ```
+
+- **Annotate config examples for a newcomer.** The grid block in `guide/concepts.html` is the model:
+  every field gets a comment saying what it is, what its units are, and what goes wrong if it is
+  set carelessly. A bare YAML block that is obvious to us is not obvious to the reader we are
+  writing for.
 
 ### The generation boundary
 

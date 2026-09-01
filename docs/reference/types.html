@@ -173,6 +173,13 @@ falling back to opening a path — a read that is not in the cache key would sil
   way.</p>
 </div>
 
+<div class="reading">
+  <span class="label">Further reading</span>
+  <ul>
+    <li><a href="https://gdal.org/en/stable/user/raster_data_model.html">GDAL raster data model</a> <span class="what">— what an affine geotransform is and how it relates to a Window</span></li>
+  </ul>
+</div>
+
 <h2 id="granules">GranuleRef and GranuleFrame</h2>
 
 <pre><code>@dataclass(frozen=<span class="k">True</span>)
@@ -194,6 +201,13 @@ falling back to opening a path — a read that is not in the cache key would sil
 <p><code>cloud_fraction</code> is nullable and the nullness is meaningful: <code>None</code> means
 the granule reports no cloud metadata, which is a different situation from reporting a high value.
 Filters take an explicit <code>on_missing</code> policy rather than guessing.</p>
+
+<div class="reading">
+  <span class="label">Further reading</span>
+  <ul>
+    <li><a href="https://docs.scipy.org/doc/scipy/reference/generated/scipy.spatial.KDTree.html">scipy.spatial.KDTree</a> <span class="what">— the nearest-neighbour structure the regrid is built on, and what max_distance means</span></li>
+  </ul>
+</div>
 
 <h2 id="stacks">SnapshotStack, BandStack, BandSpec</h2>
 

@@ -43,6 +43,58 @@
 </table>
 </div>
 
+<h2 id="crs">Coordinate reference systems, briefly</h2>
+
+<p>If <code>EPSG:4326</code> already means something to you, skip to <a href="#grid">Grid</a>.</p>
+
+<p>A pair of numbers like <code>(-115.3, 37.5)</code> means nothing on its own. A <strong>coordinate
+reference system</strong> — CRS, sometimes called a spatial reference system — is what says which
+point on Earth those numbers refer to: what shape the Earth is taken to be, where the origin sits,
+and what the units are.</p>
+
+<p>Two kinds matter here:</p>
+
+<div class="tw">
+<table>
+<thead><tr><th>Kind</th><th>Coordinates are</th><th>Units</th><th>Example</th></tr></thead>
+<tbody>
+<tr><td><strong>Geographic</strong></td><td>Angles on an ellipsoid — longitude and latitude</td><td>Degrees</td><td><code>EPSG:4326</code> (WGS 84)</td></tr>
+<tr><td><strong>Projected</strong></td><td>Distances on a flat plane, after flattening the curved surface</td><td>Metres, usually</td><td><code>EPSG:32611</code> (UTM zone 11N)</td></tr>
+</tbody>
+</table>
+</div>
+
+<p><strong>EPSG codes</strong> are short numeric identifiers from a public registry of CRS
+definitions, maintained by the IOGP Geomatics Committee. Writing <code>EPSG:4326</code> is a
+compact, unambiguous way of saying "WGS 84 longitude/latitude in degrees" — the same system a GPS
+receiver reports. Geographic CRSs occupy the <code>4xxx</code> range, which Stratum uses as a sanity
+check below.</p>
+
+<div class="warn">
+  <span class="label">The consequence that bites</span>
+  <p><strong>Resolution is expressed in the CRS's units.</strong> In <code>EPSG:4326</code>,
+  <code>0.0003</code> means 0.0003 <em>degrees</em> — roughly 33 m at the equator, and less toward
+  the poles, because lines of longitude converge. In a metre-based projected CRS the same number
+  would mean 0.3 mm. Confusing the two is the most common configuration mistake in this whole
+  system.</p>
+</div>
+
+<p>A second consequence: a cell in a geographic CRS is not a constant size on the ground.
+0.0003° of longitude is about 33 m at the equator and about 24 m at 45° latitude. That is workable
+here because the source products are themselves distributed on a geographic grid, but it is worth
+knowing before you read a cell count as an area.</p>
+
+<div class="reading">
+  <span class="label">Further reading</span>
+  <ul>
+    <li><a href="https://epsg.org/">EPSG Geodetic Parameter Dataset</a> <span class="what">— the authoritative registry, maintained by IOGP</span></li>
+    <li><a href="https://epsg.io/4326">epsg.io/4326</a> <span class="what">— quick lookup for any EPSG code; community-run, convenient rather than authoritative</span></li>
+    <li><a href="https://en.wikipedia.org/wiki/Spatial_reference_system">Spatial reference system</a> <span class="what">— plain-language overview of the concept</span></li>
+    <li><a href="https://en.wikipedia.org/wiki/World_Geodetic_System">World Geodetic System</a> <span class="what">— what WGS 84, and therefore EPSG:4326, actually is</span></li>
+    <li><a href="https://proj.org/">PROJ</a> <span class="what">— the library that performs CRS transformations underneath GDAL, rasterio and QGIS</span></li>
+  </ul>
+</div>
+
 <h2 id="grid">Grid</h2>
 
 <p>A grid is CRS, resolution and origin. <strong>It has no extent.</strong> It is a rule — cell
@@ -55,11 +107,35 @@ can share cached geometry. A grid that took its bounds from data would give ever
 different tiles.</p>
 
 <pre><code>grid:
+  <span class="c"># Which coordinate system the numbers below are in.</span>
+  <span class="c"># EPSG:4326 = WGS 84 lon/lat in degrees - the system GPS reports.</span>
   crs: EPSG:4326
-  resolution: [0.0003, -0.0003]    <span class="c"># x positive, y negative</span>
+
+  <span class="c"># Cell size as [x_step, y_step], in the CRS's units - here, degrees.</span>
+  <span class="c">#   0.0003 deg is about 33 m at the equator, less toward the poles.</span>
+  <span class="c">#   y is NEGATIVE because raster rows run north to south, so moving</span>
+  <span class="c">#   one row down decreases latitude. Positive y is nearly always a</span>
+  <span class="c">#   mistake, and Stratum rejects it unless you force it.</span>
+  resolution: [0.0003, -0.0003]
+
+  <span class="c"># The anchor cell edges are measured from: edges fall at</span>
+  <span class="c">#   origin + n * resolution. This fixes the grid's phase.</span>
+  <span class="c">#   Two runs sharing an origin produce cells that line up exactly;</span>
+  <span class="c">#   change it and nothing aligns with anything built before.</span>
+  <span class="c">#   [-180, -90] is the south-west corner of the lon/lat domain.</span>
   origin: [-180, -90]
+
+  <span class="c"># Edge length of one output tile, in CRS units - 1.0 = one degree.</span>
+  <span class="c">#   A PRODUCT decision: this is what a consumer downloads.</span>
   tile_size: 1.0
+
+  <span class="c"># Edge length of one compute block, in CELLS (not CRS units).</span>
+  <span class="c">#   An ENGINEERING decision: what one worker handles. Invisible in</span>
+  <span class="c">#   the output, and cannot change your result.</span>
   block: 512</code></pre>
+
+<p>So this grid puts cell edges every 0.0003° starting from (−180°, −90°), groups them into 1°
+tiles of roughly 3334 × 3334 cells, and hands workers 512 × 512 pieces of those tiles.</p>
 
 <p>Stratum refuses three configurations at plan time because they are almost always mistakes:</p>
 
@@ -210,6 +286,14 @@ space, because regridding discards the source column. Declare which one you mean
   you do not configure it by hand.</p>
 </div>
 
+<div class="reading">
+  <span class="label">Further reading</span>
+  <ul>
+    <li><a href="https://en.wikipedia.org/wiki/Push_broom_scanner">Push broom scanner</a> <span class="what">— why every cross-track column is a different detector, and why along-track edges are not</span></li>
+    <li><a href="https://gdal.org/en/stable/user/raster_data_model.html">GDAL raster data model</a> <span class="what">— how a geotransform maps pixel/line indices to world coordinates</span></li>
+  </ul>
+</div>
+
 <h2 id="nodata">Missing data</h2>
 
 <p>Two kinds of "nothing here" exist and they are not interchangeable:</p>
@@ -246,6 +330,13 @@ cell</em>. It loses to any observation with a real score, and if every observati
 <tr><td>Scorer output, cell not eligible</td><td>—</td><td><code>NaN</code></td></tr>
 </tbody>
 </table>
+</div>
+
+<div class="reading">
+  <span class="label">Further reading</span>
+  <ul>
+    <li><a href="https://cfconventions.org/">CF Conventions</a> <span class="what">— the NetCDF metadata standard that defines _FillValue and how missing data is declared</span></li>
+  </ul>
 </div>
 
 <h2 id="class-tables">Class tables</h2>
@@ -322,6 +413,15 @@ product, never a substitute for it.</p>
 
 <p>A mosaic's classes are its own — after lumping they are not the input classes — so the published
 class table describes the product, not the granules that fed it.</p>
+
+<div class="reading">
+  <span class="label">Further reading</span>
+  <ul>
+    <li><a href="https://www.cogeo.org/">Cloud Optimized GeoTIFF</a> <span class="what">— the COG format, and why internal tiling makes windowed reads cheap over HTTP</span></li>
+    <li><a href="https://docs.ogc.org/is/21-026/21-026.html">OGC COG standard</a> <span class="what">— the formal specification</span></li>
+    <li><a href="https://stacspec.org/">STAC</a> <span class="what">— SpatioTemporal Asset Catalog — the item and collection format used for cataloguing outputs</span></li>
+  </ul>
+</div>
 
 </div>
 <nav class="pager" aria-label="Pagination"></nav>
