@@ -21,6 +21,8 @@ Fixing these now, because three existing pipelines use the same words differentl
 | **Delivery period** | One output product. Reduced from the epochs in its *window*, which need not equal the period. |
 | **GLT** | Geographic lookup table. Maps a grid cell → (granule, raw row, raw col). |
 | **Role** | A logical input name (`geometry`, `mineral`, `mask`) resolved per collection. |
+| **Asset** | One file a granule resolves to for one role. What a reader opens. |
+| **Source** | Where the index comes from — a catalogue (CMR, STAC) or a directory. Never queried by a run. |
 | **Observation** | One granule's contribution to one block, after regrid and masking. |
 | **Snapshot** | The winning value per cell for one epoch — output of `Scorer`. |
 | **Product** | The reduced result per tile — output of `Reducer`, plus its rendering. |
@@ -75,7 +77,7 @@ Two distinctions that matter and are easy to lose:
 ### Stage 1 — Plan
 
 Reads the manifest; resolves the AOI to a tile list and the time range to epochs; queries the
-granule index; applies `GranuleFilter`; **freezes** the surviving candidate set into a
+frozen granule index — never a live catalogue ([12 §1](12-data-access.md)); applies `GranuleFilter`; **freezes** the surviving candidate set into a
 run-scoped artifact; computes the fan-out; compares it to the declared budget.
 
 Freezing is not optional. Both existing pipelines query a coverage file that is refreshed
@@ -97,6 +99,10 @@ Changing a cost function does not invalidate it. See [03](03-regrid-glt.md), [06
 
 For each (tile, epoch, block): gather the granules intersecting this block in this epoch, apply
 their GLTs, and run the `Scorer` to pick a winner per cell.
+
+Applying a GLT is also what makes the read cheap. The GLT names exactly which sensor pixels this
+block touches — roughly 170 × 170 of a granule's 1664 × 1242 — so only that rectangle is read, not
+the scene ([12 §2](12-data-access.md)).
 
 Two execution modes, chosen by the scorer's declared capability:
 
@@ -190,10 +196,11 @@ These hold across every stage, and violating any of them breaks something the de
 | [02 — Granule index](02-granule-index.md) | Index schema, freezing, queries, role resolution |
 | [03 — Regrid and GLT](03-regrid-glt.md) | GLT format, KD-tree, masking, SpectralUtil boundary |
 | [04 — Cost functions](04-cost-functions.md) | All five hook contracts, execution modes |
-| [05 — Ancillary data](05-ancillary-data.md) | Readers, regridding, `AuxAccessor`, caching |
+| [05 — Ancillary data](05-ancillary-data.md) | Aux readers, regridding, `AuxAccessor`, caching |
 | [06 — Caching](06-caching.md) | Content addressing, cache keys, invalidation |
 | [07 — Output mapping](07-output-mapping.md) | `OutputMapper`, legends, data/image split |
 | [08 — Execution](08-execution.md) | Step Functions, Batch, Lambda, routing, retries |
 | [09 — Run manifest](09-run-manifest.md) | Schema, composition, budget, validation |
 | [10 — Provenance](10-provenance.md) | STAC, run records, reproducibility |
 | [11 — Core types](11-types.md) | Every shared type, fill/nodata rules, class tables |
+| [12 — Data access](12-data-access.md) | `GranuleSource`, `GranuleReader`, `AssetStore`, CMR, the block read path |

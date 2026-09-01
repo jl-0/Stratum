@@ -212,24 +212,35 @@ stratum cache gc      [--dry-run] [--older-than PERIOD]</code></pre>
 
 <h2 id="index">stratum index</h2>
 
-<pre><code>stratum index build  --collection NAME [--since DATE] [--until DATE]
-stratum index verify --collection NAME
-stratum index query  --collection NAME --bbox W,S,E,N --start DATE --end DATE</code></pre>
+<pre><code>stratum index build  -m MANIFEST [--collection NAME] [--since DATE] [--until DATE]
+stratum index verify -m MANIFEST [--collection NAME]
+stratum index query  --index URI --bbox W,S,E,N --start DATE --end DATE</code></pre>
 
 <div class="tw">
 <table>
 <thead><tr><th>Subcommand</th><th>Does</th></tr></thead>
 <tbody>
-<tr><td><code>build</code></td><td>Populates or refreshes the GeoParquet index from the upstream catalogue. A periodic job, not part of a run.</td></tr>
+<tr><td><code>build</code></td><td>Populates or refreshes the GeoParquet index from <code>inputs.source</code> — a catalogue, or a directory. A periodic job, never part of a run.</td></tr>
 <tr><td><code>verify</code></td><td>Checks asset URIs resolve and reports rows not seen since the last build — how an upstream reprocessing is detected</td></tr>
-<tr><td><code>query</code></td><td>Ad-hoc query without writing a manifest</td></tr>
+<tr><td><code>query</code></td><td>Ad-hoc query against a built index, without writing a manifest</td></tr>
 </tbody>
 </table>
 </div>
 
+<p><code>--since</code> passes through to the source as an updated-since filter, so a refresh is
+incremental <em>and</em> picks up granules that were re-delivered rather than newly acquired. See
+<a href="../guide/reading-data.html#index">Building and refreshing the index</a>.</p>
+
+<div class="note">
+  <span class="label">This is the only command that talks to a catalogue</span>
+  <p><code>stratum plan</code>, <code>run</code> and <code>exec</code> read a frozen index and
+  never reach a live API. That is what makes a run reproducible, and what keeps a large fan-out
+  from rate-limiting an upstream service.</p>
+</div>
+
 <h2 id="plugins">stratum plugins</h2>
 
-<pre><code>stratum plugins list [--kind scorers|reducers|masks|filters|mappers]
+<pre><code>stratum plugins list [--kind scorers|reducers|masks|filters|mappers|readers|sources]
 stratum plugins show REF</code></pre>
 
 <p><code>list</code> enumerates what the current image or environment provides.

@@ -120,6 +120,52 @@ never reproject, resample or window anything.</p>
 <p>Sources are addressed by manifest alias, never URI. An undeclared alias raises rather than
 falling back to opening a path — a read that is not in the cache key would silently go stale.</p>
 
+<h2 id="access">SensorWindow, GranuleReader, GranuleSource</h2>
+
+<p>These sit <em>underneath</em> <code>ObsWindow</code>. The framework uses them to fill it; a
+scorer, mask, reducer or mapper never sees one. See
+<a href="../guide/reading-data.html">Reading data</a>.</p>
+
+<pre><code>@dataclass(frozen=<span class="k">True</span>)
+<span class="k">class</span> SensorWindow:
+    <span class="c">"""A rectangle in a granule's own sensor array. Carries its ORIGIN."""</span>
+    row0: int
+    col0: int
+    height: int
+    width: int
+
+    @classmethod
+    <span class="k">def</span> covering(cls, glt_x, glt_y) -&gt; <span class="k">"SensorWindow"</span>: ...
+    @property
+    <span class="k">def</span> slices(self) -&gt; tuple[slice, slice]: ...
+
+<span class="k">class</span> GranuleReader(Protocol):
+    collections: tuple[str, ...]
+    space: Literal[<span class="k">"sensor"</span>, <span class="k">"ortho"</span>]
+
+    <span class="k">def</span> open(self, asset: AssetHandle) -&gt; ReaderContext: ...
+    <span class="k">def</span> variables(self, ctx) -&gt; Mapping[str, VarSpec]: ...
+    <span class="k">def</span> read(self, ctx, var: str, window: SensorWindow | <span class="k">None</span> = <span class="k">None</span>) -&gt; MaskedArray: ...
+    <span class="k">def</span> geolocation(self, ctx) -&gt; LocArray | <span class="k">None</span>: ...
+    <span class="k">def</span> class_table(self, ctx, path, key, attributes) -&gt; ClassTable | <span class="k">None</span>: ...
+
+<span class="k">class</span> GranuleSource(Protocol):
+    name: str
+    <span class="k">def</span> search(self, *, collections, bbox, start, end,
+               updated_since=<span class="k">None</span>) -&gt; Iterator[GranuleRecord]: ...
+    <span class="k">def</span> assets(self, record) -&gt; Mapping[str, str]: ...</code></pre>
+
+<div class="tw">
+<table>
+<thead><tr><th>Guarantee</th><th>Why it is in the type</th></tr></thead>
+<tbody>
+<tr><td><code>SensorWindow</code> carries <code>row0</code>/<code>col0</code></td><td>A sensor-space mask needs the absolute cross-track column. A bare <code>(h, w)</code> would let <code>EdgeTrim</code> trim every block's edge instead of the detector's, and the output would look fine</td></tr>
+<tr><td><code>read</code> returns a masked array</td><td>The reader is the last place <code>-9999</code> exists. Above it, "not observed" stays distinguishable from "observed, nothing identified"</td></tr>
+<tr><td><code>space</code> is declared</td><td>An ortho-native product has no sensor space and no <code>loc</code> array. Asking it to regrid is a plan-time error, not a confusing worker failure</td></tr>
+</tbody>
+</table>
+</div>
+
 <h2 id="grid">GridDef, TileRef, BlockRef</h2>
 
 <pre><code>@dataclass(frozen=<span class="k">True</span>)

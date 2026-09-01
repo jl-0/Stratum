@@ -36,9 +36,14 @@
 <thead><tr><th>Component</th><th>Status</th><th>Notes</th></tr></thead>
 <tbody>
 <tr><td>Core types</td><td><span class="chip chip-draft">specified</span></td><td>Shapes settled; two open fields. See <a href="reference/types.html">Type reference</a>.</td></tr>
-<tr><td>Plugin contracts</td><td><span class="chip chip-draft">specified</span></td><td>All five hooks</td></tr>
+<tr><td>Plugin contracts</td><td><span class="chip chip-draft">specified</span></td><td>All five science hooks, plus the two access hooks</td></tr>
 <tr><td>Manifest schema</td><td><span class="chip chip-draft">specified</span></td><td>Pydantic models not written</td></tr>
+<tr><td>Granule reader contract</td><td><span class="chip chip-draft">specified</span></td><td>Registry keyed on collection; readers ship in the plugin package</td></tr>
 <tr><td>L2B reader</td><td><span class="chip chip-open">not started</span></td><td>First deliverable — no reader exists for the L2B mineral products today</td></tr>
+<tr><td>Asset store — staging</td><td><span class="chip chip-open">not started</span></td><td>Stage-in first; works against existing code unmodified</td></tr>
+<tr><td>Asset store — streaming</td><td><span class="chip chip-open">not started</span></td><td>Second; turns a block read into a range request over ~1% of a file</td></tr>
+<tr><td>CMR source</td><td><span class="chip chip-open">not started</span></td><td>Bridge over <code>earthaccess</code>. Blocked on confirming which vintage fields CMR exposes</td></tr>
+<tr><td>Local source</td><td><span class="chip chip-open">not started</span></td><td>Directory scan; what makes a laptop run possible with no account</td></tr>
 <tr><td>Regrid wrapper</td><td><span class="chip chip-open">not started</span></td><td>Wraps existing KD-tree regrid rather than reimplementing it</td></tr>
 <tr><td>Resolve / scorer runtime</td><td><span class="chip chip-open">not started</span></td><td></td></tr>
 <tr><td>Reduce / reducer runtime</td><td><span class="chip chip-open">not started</span></td><td></td></tr>
@@ -56,7 +61,9 @@
 <table>
 <thead><tr><th>Area</th><th>Decision</th></tr></thead>
 <tbody>
-<tr><td>Pipeline shape</td><td>Five stages, five plugin hooks; geometry cached and independent of science</td></tr>
+<tr><td>Pipeline shape</td><td>Five stages, five science hooks; geometry cached and independent of science</td></tr>
+<tr><td>Data access</td><td>Discovery, access and read are separate seams. A run reads a frozen index and never queries a catalogue</td></tr>
+<tr><td>Catalogue client</td><td><code>earthaccess</code>, behind a bridge — it handles Earthdata Login, but returns generic metadata and carries global state</td></tr>
 <tr><td>Compute unit</td><td>Block, distinct from tile; halos declared by plugins; block size never changes output</td></tr>
 <tr><td>Core types</td><td>Settled apart from two fields — see <a href="reference/types.html#stability">stability table</a></td></tr>
 <tr><td>Class identity</td><td>Products carry their own class tables; classes are named by attribute and resolved per granule at plan time</td></tr>
@@ -90,7 +97,7 @@ and that is much cheaper to find out now than after orchestration is built on to
 <table>
 <thead><tr><th>Question</th><th>Blocks</th><th>Owner</th></tr></thead>
 <tbody>
-<tr><td>Are product version fields exposed by the catalogue <strong>before download</strong>?</td><td>Whether vintage filtering is an index predicate or must be recorded at index-build time</td><td>Phil</td></tr>
+<tr><td>Are product version fields exposed by the catalogue <strong>before download</strong>?</td><td>Whether vintage filtering is an index predicate or a header scan at index-build time — see <a href="guide/reading-data.html#bridge">Reading data</a>. The run-time contract is the same either way</td><td>Phil</td></tr>
 <tr><td>Is the existing temporal-stack <code>freq-N</code> parameter a frequency rank or a time period?</td><td>How much of mode-through-time is new work versus a port</td><td>James</td></tr>
 <tr><td>Reduce over class labels, or over continuous quantities first?</td><td>The shape of the baseline reducer</td><td>Phil</td></tr>
 <tr><td>Zone selection for the pilot</td><td>The first fixtures and the V002 comparison target</td><td>Dana</td></tr>
@@ -113,8 +120,10 @@ and that is much cheaper to find out now than after orchestration is built on to
 <tr><td>Types</td><td>Is fingerprint-and-fail enough for class-table disagreement, or is remapping needed in v1?</td><td>Fail first; test against a real multi-vintage set before deciding</td></tr>
 <tr><td>Grid</td><td>Do we need a second, coarser grid for a 0.5&deg; aggregate product?</td><td>Probably a separate product built from these outputs</td></tr>
 <tr><td>Grid</td><td>Should block size vary per stage?</td><td>One size until a pilot is measured</td></tr>
-<tr><td>Index</td><td>Build from the catalogue API directly, from STAC, or via <code>earthaccess</code>?</td><td><code>earthaccess</code> — it handles Earthdata Login and is already a dependency nearby</td></tr>
 <tr><td>Index</td><td>Index internal collections as well as delivered ones?</td><td>Delivered, since L3 must touch every delivered file — but reprocessing may need internal builds</td></tr>
+<tr><td>Data access</td><td>Does <code>inputs.source</code> belong in the run manifest, or a separate index config?</td><td>Manifest — one document, one hash, at the cost of a field <code>run</code> ignores</td></tr>
+<tr><td>Data access</td><td>Should staged granules share a node-level cache across concurrent workers?</td><td>Clear win on a cluster node; needs a lock, and locks on shared filesystems are where reliability goes to die</td></tr>
+<tr><td>Data access</td><td>Should a sensor window round out to the file's chunk boundaries?</td><td>A tight box can be slower than a chunk-aligned over-read. Measure first</td></tr>
 <tr><td>Regrid</td><td>Is nearest-neighbour sufficient, or do we need area-weighted resampling?</td><td>Nearest</td></tr>
 <tr><td>Scorer</td><td>Does a scorer need the previous epoch's snapshot?</td><td>No — it would break epoch independence and therefore parallelism</td></tr>
 <tr><td>Aux</td><td>Allow remote HTTP sources, or require staging into our bucket?</td><td>Staging — more reproducible, no third-party uptime dependency mid-run</td></tr>

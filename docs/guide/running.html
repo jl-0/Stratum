@@ -71,6 +71,10 @@ time:
 
 inputs:
   index: ./index/emit-granules.parquet    <span class="c"># local file or s3:// URI</span>
+  source:                                 <span class="c"># only used by `stratum index build`</span>
+    kind: local
+    root: ./granules
+    pattern: <span class="k">"EMIT_L2B_MIN_*.nc"</span>
   roles:
     geometry: {collection: EMITL1BOBS, var: obs}
     mineral:
@@ -103,6 +107,11 @@ unchanged. Add one when you want to combine epochs; see
 <a href="plugins.html#reducer">Writing plugins</a>.</p>
 
 <p>The full field list is in the <a href="../reference/manifest.html">manifest reference</a>.</p>
+
+<p><code>inputs.index</code> is the only input a run touches. <code>inputs.source</code> says how
+that index is built — here from a directory of files you already have, which is what makes this
+manifest runnable with no network and no Earthdata account. Point it at NASA's archive instead and
+nothing else in the document changes; see <a href="reading-data.html">Reading data</a>.</p>
 
 <div class="reading">
   <span class="label">Further reading</span>

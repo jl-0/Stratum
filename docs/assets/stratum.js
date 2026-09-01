@@ -16,6 +16,7 @@
     { section: 'Guide', items: [
       { id: 'guide/concepts',   href: 'guide/concepts.html',   label: 'Concepts' },
       { id: 'guide/running',    href: 'guide/running.html',    label: 'Running a mosaic' },
+      { id: 'guide/reading-data', href: 'guide/reading-data.html', label: 'Reading data' },
       { id: 'guide/plugins',    href: 'guide/plugins.html',    label: 'Writing plugins' },
       { id: 'guide/caching',    href: 'guide/caching.html',    label: 'Caching & reruns' },
       { id: 'guide/scaling',    href: 'guide/scaling.html',    label: 'Running at scale' }

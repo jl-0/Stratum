@@ -57,9 +57,14 @@ inside <code>score</code>.</p>
 <tr><td>Choose between overlapping observations</td><td><code>Scorer</code></td><td>The cost function proper</td></tr>
 <tr><td>Combine epochs through time</td><td><code>Reducer</code></td><td>Sees all epochs for a block at once</td></tr>
 <tr><td>Control how the output looks</td><td><code>OutputMapper</code></td><td>Runs at publish, over finished bands</td></tr>
+<tr><td>Support a new instrument, product or archive</td><td><a href="reading-data.html#reader"><code>GranuleReader</code></a> / <a href="reading-data.html#source-hook"><code>GranuleSource</code></a></td><td>A different tier — see <a href="reading-data.html">Reading data</a></td></tr>
 </tbody>
 </table>
 </div>
+
+<p>The last row is deliberately set apart. The five hooks on this page change <em>the answer</em>;
+readers and sources change <em>where the data comes from</em>. If what you need is a format or an
+archive rather than a decision, you want that page instead.</p>
 
 <div class="key">
   <span class="label">Masking is not ranking</span>

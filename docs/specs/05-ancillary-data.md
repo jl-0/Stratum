@@ -5,6 +5,11 @@
 
 How a cost function reaches data that has nothing to do with EMIT's grid.
 
+> **Not the granule path.** `AuxAccessor` covers everything that is *not* an observation — DEMs,
+> landcover, claim polygons. Granules themselves arrive through `GranuleSource`, `AssetStore` and
+> `GranuleReader` ([12](12-data-access.md)). The two paths make the same promise to a plugin
+> author — already on your block's grid, already windowed, already cached — and share nothing else.
+
 ---
 
 ## 1. The contract

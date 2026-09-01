@@ -107,7 +107,8 @@ if not os.path.exists(input_file):
 
 Sequencing: **stage-in shim first** (download to ephemeral disk, call existing code unmodified,
 upload) — works immediately; **`/vsis3/` streaming second**, which turns a block read into a range
-request over only the pixels it touches.
+request over only the pixels it touches. Both modes sit behind one `AssetStore` handle, so a reader
+does not change when the mode does ([12 §4](12-data-access.md)).
 
 Also note `write_cog` builds the whole output through GDAL's in-memory `MEM` driver, so output
 size is bounded by worker RAM. Blocks keep that comfortable.
@@ -121,7 +122,11 @@ primary Critical Minerals input. An `EMIT_L2B_MIN_*.nc` falls through to
 
 Writing that reader is an early, concrete deliverable, and it must cover both L2B flavours
 ([02 §5](02-granule-index.md)). Substring dispatch is itself fragile once files are staged into
-cache-keyed paths — Stratum should pass product type explicitly from the role declaration.
+cache-keyed paths — Stratum passes product type explicitly from the role declaration instead.
+
+That is the first `GranuleReader` implementation rather than a patch to `spec_io`: the protocol,
+the registry keyed on collection, and the reason it is shaped that way are
+[12 §3](12-data-access.md).
 
 ---
 

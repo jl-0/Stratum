@@ -3,8 +3,10 @@
 **Status:** draft · **Depends on:** [00](00-overview.md), [01](01-grid-tiling.md) ·
 **Depended on by:** [05](05-ancillary-data.md), [07](07-output-mapping.md), [08](08-execution.md)
 
-The five hooks, their contracts, how they are registered and resolved, and how the framework
-decides where to run them.
+The five science hooks, their contracts, how they are registered and resolved, and how the
+framework decides where to run them. The two *access* hooks — `GranuleSource` and `GranuleReader` —
+are a separate tier and live in [12](12-data-access.md): they add a data source rather than
+changing an answer.
 
 ---
 

@@ -62,6 +62,9 @@ cache entry can always be explained — which matters the first time two keys un
    lies; the accessor rejects it rather than trusting authors to remember ([05](05-ancillary-data.md)).
 6. **Cache writes are atomic** — write to a temp key, then copy — so an interrupted Spot task
    cannot leave a truncated artifact that later reads as a hit.
+7. **Staged source files are not artifacts.** A local copy of an upstream granule is keyed by URI
+   and ETag, scoped to a worker, and never enters a cache key. Asset *identity* determines an
+   artifact; whether the bytes happened to be local does not ([12 §4](12-data-access.md)).
 
 ---
 

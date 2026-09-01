@@ -1,0 +1,410 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Reading data · Stratum</title>
+<link rel="stylesheet" href="../assets/stratum.css">
+</head>
+<body data-page="guide/reading-data" data-root="../">
+<a class="skip" href="#content">Skip to content</a>
+<header class="masthead">
+  <a class="wordmark" href="../index.html"><span class="glyph"></span>Stratum</a>
+  <span class="stage">Pre-release</span>
+  <span class="spacer"></span>
+  <span class="repo">EMIT Critical Minerals L3</span>
+</header>
+<div class="layout">
+<nav id="sidebar" aria-label="Documentation"></nav>
+<main id="content">
+<div class="prose">
+
+<h1>Reading data</h1>
+<p class="lede">How granules are found, fetched and turned into the arrays a scorer sees &mdash;
+from a directory on your laptop or from NASA's archive, through the same interface.</p>
+
+<h2 id="seams">Three jobs, kept apart</h2>
+
+<p>Getting data into a block looks like one task and is really three. Stratum keeps them separate
+because they run in different places, at different times, with different failure modes.</p>
+
+<div class="tw">
+<table>
+<thead><tr><th>Job</th><th>Component</th><th>Runs</th><th>Talks to</th></tr></thead>
+<tbody>
+<tr><td><strong>Discovery</strong> &mdash; what granules exist</td><td><code>GranuleSource</code></td><td>Index build &mdash; a periodic job</td><td>A live catalogue, or a directory</td></tr>
+<tr><td><strong>Access</strong> &mdash; a URI becomes readable bytes</td><td><code>AssetStore</code></td><td>Every worker</td><td>Storage, and a credential endpoint</td></tr>
+<tr><td><strong>Read</strong> &mdash; bytes become arrays</td><td><code>GranuleReader</code></td><td>Every worker</td><td>Nothing external</td></tr>
+</tbody>
+</table>
+</div>
+
+<div class="key">
+  <span class="label">A run never queries a catalogue</span>
+  <p>Discovery happens ahead of time and lands in an index. A run reads a frozen copy of that index
+  and nothing else. That is what lets a run be reproduced months later &mdash; and it is what stops
+  several thousand workers hammering a public API the moment your fan-out gets interesting.</p>
+</div>
+
+<p>The seam that matters most is between <em>access</em> and <em>read</em>. A reader that takes a
+path and opens it can only ever read local files. Split apart, the reader is handed an already-open
+handle and never learns whether the bytes came from disk, from S3, or from a range request over
+HTTP &mdash; so the same reader works on your laptop and in Lambda.</p>
+
+<h2 id="block">How a block gets its data</h2>
+
+<p>Stage 3 works on one <a href="concepts.html#tile-block">block</a> of one tile for one epoch. Here
+is what happens when it needs a band, for one contributing granule:</p>
+
+<pre><code><span class="c"># The work item names a block and an epoch. Which granules touch it</span>
+<span class="c"># comes from the frozen index — no catalogue call.</span>
+win  = block.window                                <span class="c"># (H, W) on the tile grid, halo included</span>
+cand = frozen_index.intersecting(block, epoch)
+
+<span class="k">for</span> granule <span class="k">in</span> cand:
+
+    <span class="c"># 1. The GLT was built in stage 2 and cached. It is a COG, so this</span>
+    <span class="c">#    reads only the bytes covering this block — not the whole tile.</span>
+    glt = assets.open(glt_key_for(granule, tile))
+    g   = glt.read(win)                            <span class="c"># (H, W, 3) int32</span>
+
+    <span class="k">if</span> <span class="k">not</span> g[..., 2].any():
+        <span class="k">continue</span>                                   <span class="c"># granule does not reach this block</span>
+
+    <span class="c"># 2. The GLT names exactly which sensor pixels this block touches.</span>
+    <span class="c">#    Take their bounding box — this is the whole trick.</span>
+    sw  = SensorWindow.covering(g[..., 0], g[..., 1])
+
+    <span class="c"># 3. Open the asset and read ONLY that rectangle.</span>
+    src = assets.open(granule.assets[<span class="k">"mineral"</span>])
+    arr = reader.read(src, var=<span class="k">"group_1_mineral_id"</span>, window=sw)   <span class="c"># (h, w)</span>
+
+    <span class="c"># 4. Map sensor pixels onto grid cells. The only place the two meet.</span>
+    band, valid = gather(arr, g, sw)               <span class="c"># (H, W) on the block grid</span></code></pre>
+
+<h3 id="window">Why step 2 is the whole trick</h3>
+
+<p>A 512 &times; 512 block at 0.0003&deg; spans about 0.15&deg;, which covers roughly 170 &times; 170
+of a granule's 60 m pixels. The granule itself is 1664 &times; 1242. Reading the whole scene for
+every block would read about fifty times more data than the block needs &mdash; and pay it again for
+every granule, in every epoch.</p>
+
+<div class="tw">
+<table>
+<thead><tr><th>Approach</th><th>Read per block, per granule</th></tr></thead>
+<tbody>
+<tr><td>Open the granule, take what you need</td><td>The whole scene &mdash; ~2.1 M pixels per variable</td></tr>
+<tr><td>Window from the GLT first</td><td>~29 k pixels &mdash; about 1.4%</td></tr>
+</tbody>
+</table>
+</div>
+
+<p>Because the GLT already knows which source pixels landed in this block, the window is exact
+rather than estimated. Nothing is guessed from footprints.</p>
+
+<div class="note">
+  <span class="label">A window remembers where it came from</span>
+  <p><code>SensorWindow</code> is <code>(row0, col0, height, width)</code> against the
+  <em>full</em> granule, not a bare shape. A sensor-space mask like <code>EdgeTrim</code> needs the
+  absolute cross-track column to know whether it is looking at a detector edge. Hand it a window
+  that has forgotten its origin and it will trim the edge of every <em>block</em> instead of the
+  edge of the <em>detector</em> &mdash; and the output will look entirely reasonable.</p>
+</div>
+
+<h3 id="gather">Step 4, in full</h3>
+
+<p>The gather is the one place sensor space and block space meet, so it lives in the framework
+rather than in anybody's plugin:</p>
+
+<pre><code>gy, gx, fi = g[..., 1], g[..., 0], g[..., 2]
+
+hit    = fi != 0                     <span class="c"># 0 is GLT nodata</span>
+interp = (gy &lt; 0) | (gx &lt; 0)         <span class="c"># negative marks an interpolated cell</span>
+
+r = np.abs(gy) - 1 - sw.row0         <span class="c"># GLT indices are 1-based</span>
+c = np.abs(gx) - 1 - sw.col0
+
+band  = np.where(hit, arr[r, c], fill)
+valid = hit &amp; ~arr.mask[r, c]</code></pre>
+
+<p>One-based indices and the negative-means-interpolated convention are inherited on purpose, so
+Stratum's GLTs interoperate with artifacts the existing tooling produces. Both are easy to get
+wrong once and never notice.</p>
+
+<div class="key">
+  <span class="label">Your scorer sees none of this</span>
+  <p>Everything above happens below <code>ObsWindow</code>. A <code>Scorer</code> gets
+  <code>obs["mineral"]</code> already on the block grid, already masked, and never sees a URI, a
+  sensor window, a reader or a credential. That is the same promise
+  <a href="plugins.html#aux"><code>aux</code></a> makes for ancillary data.</p>
+</div>
+
+<h3 id="ortho">Products already on a map grid</h3>
+
+<p>Not every input is in sensor space. EMIT's fractional-cover product (FRCOV) ships
+orthorectified, so it has no sensor geometry to window and nothing to regrid &mdash; it is warped
+onto the block grid directly. A reader declares which space it produces, and Stratum takes the
+cheaper path when it can.</p>
+
+<h2 id="sources">Where granules come from</h2>
+
+<p>A run reads an index. How that index gets built is a <code>GranuleSource</code>, declared under
+<code>inputs.source</code>:</p>
+
+<div class="tw">
+<table>
+<thead><tr><th>Kind</th><th>Use when</th><th>Needs an account?</th></tr></thead>
+<tbody>
+<tr><td><code>local</code></td><td>Granules are already on disk &mdash; a laptop run, a cluster scratch directory, a test fixture set</td><td>No</td></tr>
+<tr><td><code>cmr</code></td><td>Pulling from NASA's archive. The default for EMIT</td><td>Earthdata Login</td></tr>
+<tr><td><code>stac</code></td><td>Any STAC catalogue, including CMR-STAC</td><td>Depends on the catalogue</td></tr>
+<tr><td><code>parquet</code></td><td>Someone already built an index and you are pointing at it</td><td>No</td></tr>
+</tbody>
+</table>
+</div>
+
+<h3 id="local">From a directory</h3>
+
+<pre><code>inputs:
+  index: ./index/emit-granules.parquet   <span class="c"># what a RUN reads</span>
+  source:                                <span class="c"># how that index is BUILT</span>
+    kind: local
+    root: ./granules
+    pattern: <span class="k">"EMIT_L2B_MIN_*.nc"</span></code></pre>
+
+<p><code>stratum index build</code> walks the directory, reads each file's header once, and writes
+the same index the archive path produces. No network, no Earthdata account, no catalogue. Nothing
+downstream can tell the difference &mdash; which is the test that this seam is in the right
+place.</p>
+
+<h3 id="cmr">From NASA's archive</h3>
+
+<pre><code>inputs:
+  index: s3://emit-l3/index/emit-granules.parquet
+  source:
+    kind: cmr
+    provider: LPCLOUD      <span class="c"># the DAAC that distributes EMIT</span>
+    prefer: direct         <span class="c"># direct (s3://) where possible, else https</span></code></pre>
+
+<details class="explainer">
+<summary>What are CMR, a DAAC, and Earthdata Login?</summary>
+<div class="body">
+
+<p>NASA does not keep its Earth science data in one place. It is distributed across a dozen
+<strong>DAACs</strong> &mdash; Distributed Active Archive Centers &mdash; each responsible for a
+subject area. EMIT products are distributed by <strong>LP DAAC</strong>, the Land Processes centre,
+whose cloud holdings appear under the provider name <code>LPCLOUD</code>.</p>
+
+<p>The <strong>CMR</strong> &mdash; Common Metadata Repository &mdash; is the catalogue that sits in
+front of all of them. It does not hold the data; it holds a metadata record for every granule, and
+answers questions like "which EMIT L2B granules intersect this box between these dates?" Each answer
+includes the URLs where the actual file can be fetched.</p>
+
+<p>Those metadata records follow a schema called <strong>UMM-G</strong> (Unified Metadata Model,
+Granule). It is generic across every NASA mission, which is why it does not look much like our index
+schema and why a translation layer is needed.</p>
+
+<p><strong>Earthdata Login</strong> (URS) is the single sign-on account for all of it. Downloads are
+authenticated even though the data is free, so a machine fetching granules needs credentials &mdash;
+usually a token, or a <code>~/.netrc</code> entry.</p>
+
+<div class="reading">
+  <span class="label">Further reading</span>
+  <ul>
+    <li><a href="https://cmr.earthdata.nasa.gov/search/site/docs/search/api.html">CMR Search API</a> <span class="what">&mdash; the query interface, its parameters, and how paging works</span></li>
+    <li><a href="https://urs.earthdata.nasa.gov/">Earthdata Login</a> <span class="what">&mdash; where you register the account everything else needs</span></li>
+    <li><a href="https://www.earthdata.nasa.gov/data/tools/earthaccess">earthaccess</a> <span class="what">&mdash; NASA's Python client; handles login, search and the S3 credential exchange</span></li>
+    <li><a href="https://earthaccess.readthedocs.io/">earthaccess documentation</a> <span class="what">&mdash; API reference for the library Stratum's CMR source is built on</span></li>
+    <li><a href="https://www.earthdata.nasa.gov/data/catalog">Earthdata catalog</a> <span class="what">&mdash; browse collections and their short names, which is what a role's <code>collection</code> field takes</span></li>
+  </ul>
+</div>
+
+</div>
+</details>
+
+<h3 id="bridge">Why there is a bridge layer</h3>
+
+<p><code>earthaccess</code> is NASA's own Python client and Stratum uses it. It handles the parts
+that are genuinely tedious &mdash; login, <code>.netrc</code>, the S3 credential exchange, DAAC
+endpoints &mdash; and it is already a dependency of the tooling this project builds on. But it
+returns a thin wrapper over UMM-G JSON, and four things have to happen between that and a row in an
+index:</p>
+
+<div class="tw">
+<table>
+<thead><tr><th>What the bridge does</th><th>Why it cannot be skipped</th></tr></thead>
+<tbody>
+<tr><td>Maps UMM-G fields onto the index schema</td><td>Not one-to-one, and lossy in places</td></tr>
+<tr><td>Resolves assets to <a href="concepts.html#roles">roles</a></td><td>UMM-G types URLs by <em>access method</em>, not by role. Choosing the <code>s3://</code> entry over the HTTPS one, and deciding which file is <code>mineral</code> and which is <code>mask</code>, is our policy</td></tr>
+<tr><td>Applies the missing-metadata policy</td><td>Cloud fraction is present on some collections and simply absent on others. Absent must arrive as <em>null</em>, never <code>0.0</code> &mdash; see <a href="running.html#missing">Missing metadata</a></td></tr>
+<tr><td>Holds an explicit session</td><td><code>earthaccess.login()</code> sets module-level global state, which is wrong in a process pool and worse in a Lambda</td></tr>
+</tbody>
+</table>
+</div>
+
+<p>The field-by-field mapping, including the two fields that still need confirming against a real
+query, is in <a href="../specs/12-data-access.md"><code>specs/12-data-access.md</code></a>.</p>
+
+<h2 id="index">Building and refreshing the index</h2>
+
+<pre><code>stratum index build -m manifest.yaml                  <span class="c"># first build, from inputs.source</span>
+stratum index build -m manifest.yaml --since 2026-09-01  <span class="c"># incremental refresh</span>
+stratum index verify -m manifest.yaml                 <span class="c"># do the asset URIs still resolve?</span></code></pre>
+
+<p><code>--since</code> does more than make refreshes cheap. Upstream reprocessing re-delivers
+granules with the same identifiers and different contents, and an incremental refresh is how that
+becomes visible: the granule comes back as updated, the index records a new last-seen timestamp, and
+<code>verify</code> reports it.</p>
+
+<div class="warn">
+  <span class="label">Without that, the archive changes underneath you silently</span>
+  <p>A stable query returning different science is the failure this whole path is arranged to
+  prevent. Pair it with vintage pinning &mdash; see
+  <a href="running.html#vintage">Vintage pinning is required</a>.</p>
+</div>
+
+<h2 id="access">Fetching the bytes</h2>
+
+<p>Once a run has an index, reading an asset is <code>AssetStore</code>'s problem. It supports two
+modes behind one interface:</p>
+
+<div class="tw">
+<table>
+<thead><tr><th>Mode</th><th>What happens</th><th>When</th></tr></thead>
+<tbody>
+<tr><td><strong>Stage in</strong></td><td>The whole asset is copied to local scratch and the reader gets a path</td><td>The default. Works with any code that expects a filename</td></tr>
+<tr><td><strong>Stream</strong></td><td>Reads become HTTP range requests; only the touched bytes move</td><td>Once a reader supports windowed reads &mdash; roughly 1% of a file for one block</td></tr>
+</tbody>
+</table>
+</div>
+
+<p>Readers do not change when the mode does. Staging is what works today against existing code;
+streaming is where the cost goes.</p>
+
+<h3 id="credentials">Credentials</h3>
+
+<div class="tw">
+<table>
+<thead><tr><th>Access path</th><th>What you need</th><th>Lifetime</th></tr></thead>
+<tbody>
+<tr><td>LP DAAC over HTTPS</td><td>An Earthdata token, or a <code>~/.netrc</code> entry</td><td>Long</td></tr>
+<tr><td>LP DAAC direct S3</td><td>Temporary AWS credentials, exchanged with your Earthdata token</td><td><strong>About one hour</strong></td></tr>
+<tr><td>Your own buckets</td><td>A task role or instance profile</td><td>Refreshed for you</td></tr>
+</tbody>
+</table>
+</div>
+
+<div class="warn">
+  <span class="label">The one-hour expiry shapes the design</span>
+  <p>Any worker that lives longer than an hour has to refresh mid-run, and any unit of work that
+  <em>cannot finish</em> in an hour is the wrong size. This is an independent argument for many
+  short tasks over a few long ones &mdash; the same conclusion
+  <a href="scaling.html">Running at scale</a> reaches from the cost side. Stratum refreshes on
+  expiry and retries once, so no plugin has to know about it.</p>
+</div>
+
+<p>Direct S3 access to the archive works only from inside the same AWS region the data lives in
+(<code>us-west-2</code>). From elsewhere it fails in a way that reads like a permissions error, so
+Stratum checks the region and falls back to HTTPS rather than surfacing the confusing message.</p>
+
+<h2 id="reader">Adding a reader</h2>
+
+<p>A <code>GranuleReader</code> turns one product family into arrays. You write one to support a new
+instrument or a new product; you do not write one to change what a mosaic means.</p>
+
+<pre><code><span class="k">class</span> GranuleReader(Protocol):
+    collections: tuple[str, ...]        <span class="c"># which collections this reader claims</span>
+    space: Literal[<span class="k">"sensor"</span>, <span class="k">"ortho"</span>]
+
+    <span class="k">def</span> open(self, asset: AssetHandle) -&gt; ReaderContext:
+        <span class="c">"""Cheap. Headers and metadata only — never the pixels."""</span>
+
+    <span class="k">def</span> variables(self, ctx) -&gt; Mapping[str, VarSpec]:
+        <span class="c">"""Name -> dtype, shape, fill. Used by plan-time validation."""</span>
+
+    <span class="k">def</span> read(self, ctx, var: str, window: SensorWindow | <span class="k">None</span> = <span class="k">None</span>) -&gt; MaskedArray:
+        <span class="c">"""Fills already resolved to a mask."""</span>
+
+    <span class="k">def</span> geolocation(self, ctx) -&gt; LocArray | <span class="k">None</span>:
+        <span class="c">"""lat/lon/elev in sensor space. None when space == 'ortho'."""</span>
+
+    <span class="k">def</span> class_table(self, ctx, path, key, attributes) -&gt; ClassTable | <span class="k">None</span>:
+        <span class="c">"""Pull an embedded class table out of the granule being read."""</span></code></pre>
+
+<p>Four rules come with it:</p>
+
+<ul>
+<li><strong>Selection is by declared collection, never by filename.</strong> The role says
+<code>collection: EMITL2BMIN</code>, and that picks the reader. Sniffing filenames breaks the moment
+a file is staged into a cache-keyed path, which is exactly what staging does.</li>
+<li><strong>The reader is where <code>-9999</code> dies.</strong> <code>read</code> returns values
+with fills already converted to a mask. Nothing above a reader sees a sentinel &mdash; which is how
+"not observed" stays distinguishable from
+<a href="concepts.html#nodata">"observed, nothing identified"</a> all the way to a reducer.</li>
+<li><strong><code>open</code> is cheap, <code>read</code> is windowed.</strong> The same asset is
+opened once per block. A reader that parses the whole file on <code>open</code> becomes the
+dominant cost.</li>
+<li><strong>Readers ship in a plugin package.</strong> <code>stratum</code> core provides none;
+<code>stratum_emit</code> provides the EMIT ones.</li>
+</ul>
+
+<p>Registration works exactly as it does for the other hooks &mdash; an entry point in your
+package's metadata, listed by <code>stratum plugins list --kind readers</code>. See
+<a href="plugins.html#registering">Registering and shipping</a>.</p>
+
+<h3 id="two-flavours">One role, two file layouts</h3>
+
+<p>The same logical input often arrives in more than one form. EMIT mineral products exist both as
+DAAC-distributed NetCDF and as the Dataset layout the Tetracorder wrapper writes. Those are two
+readers claiming two collection names and resolving through one role &mdash; which is what the
+registry is for, and what filename dispatch cannot express.</p>
+
+<h2 id="source-hook">Adding a source</h2>
+
+<p>Rarer, and only needed for an archive Stratum does not already speak to:</p>
+
+<pre><code><span class="k">class</span> GranuleSource(Protocol):
+    name: str
+
+    <span class="k">def</span> search(self, *, collections, bbox, start, end,
+               updated_since: datetime | <span class="k">None</span> = <span class="k">None</span>) -&gt; Iterator[GranuleRecord]:
+        <span class="c">"""Yields catalogue records. Pages internally; may be very long."""</span>
+
+    <span class="k">def</span> assets(self, record) -&gt; Mapping[str, str]:
+        <span class="c">"""Role -> URI. The source owns this policy; the index stores the result."""</span></code></pre>
+
+<p><code>search</code> pages internally and yields rather than returning a list &mdash; a
+full-mission EMIT query is far larger than anything worth holding in memory, and CMR requires
+cursor-based paging past the first few thousand results anyway.</p>
+
+<div class="note">
+  <span class="label">These are not science hooks</span>
+  <p>The five hooks in <a href="plugins.html">Writing plugins</a> change the answer.
+  <code>GranuleSource</code> and <code>GranuleReader</code> add a data source. A new instrument is a
+  reader; a new archive is a source; neither changes what a mosaic means &mdash; which is why they
+  are kept in a separate tier rather than swelling the list you have to understand to write a cost
+  function.</p>
+</div>
+
+<div class="reading">
+  <span class="label">Further reading</span>
+  <ul>
+    <li><a href="https://gdal.org/en/stable/user/virtual_file_systems.html">GDAL virtual file systems</a> <span class="what">&mdash; how <code>/vsis3/</code> turns an object-store path into range requests</span></li>
+    <li><a href="https://cogeo.org/">Cloud Optimized GeoTIFF</a> <span class="what">&mdash; the layout that makes a windowed read cheap in the first place</span></li>
+    <li><a href="https://stacspec.org/">STAC</a> <span class="what">&mdash; the catalogue standard behind the <code>stac</code> source, and what Stratum publishes</span></li>
+    <li><a href="https://filesystem-spec.readthedocs.io/">fsspec</a> <span class="what">&mdash; the Python filesystem abstraction underneath streaming reads</span></li>
+  </ul>
+</div>
+
+</div>
+<nav class="pager" aria-label="Pagination"></nav>
+<footer class="site">
+  Specified in <a href="../specs/12-data-access.md"><code>specs/12-data-access.md</code></a>,
+  <a href="../specs/02-granule-index.md"><code>02</code></a>,
+  <a href="../specs/03-regrid-glt.md"><code>03</code></a>
+</footer>
+</main>
+</div>
+<script src="../assets/stratum.js"></script>
+</body>
+</html>

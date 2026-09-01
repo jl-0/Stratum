@@ -28,8 +28,9 @@ one.
 
 | If you change… | Update |
 |---|---|
-| Any shared type (`ObsWindow`, `AuxAccessor`, `GLT`, `SnapshotStack`, `BandStack`, `GranuleRef`, `ClassTable`) | [`docs/specs/11-types.md`](docs/specs/11-types.md) — **always**, no exceptions |
+| Any shared type (`ObsWindow`, `AuxAccessor`, `GLT`, `SnapshotStack`, `BandStack`, `GranuleRef`, `ClassTable`, `SensorWindow`) | [`docs/specs/11-types.md`](docs/specs/11-types.md) — **always**, no exceptions |
 | A plugin contract | [`04-cost-functions.md`](docs/specs/04-cost-functions.md), and [`07`](docs/specs/07-output-mapping.md) for `OutputMapper` |
+| How granules are found, fetched or read (`GranuleSource`, `GranuleReader`, `AssetStore`) | [`12-data-access.md`](docs/specs/12-data-access.md) |
 | What goes into a cache key | [`06-caching.md`](docs/specs/06-caching.md) |
 | The manifest schema | [`09-run-manifest.md`](docs/specs/09-run-manifest.md) |
 | Fill/nodata handling anywhere | [`11-types.md` §2](docs/specs/11-types.md) — the single source of truth |
@@ -51,6 +52,7 @@ statement on the page becomes false.
 |---|---|
 | `00-overview`, `01-grid-tiling`, `11-types` §1–2, §9 | [`docs/guide/concepts.html`](docs/guide/concepts.html) |
 | `02-granule-index`, `09-run-manifest`, `10-provenance` | [`docs/guide/running.html`](docs/guide/running.html) |
+| `12-data-access`, `02-granule-index` §5–6, `03-regrid-glt` §4 | [`docs/guide/reading-data.html`](docs/guide/reading-data.html) |
 | `04-cost-functions`, `05-ancillary-data`, `07-output-mapping` | [`docs/guide/plugins.html`](docs/guide/plugins.html) |
 | `06-caching` | [`docs/guide/caching.html`](docs/guide/caching.html) |
 | `08-execution`, `ADR-0002` | [`docs/guide/scaling.html`](docs/guide/scaling.html) |

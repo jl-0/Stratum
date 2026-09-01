@@ -119,6 +119,23 @@ a common grid, fanning the work out, caching, cataloguing — is the framework's
 like</em>. Most mappings and filters are configuration, not code — you only write a plugin when
 the built-ins do not cover what you need. See <a href="guide/plugins.html">Writing plugins</a>.</p>
 
+<p>Two more hooks sit underneath those, and they exist to add a <em>data source</em> rather than to
+change an answer:</p>
+
+<div class="tw">
+<table>
+<thead><tr><th>Hook</th><th>You use it to say</th><th>Runs</th></tr></thead>
+<tbody>
+<tr><td><code>GranuleSource</code></td><td>Where the catalogue of granules comes from — a directory, CMR, a STAC API</td><td>Index build, ahead of any run</td></tr>
+<tr><td><code>GranuleReader</code></td><td>How one product family's bytes become arrays</td><td>Per block, in every worker</td></tr>
+</tbody>
+</table>
+</div>
+
+<p>A new instrument is a reader; a new archive is a source. Neither changes what a mosaic means,
+which is why they are kept apart from the five above. See
+<a href="guide/reading-data.html">Reading data</a>.</p>
+
 <h2 id="iterate">Changing your mind is cheap</h2>
 
 <p>Regridding is the expensive stage and depends only on geometry. Scoring is cheap and is the
@@ -164,7 +181,7 @@ a plugin package:</p>
 <thead><tr><th>Package</th><th>Provides</th></tr></thead>
 <tbody>
 <tr><td><code>stratum</code></td><td>The pipeline, the plugin contracts, the CLI, caching, provenance</td></tr>
-<tr><td><code>stratum_emit</code></td><td>EMIT readers, detector-edge masks, mineral scorers, FRCOV support, lumping</td></tr>
+<tr><td><code>stratum_emit</code></td><td>EMIT granule readers, the CMR source, detector-edge masks, mineral scorers, FRCOV support, lumping</td></tr>
 </tbody>
 </table>
 </div>
@@ -177,6 +194,11 @@ a plugin package:</p>
     <p>Grid, tile and block; epochs and delivery windows; roles and aliases; how missing data is
     represented. Read this before writing a manifest.</p>
   </a>
+  <a class="card" href="guide/reading-data.html">
+    <h3>Reading data</h3>
+    <p>How a block gets its bytes, where granules come from, and what it takes to add an
+    instrument or an archive.</p>
+  </a>
   <a class="card" href="guide/running.html">
     <h3>Running a mosaic</h3>
     <p>The workflow end to end — write a manifest, dry-run it, submit it, and find what came
@@ -184,8 +206,8 @@ a plugin package:</p>
   </a>
   <a class="card" href="guide/plugins.html">
     <h3>Writing plugins</h3>
-    <p>The five hooks in full, with worked cost functions, how to register them, and how to ship
-    one without rebuilding an image.</p>
+    <p>The five science hooks in full, with worked cost functions, how to register them, and how
+    to ship one without rebuilding an image.</p>
   </a>
   <a class="card" href="guide/caching.html">
     <h3>Caching &amp; reruns</h3>

@@ -94,6 +94,8 @@ names `tetracorder5.27c.cmds`. So the identifier exists and is unambiguous *in t
 
 Still open: whether CMR exposes these **before download**. If not, vintage filtering cannot be an
 index predicate and the index build must record it at ingest — which is the design assumed here.
+Both outcomes are handled without changing the run-time contract; see
+[12 §5](12-data-access.md).
 
 > Phil has since confirmed that V002 only **adds** metadata. A reader written against V001 fields
 > therefore stays forward-compatible. Note this does *not* extend to class tables keyed on
@@ -134,7 +136,8 @@ inputs:
     mask:     {collection: EMITL2AMASK, var: mask}
 ```
 
-A role resolves to `(asset_uri, variable)`. Build version becomes an indexed, filterable column —
+A role resolves to `(asset_uri, variable)`, and the collection selects the reader that opens it
+([12 §3](12-data-access.md)). Build version becomes an indexed, filterable column —
 which is also how a reprocessing campaign gets pinned to a specific build instead of a string
 constant.
 
@@ -154,13 +157,17 @@ This is not optional. A CMR query today and tomorrow return different answers; w
 permanently, and a later re-run can be *verified* rather than merely repeated.
 
 The index build itself is a separate periodic job, so a run never depends on CMR being reachable.
+How that job talks to CMR — and how UMM-G maps onto the schema in §2 — is
+[12 §5](12-data-access.md).
 
 ---
 
 ## 7. Open questions
 
-1. Build the index from CMR directly, from CMR-STAC, or from `earthaccess`? `earthaccess` is
-   already a `SpectralUtil` dependency and handles EDL, which argues for it.
+1. ~~Build the index from CMR directly, from CMR-STAC, or from `earthaccess`?~~ **Resolved:**
+   `earthaccess` behind a `CMRSource` bridge — it is already a `SpectralUtil` dependency and
+   handles EDL, but it returns UMM-G rather than our schema and carries module-level global state.
+   See [12 §5](12-data-access.md).
 2. Do we index the SDS-internal collections as well as the DAAC ones? Phil noted L3 must touch
    every delivered file, which suggests DAAC — but reprocessing may need internal builds.
 3. Should the frozen index carry the full asset URIs, or resolve them at read time from a

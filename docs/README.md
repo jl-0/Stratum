@@ -21,7 +21,8 @@ index.html                what it does, the pipeline, where you plug in
 guide/
   concepts.html           grid/tile/block, epochs & delivery, roles, spaces, nodata, class tables
   running.html            write a manifest, dry-run it, submit it, read the output
-  plugins.html            authoring guide for all five hooks
+  reading-data.html       the block read path; sources, readers, staging, credentials
+  plugins.html            authoring guide for all five science hooks
   caching.html            what invalidates what; inspecting the cache
   scaling.html            local, SLURM and AWS executors; credentials; Terraform's role
 reference/
@@ -69,14 +70,15 @@ Authoritative. Numbered by dependency order, not build order.
 | [01 — Grid, tiling, blocks](specs/01-grid-tiling.md) | Grid definition, tile/block split, halos |
 | [02 — Granule index](specs/02-granule-index.md) | Schema, queries, freezing, role resolution |
 | [03 — Regrid and GLT](specs/03-regrid-glt.md) | GLT format, KD-tree, SpectralUtil boundary |
-| [04 — Cost functions](specs/04-cost-functions.md) | All five plugin contracts, execution modes |
-| [05 — Ancillary data](specs/05-ancillary-data.md) | Readers, regridding, `AuxAccessor` |
+| [04 — Cost functions](specs/04-cost-functions.md) | All five science-hook contracts, execution modes |
+| [05 — Ancillary data](specs/05-ancillary-data.md) | Aux readers, regridding, `AuxAccessor` |
 | [06 — Caching](specs/06-caching.md) | Content addressing, keys, invalidation, sharing |
 | [07 — Output mapping](specs/07-output-mapping.md) | `OutputMapper`, legends, data/image split |
 | [08 — Execution](specs/08-execution.md) | Step Functions, Batch, Lambda, routing, failures |
 | [09 — Run manifest](specs/09-run-manifest.md) | Schema, composition, budget, validation |
 | [10 — Provenance](specs/10-provenance.md) | STAC, run records, reproducibility |
 | [11 — Core types](specs/11-types.md) | Every shared type, fill/nodata rules, class tables |
+| [12 — Data access](specs/12-data-access.md) | `GranuleSource`, `GranuleReader`, `AssetStore`, CMR, the block read path |
 
 Specs cite the file a claim came from, and mark inferences as inferences. Where a contract exists
 because of something observed in an existing pipeline, the citation is inline and the fuller

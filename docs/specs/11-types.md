@@ -390,7 +390,77 @@ belongs in the core.
 A mosaic's classes are its own — post-lumping, they are not the input classes. Stage 5 therefore
 publishes a `ClassTable` for the product alongside it, which is the same requirement as the legend
 in [07 §2](07-output-mapping.md), reached from the other direction.
-## 10. Observed oddities
+## 10. Data access
+
+The types below sit *underneath* `ObsWindow` — the framework uses them to fill it, and no plugin
+in the science tier ever sees one. Contracts and rationale are in
+[12](12-data-access.md).
+
+```python
+@dataclass(frozen=True)
+class SensorWindow:
+    """A rectangle in a granule's own sensor array. Carries its ORIGIN, not just a shape."""
+    row0: int
+    col0: int
+    height: int
+    width: int
+
+    @classmethod
+    def covering(cls, glt_x: np.ndarray, glt_y: np.ndarray) -> "SensorWindow": ...
+    @property
+    def slices(self) -> tuple[slice, slice]: ...
+
+@dataclass(frozen=True)
+class VarSpec:
+    name: str
+    dtype: str
+    shape: tuple[int, ...]
+    fill: float | int | None
+    units: str = "unitless"
+
+class GranuleReader(Protocol):
+    collections: tuple[str, ...]          # index `collection` values this reader claims
+    space: Literal["sensor", "ortho"]
+
+    def open(self, asset: AssetHandle) -> ReaderContext: ...
+    def variables(self, ctx: ReaderContext) -> Mapping[str, VarSpec]: ...
+    def read(self, ctx, var: str, window: SensorWindow | None = None) -> MaskedArray: ...
+    def geolocation(self, ctx) -> LocArray | None: ...
+    def class_table(self, ctx, path: str, key: str, attributes) -> ClassTable | None: ...
+
+class GranuleSource(Protocol):
+    name: str
+    def search(self, *, collections, bbox, start, end,
+               updated_since: datetime | None = None) -> Iterator[GranuleRecord]: ...
+    def assets(self, record: GranuleRecord) -> Mapping[str, str]: ...
+
+class AssetStore:
+    def open(self, uri: str, *, etag: str | None = None) -> AssetHandle: ...
+    def stage(self, uri: str) -> Path: ...
+    def credentials_for(self, uri: str) -> Credentials: ...
+```
+
+Three properties are worth stating as type-level guarantees, because each has a failure mode that
+is invisible if it is left to convention:
+
+1. **`SensorWindow` carries `row0`/`col0`.** A sensor-space `PixelMask` needs the *absolute*
+   crosstrack column to know whether it is on a detector edge ([04 §3](04-cost-functions.md)). A
+   bare `(h, w)` window would let `EdgeTrim` trim the edge of every block instead of the edge of
+   the detector, and the result would look plausible.
+2. **`GranuleReader.read` returns a masked array, never sentinels.** The reader is the last place
+   `-9999` exists. Everything above it works in the internal convention of §2, which is what keeps
+   "not observed" and "observed, nothing identified" distinguishable all the way to a `Reducer`.
+3. **`space` is declared, not inferred.** An ortho-native product like L2B FRCOV has no sensor
+   space and no `loc` array; asking it for a KD-tree regrid is a plan-time error rather than a
+   confusing failure in a worker.
+
+`GranuleReader` and `GranuleSource` are plugin hooks, but they belong to the **access tier**, not
+the science tier of [04](04-cost-functions.md). A new instrument is a reader; a new archive is a
+source; neither changes what a mosaic means.
+
+---
+
+## 11. Observed oddities
 
 Recorded so nobody re-derives them.
 
@@ -406,7 +476,7 @@ Recorded so nobody re-derives them.
 
 ---
 
-## 11. Open questions
+## 12. Open questions
 
 1. Are `software_build_version` / `product_version` exposed by CMR before download? Decides
    whether vintage filtering is an index predicate or requires touching files.

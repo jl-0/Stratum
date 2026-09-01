@@ -18,7 +18,7 @@ versioned in git, reviewed like code, and hashed into provenance.
 |---|---|---|
 | ECR, image build/push | Grid, tiling, blocks | The framework package |
 | Batch compute envs, queues | AOI and zones | The plugin package |
-| Lambda functions, SFN definition | Time range, epochs, delivery windows | Contracts, aux accessor |
+| Lambda functions, SFN definition | Time range, epochs, delivery windows | Contracts, accessors, readers |
 | S3 buckets + lifecycle | Filters, masks, scorer, reducer, mapper | Tests and fixtures |
 | IAM roles, EDL secret | Aux sources | |
 | Budgets, alarms | Budget ceilings, output formats | |
@@ -54,7 +54,11 @@ time:
 #   deliver: {every: P1M, window: P13M, align: center}
 
 inputs:
-  index: s3://emit-l3/index/emit-granules.parquet
+  index: s3://emit-l3/index/emit-granules.parquet   # what a RUN reads
+  source:                                           # how that index is BUILT - see 12
+    kind: cmr
+    provider: LPCLOUD
+    prefer: direct                                  # direct (s3://) | https
   roles:
     geometry:       {collection: EMITL1BOBS,  var: obs}
     mineral:
@@ -157,6 +161,9 @@ Everything below fails in stage 1, loudly, while it is cheap:
 - schema validity (Pydantic v2) with precise error locations;
 - named scorer/reducer/mapper/mask plugins resolve, and versions are recordable;
 - every plugin's `required_roles` present in `inputs.roles`;
+- every role's `collection` resolves to exactly one registered `GranuleReader`, and its `var`
+  exists in that reader's variables ([12 §7](12-data-access.md));
+- every asset URI scheme is supported and credentials for it are obtainable now;
 - every plugin's `required_aux` declared in `aux` — undeclared reads are refused
   ([05 §5](05-ancillary-data.md));
 - aux sources exist and are readable;
