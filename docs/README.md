@@ -23,7 +23,7 @@ guide/
   running.html            write a manifest, dry-run it, submit it, read the output
   plugins.html            authoring guide for all five hooks
   caching.html            what invalidates what; inspecting the cache
-  deployment.html         AWS topology, routing, credentials, failure handling  [operators]
+  scaling.html            local, SLURM and AWS executors; credentials; Terraform's role
 reference/
   manifest.html           every manifest field                        [generation candidate]
   types.html              the types plugins receive                   [generation candidate]

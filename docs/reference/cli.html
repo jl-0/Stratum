@@ -36,7 +36,8 @@ on a laptop, on a cluster, and as the worker entrypoint.</p>
 <thead><tr><th>Command</th><th>Does</th></tr></thead>
 <tbody>
 <tr><td><a href="#plan"><code>stratum plan</code></a></td><td>Resolve a manifest and report what would run. Provisions nothing.</td></tr>
-<tr><td><a href="#submit"><code>stratum submit</code></a></td><td>Start a run</td></tr>
+<tr><td><a href="#run"><code>stratum run</code></a></td><td>Execute a run — locally by default, or on SLURM or AWS</td></tr>
+<tr><td><a href="#exec"><code>stratum exec</code></a></td><td>Execute one work item from a plan. The worker entrypoint.</td></tr>
 <tr><td><a href="#status"><code>stratum status</code></a></td><td>Progress of a run in flight</td></tr>
 <tr><td><a href="#report"><code>stratum report</code></a></td><td>Human-readable summary of a finished run</td></tr>
 <tr><td><a href="#approve"><code>stratum approve</code> / <code>reject</code></a></td><td>Release or cancel a run paused at the budget gate</td></tr>
@@ -57,7 +58,8 @@ on a laptop, on a cluster, and as the worker entrypoint.</p>
 <tbody>
 <tr><td><code>-m, --manifest PATH</code></td><td>Base manifest</td></tr>
 <tr><td><code>-p, --patch NAME</code></td><td>Patch to merge, repeatable, applied in order</td></tr>
-<tr><td><code>--profile NAME</code></td><td>Deployment profile — endpoints, bucket, region</td></tr>
+<tr><td><code>--executor NAME</code></td><td><code>local</code> (default) | <code>slurm</code> | <code>aws</code>. A platform choice, never a manifest field.</td></tr>
+<tr><td><code>--profile NAME</code></td><td>Named executor settings — cluster partition, or AWS endpoints and region</td></tr>
 <tr><td><code>--log-level LEVEL</code></td><td><code>debug</code> | <code>info</code> | <code>warning</code> | <code>error</code></td></tr>
 <tr><td><code>--json</code></td><td>Machine-readable output instead of formatted text</td></tr>
 </tbody>
@@ -86,16 +88,23 @@ nothing; writes nothing unless <code>--out</code> is given.</p>
 <p>Exit codes: <code>0</code> valid and within budget, <code>2</code> valid but over budget,
 <code>1</code> invalid.</p>
 
-<h2 id="submit">stratum submit</h2>
+<h2 id="run">stratum run</h2>
 
-<pre><code>stratum submit -m manifest.yaml [-p PATCH]... [--wait]
-stratum submit --from-provenance s3://.../provenance.json</code></pre>
+<pre><code>stratum run -m manifest.yaml [-p PATCH]... [--executor NAME]
+stratum run --from-provenance &lt;uri&gt;</code></pre>
+
+<p>Executes the pipeline. With no <code>--executor</code> it runs here, in a process pool, and
+blocks until finished.</p>
 
 <div class="tw">
 <table>
 <thead><tr><th>Option</th><th>Effect</th></tr></thead>
 <tbody>
-<tr><td><code>--wait</code></td><td>Block until the run finishes; exit non-zero on failure</td></tr>
+<tr><td><code>--executor NAME</code></td><td><code>local</code> (default), <code>slurm</code>, <code>aws</code></td></tr>
+<tr><td><code>--workers N</code></td><td><code>local</code>: pool size. Default one per core.</td></tr>
+<tr><td><code>--max-concurrent N</code></td><td><code>slurm</code>/<code>aws</code>: cap on simultaneous work items, so one run cannot take the whole partition or account</td></tr>
+<tr><td><code>--partition</code>, <code>--cpus-per-task</code>, <code>--mem</code>, <code>--time</code></td><td><code>slurm</code>: passed through to <code>sbatch</code></td></tr>
+<tr><td><code>--wait</code> / <code>--no-wait</code></td><td>Block until the run finishes. Default: wait for <code>local</code>, do not wait for the others.</td></tr>
 <tr><td><code>--from-provenance URI</code></td><td>Re-run against a previous run's frozen index rather than re-querying</td></tr>
 <tr><td><code>--dry-run</code></td><td>Equivalent to <code>plan</code></td></tr>
 <tr><td><code>--no-cache</code></td><td>Ignore cache hits and rebuild everything</td></tr>
@@ -106,7 +115,37 @@ stratum submit --from-provenance s3://.../provenance.json</code></pre>
 </div>
 
 <p>A run over budget with <code>on_exceed: require_approval</code> pauses before provisioning
-compute and waits for <code>stratum approve</code>.</p>
+anything and waits for <code>stratum approve</code>.</p>
+
+<p>Re-running the same manifest is cheap and safe: completed items are cache hits and are skipped,
+so an interrupted run resumes, and a run started on one executor can be finished on another.</p>
+
+<h2 id="exec">stratum exec</h2>
+
+<pre><code>stratum exec --plan &lt;dir-or-uri&gt; --stage STAGE --index N
+stratum exec --plan &lt;dir-or-uri&gt; --stage STAGE --range A:B</code></pre>
+
+<p>Executes a single work item, or a contiguous slice, from a plan written by
+<code>stratum plan --out</code>. This is the worker entrypoint every executor ultimately calls, and
+it is what a scheduler array task should invoke:</p>
+
+<pre><code>sbatch --array=0-724%64 --wrap \
+  "stratum exec --plan $SCRATCH/run-01 --stage regrid --index \$SLURM_ARRAY_TASK_ID"</code></pre>
+
+<div class="tw">
+<table>
+<thead><tr><th>Option</th><th>Effect</th></tr></thead>
+<tbody>
+<tr><td><code>--stage STAGE</code></td><td><code>regrid</code> | <code>resolve</code> | <code>reduce</code> | <code>publish</code></td></tr>
+<tr><td><code>--index N</code></td><td>Zero-based item index within that stage's work list</td></tr>
+<tr><td><code>--range A:B</code></td><td>A contiguous slice, for when per-item scheduler overhead dominates</td></tr>
+<tr><td><code>--force</code></td><td>Recompute even on a cache hit</td></tr>
+</tbody>
+</table>
+</div>
+
+<p>Useful directly when debugging: it reproduces exactly what a Lambda or an array task did, on your
+machine, for one item.</p>
 
 <h2 id="status">stratum status</h2>
 
@@ -139,7 +178,7 @@ seeing before it becomes a mystery in the product.</p>
 <pre><code>stratum approve --run RUN_ID [--note TEXT]
 stratum reject  --run RUN_ID [--note TEXT]</code></pre>
 
-<p>Releases or cancels a run paused at the budget gate. The note is recorded in provenance.</p>
+<p>Releases or cancels a run paused at the budget gate. The note is recorded in provenance. Applies to any executor.</p>
 
 <h2 id="render">stratum render</h2>
 

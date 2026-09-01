@@ -1,0 +1,309 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Running at scale · Stratum</title>
+<link rel="stylesheet" href="../assets/stratum.css">
+</head>
+<body data-page="guide/scaling" data-root="../">
+<a class="skip" href="#content">Skip to content</a>
+<header class="masthead">
+  <a class="wordmark" href="../index.html"><span class="glyph"></span>Stratum</a>
+  <span class="stage">Pre-release</span>
+  <span class="spacer"></span>
+  <span class="repo">EMIT Critical Minerals L3</span>
+</header>
+<div class="layout">
+<nav id="sidebar" aria-label="Documentation"></nav>
+<main id="content">
+<div class="prose">
+
+<h1>Running at scale</h1>
+<p class="lede">The same pipeline on a laptop, a cluster, or AWS. What changes is who dispatches
+the work — not the code, the manifest, or the result.</p>
+
+<h2 id="portability">One pipeline, three executors</h2>
+
+<p>Stratum is an ordinary Python package with a CLI. Everything it does runs on one machine; the
+other backends exist because some runs are too big for one machine, not because the pipeline needs
+them.</p>
+
+<div class="tw">
+<table>
+<thead><tr><th>Executor</th><th>Dispatches work via</th><th>Good for</th></tr></thead>
+<tbody>
+<tr><td><code>local</code></td><td>A process pool on this machine. <strong>Default.</strong></td><td>Development, a zone, a few tiles, anything you want to debug</td></tr>
+<tr><td><code>slurm</code></td><td>A job array on a shared filesystem</td><td>An institutional cluster you already have an allocation on</td></tr>
+<tr><td><code>aws</code></td><td>Step Functions, fanning out to Lambda and Batch</td><td>Continental or global runs; bursty campaigns with nothing to keep warm</td></tr>
+</tbody>
+</table>
+</div>
+
+<pre><code>stratum run -m manifest.yaml                      <span class="c"># local, the default</span>
+stratum run -m manifest.yaml --executor slurm
+stratum run -m manifest.yaml --executor aws</code></pre>
+
+<div class="key">
+  <span class="label">The executor is not a manifest field</span>
+  <p>Where a run executes is a <strong>platform</strong> decision, not a science one, so it is a CLI
+  flag or a deployment profile — never part of the manifest. The same manifest must produce the same
+  result on a laptop and on a 10,000-way fan-out, and a manifest that named its executor could not
+  make that promise. Same rule as
+  <a href="../decisions/index.html#adr-0002">Terraform versus manifest</a>.</p>
+</div>
+
+<h3 id="seam">What makes this work</h3>
+
+<p>Stage 1 emits a <strong>work list</strong> — a flat file of independent items, each naming a
+(granule, tile) or a (tile, epoch, block). Every executor does the same thing with it: run each item,
+somewhere. Items do not talk to each other, and each writes to a content-addressed key.</p>
+
+<pre><code>plan  ──▶  work list  ──▶  [ executor ]  ──▶  content-addressed artifacts</code></pre>
+
+<p>So the executor is genuinely swappable. A run started locally and interrupted can be finished on
+the cluster: the completed items are already in the cache, and the second run skips them.</p>
+
+<h2 id="local">Local</h2>
+
+<p>No infrastructure, no credentials beyond data access, no configuration. Storage is a directory
+instead of a bucket, and paths are used wherever a URI would be:</p>
+
+<pre><code>cache:    ./cache            <span class="c"># instead of s3://bucket/cache</span>
+outputs:
+  bucket: ./products         <span class="c"># local paths work anywhere a URI does</span></code></pre>
+
+<pre><code>stratum run -m manifest.yaml --workers 8    <span class="c"># default: one per core</span></code></pre>
+
+<p>Worth knowing what this <em>is</em> good for, since it is easy to assume local means toy:</p>
+
+<ul>
+<li>A pilot zone at block granularity is minutes of work, not hours.</li>
+<li>Blocks are sized to fit a worker, so a laptop runs the same code path a Lambda would — there is
+no separate "small" implementation to diverge.</li>
+<li>Stage-in of granules to local disk is the simple path, and staging is what a cluster does
+anyway.</li>
+</ul>
+
+<p>What you actually run out of is time and disk, in that order. When a run stops fitting, change
+the executor and nothing else.</p>
+
+<h2 id="slurm">SLURM</h2>
+
+<p>The natural mapping: <strong>a work list is a job array.</strong> Each array task takes its index,
+reads that item, and runs it. Stages become dependent array jobs.</p>
+
+<pre><code><span class="c"># 1. plan on the login node - cheap, no compute needed</span>
+stratum plan -m manifest.yaml --out $SCRATCH/run-01
+
+<span class="c"># 2. one array task per work item</span>
+sbatch --array=0-724%64 --cpus-per-task=4 --mem=16G --time=00:30:00 \
+       --wrap "stratum exec --plan $SCRATCH/run-01 --stage regrid --index \$SLURM_ARRAY_TASK_ID"</code></pre>
+
+<p>Or let Stratum submit the chain, which is the same thing with the dependencies filled in:</p>
+
+<pre><code>stratum run -m manifest.yaml --executor slurm \
+    --partition normal --cpus-per-task 4 --mem 16G --max-concurrent 64</code></pre>
+
+<div class="tw">
+<table>
+<thead><tr><th>Concern</th><th>How it maps</th></tr></thead>
+<tbody>
+<tr><td>Fan-out</td><td><code>--array=0-N</code>, throttled with <code>%K</code> so one run cannot take the whole partition</td></tr>
+<tr><td>Stage ordering</td><td><code>--dependency=afterok:&lt;jobid&gt;</code> between stages</td></tr>
+<tr><td>Shared state</td><td>The cache is a directory on the shared filesystem. Content addressing means concurrent tasks never collide.</td></tr>
+<tr><td>Retries</td><td><code>--requeue</code>, plus the fact that a retried item recomputes to the same key</td></tr>
+<tr><td>Partial failure</td><td>Failed array indices are re-submittable on their own — the work list index <em>is</em> the identifier</td></tr>
+</tbody>
+</table>
+</div>
+
+<div class="note">
+  <span class="label">Sizing</span>
+  <p>Ask for what a <em>block</em> needs, not what a tile needs. The reason existing cluster jobs
+  request 32 GB and long walltimes is that they materialize a whole tile; a 512×512 block is about a
+  gigabyte, so short, small, high-concurrency array tasks are the better shape and they fail more
+  cheaply.</p>
+</div>
+
+<p>One thing to check on a cluster: <code>--cpus-per-task</code> must match what the regrid actually
+uses. The KD-tree query is the compute-bound step and takes a worker count; requesting four CPUs and
+running single-threaded wastes three of them for the whole regrid phase.</p>
+
+<h2 id="aws">AWS</h2>
+
+<p>For runs where the fan-out is the point. Serverless is right for three of the five stages and
+wrong for the two that matter most, so the answer is a split rather than a choice.</p>
+
+<div class="tw">
+<table>
+<thead><tr><th>Plane</th><th>Service</th><th>Stages</th><th>Profile</th></tr></thead>
+<tbody>
+<tr><td><strong>Control</strong></td><td>Step Functions + Lambda</td><td>1, 5, all cache probes</td><td>Seconds, hundreds of MB, thousands of invocations</td></tr>
+<tr><td><strong>Data</strong></td><td>AWS Batch on EC2 Spot</td><td>2, 3, 4 when large</td><td>Minutes to hours, GBs of RAM, GDAL in the image</td></tr>
+<tr><td><strong>Either</strong></td><td>Routed per work item</td><td>2, 3, 4 when small</td><td>Blocks are sized so most work fits Lambda</td></tr>
+</tbody>
+</table>
+</div>
+
+<p>Placement is a routing decision the planner makes from measured properties, not a static
+configuration:</p>
+
+<pre><code><span class="k">def</span> route(item, plan) -&gt; Literal[<span class="k">"lambda"</span>, <span class="k">"batch"</span>]:
+    <span class="k">if</span> plan.capability == <span class="k">"tile"</span>:       <span class="k">return</span> <span class="k">"batch"</span>   <span class="c"># needs a global view</span>
+    <span class="k">if</span> item.est_peak_bytes &gt; 7 * GB:    <span class="k">return</span> <span class="k">"batch"</span>
+    <span class="k">if</span> item.est_seconds    &gt; 600:       <span class="k">return</span> <span class="k">"batch"</span>   <span class="c"># 15-min ceiling, with margin</span>
+    <span class="k">if</span> item.est_bytes_read &gt; 8 * GB:    <span class="k">return</span> <span class="k">"batch"</span>
+    <span class="k">return</span> <span class="k">"lambda"</span></code></pre>
+
+<h3 id="image">The container image</h3>
+
+<p>One image, two entrypoints: a Lambda Runtime Interface Client entrypoint and the same plain CLI
+you run locally. That is what keeps the three executors honest — identical code, so a stage can be
+reproduced on a laptop from its <code>.inputs.json</code> with no AWS involvement.</p>
+
+<p>Lambda <strong>container images</strong> are required, not zip layers: layers cap at 250 MB
+unzipped across all layers, which GDAL, netCDF4, scipy and numpy exceed before any project code.
+Container image Lambdas allow 10 GB.</p>
+
+<div class="tw">
+<table>
+<thead><tr><th>Limit</th><th>Value</th></tr></thead>
+<tbody>
+<tr><td>Lambda timeout</td><td>15 minutes</td></tr>
+<tr><td>Lambda memory</td><td>10 GB</td></tr>
+<tr><td>Lambda <code>/tmp</code></td><td>10 GB</td></tr>
+<tr><td>Lambda container image</td><td>10 GB</td></tr>
+</tbody>
+</table>
+</div>
+
+<h3 id="state-machine">The state machine</h3>
+
+<pre><code>Plan                <span class="c"># Lambda: manifest -&gt; frozen index -&gt; work list -&gt; S3</span>
+BudgetGate          <span class="c"># Choice: within budget? else -&gt; ApprovalWait (task token)</span>
+RegridMap           <span class="c"># Distributed Map over (granule x tile), ItemReader = S3 JSONL</span>
+  └─ CacheProbe -&gt; Regrid          <span class="c"># skipped entirely on hit</span>
+EpochMap            <span class="c"># Distributed Map over epochs</span>
+  └─ BlockMap       <span class="c"># nested Distributed Map over (tile x block)</span>
+       └─ Resolve
+ReduceMap           <span class="c"># Distributed Map over (tile x block)</span>
+PublishMap          <span class="c"># Distributed Map over tiles: stitch, COG, render, STAC</span>
+Finalize            <span class="c"># provenance record, run report, notification</span></code></pre>
+
+<p>Distributed Map is the same work-list idea as a SLURM array: it reads its item list from an S3
+object rather than from execution state, and fans out to 10,000 concurrent children.</p>
+
+<div class="tw">
+<table>
+<thead><tr><th>Constraint</th><th>Consequence</th></tr></thead>
+<tbody>
+<tr><td><code>ItemReader</code> and <code>ResultWriter</code> need buckets in the same account and region as the state machine</td><td>Deploy in <code>us-west-2</code>, where the source data lives</td></tr>
+<tr><td>Child execution input caps at 256 KiB</td><td>Work items carry keys and hashes, never geometry or band lists</td></tr>
+<tr><td>Standard workflows bill per state transition</td><td>Use Express child workflows on inner maps — at 100k+ blocks this is a real cost line</td></tr>
+<tr><td>Maximum concurrency is 10,000</td><td>A CONUS run at 1&deg;/512px is roughly 44k blocks: nested maps, or accept waves</td></tr>
+</tbody>
+</table>
+</div>
+
+<h3 id="terraform">What Terraform owns</h3>
+
+<div class="key">
+  <span class="label">The rule</span>
+  <p><strong>Terraform owns the platform. The manifest owns the science.</strong> One deployment
+  serves many concurrent runs; a new experiment is a new manifest, never a new deployment.</p>
+</div>
+
+<p>Terraform is <em>a deployment method for the AWS executor</em> — it stands up ECR, Batch compute
+environments and queues, Lambda functions, the state machine, S3 buckets and lifecycle rules, IAM
+roles, the Earthdata secret, and budgets and alarms. It is not involved in a local or SLURM run at
+all.</p>
+
+<div class="tw">
+<table>
+<thead><tr><th>Terraform</th><th>Manifest</th></tr></thead>
+<tbody>
+<tr><td>ECR repositories, image build and push</td><td>Grid, tiling, block size</td></tr>
+<tr><td>Batch compute environments, queues, job definitions</td><td>Area of interest and zones</td></tr>
+<tr><td>Lambda functions, the state machine</td><td>Time range, epochs, delivery windows</td></tr>
+<tr><td>S3 buckets and lifecycle rules</td><td>Filters, masks, scorer, reducer, mapper</td></tr>
+<tr><td>IAM roles, the Earthdata credential</td><td>Ancillary source declarations</td></tr>
+<tr><td>Account budgets, alarms, dashboards</td><td>Run budget ceilings, output formats</td></tr>
+</tbody>
+</table>
+</div>
+
+<p>Terraform contains no zone names, no dates, no thresholds and no class names. A CI check greps for
+them, because the leak is gradual and worth catching early. If a science parameter needs an
+infrastructure pull request to change, the boundary has moved and should be moved back.</p>
+
+<p>Reach for a second deployment only on a real boundary — a separate account for delivered products
+versus experimentation, or a different region. Never for an experiment.</p>
+
+<h2 id="credentials">Credentials</h2>
+
+<p>Source data sits in <code>lp-prod-protected</code> (us-west-2) behind Earthdata Login, and the S3
+credentials it issues are temporary — roughly one hour. This applies to every executor, not just
+AWS.</p>
+
+<div class="tw">
+<table>
+<thead><tr><th>Executor</th><th>Where the credential lives</th></tr></thead>
+<tbody>
+<tr><td><code>local</code></td><td>Your <code>~/.netrc</code> or environment, as <code>earthaccess</code> expects</td></tr>
+<tr><td><code>slurm</code></td><td>Same, on the shared filesystem. Long array tasks must refresh.</td></tr>
+<tr><td><code>aws</code></td><td>Secrets Manager, never in the image</td></tr>
+</tbody>
+</table>
+</div>
+
+<p>The one-hour expiry is a real constraint on long-running work: a refresh wrapper re-fetches before
+expiry and wraps every long read. Lambda's 15-minute ceiling makes it a non-issue there, which is a
+quiet argument for routing to Lambda wherever it fits — and an argument for short, small SLURM array
+tasks over long ones.</p>
+
+<h2 id="failures">Failure handling</h2>
+
+<p>Most of this is executor-independent, because it comes from content addressing rather than from
+any scheduler.</p>
+
+<div class="tw">
+<table>
+<thead><tr><th>Mechanism</th><th>Effect</th></tr></thead>
+<tbody>
+<tr><td>Content addressing</td><td>A retried item recomputes to the same key, so retry is always safe</td></tr>
+<tr><td>Atomic writes</td><td>An interrupted task cannot leave a truncated artifact that later reads as a hit</td></tr>
+<tr><td>Block-level blast radius</td><td>One failure loses one block — which is what makes Spot, and preemptible cluster queues, sensible</td></tr>
+<tr><td>Per-item outcomes</td><td>Failures land in <code>failures.jsonl</code> as a queryable list, not a log grep. Re-running the same manifest retries only those items.</td></tr>
+<tr><td>Retry with backoff <span class="chip chip-obs">aws</span></td><td>Absorbs Spot reclaim, throttling and credential expiry</td></tr>
+<tr><td><code>--requeue</code> <span class="chip chip-obs">slurm</span></td><td>The scheduler's equivalent</td></tr>
+<tr><td>Tolerated failure percentage</td><td>A run completes and reports a handful of bad blocks rather than failing 44,000 items over one corrupt granule. Permissive for experiments, zero for delivered products.</td></tr>
+</tbody>
+</table>
+</div>
+
+<h2 id="index">The granule index</h2>
+
+<p>The index is a GeoParquet dataset queried with DuckDB, over range requests from S3 or straight
+from a local file. There is no database to operate in any of the three cases.</p>
+
+<pre><code>stratum index build  --collection EMITL2BMIN --since 2026-08-01
+stratum index verify --collection EMITL2BMIN</code></pre>
+
+<p>Building it is a separate periodic job, deliberately: a run never depends on an upstream catalogue
+being reachable, and stage 1 freezes the granule set it selected into the run prefix so the same
+manifest reproduces the same inputs later. The index records when each row was last seen, so an
+upstream reprocessing is detectable rather than silent.</p>
+
+</div>
+<nav class="pager" aria-label="Pagination"></nav>
+<footer class="site">
+  Specified in <a href="../specs/08-execution.md"><code>specs/08-execution.md</code></a>,
+  <a href="../specs/02-granule-index.md"><code>02</code></a>,
+  <a href="../decisions/ADR-0002-terraform-manifest-boundary.md">ADR-0002</a>
+</footer>
+</main>
+</div>
+<script src="../assets/stratum.js"></script>
+</body>
+</html>

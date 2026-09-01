@@ -36,7 +36,7 @@ Corollaries:
    many concurrent runs, distinguished by `run_id` prefix and Step Functions execution.
 2. **Terraform contains no zone names, no dates, no thresholds, no mineral classes.**
 3. **Resource sizing is a platform concern**, but *which* resource a work item uses is a runtime
-   routing decision from measured properties ([08 §1](../specs/08-execution.md)).
+   routing decision from measured properties ([08 §2](../specs/08-execution.md)).
 4. A second Terraform deployment is justified only by a real boundary — a separate AWS account
    for delivered products versus experimentation, or a different region — never by an experiment.
 

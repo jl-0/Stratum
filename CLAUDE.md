@@ -53,7 +53,7 @@ statement on the page becomes false.
 | `02-granule-index`, `09-run-manifest`, `10-provenance` | [`docs/guide/running.html`](docs/guide/running.html) |
 | `04-cost-functions`, `05-ancillary-data`, `07-output-mapping` | [`docs/guide/plugins.html`](docs/guide/plugins.html) |
 | `06-caching` | [`docs/guide/caching.html`](docs/guide/caching.html) |
-| `08-execution`, `ADR-0002` | [`docs/guide/deployment.html`](docs/guide/deployment.html) |
+| `08-execution`, `ADR-0002` | [`docs/guide/scaling.html`](docs/guide/scaling.html) |
 | `09-run-manifest` (fields) | [`docs/reference/manifest.html`](docs/reference/manifest.html) |
 | `11-types` | [`docs/reference/types.html`](docs/reference/types.html) |
 | Any CLI surface | [`docs/reference/cli.html`](docs/reference/cli.html) |

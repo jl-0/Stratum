@@ -3,11 +3,74 @@
 **Status:** draft · **Depends on:** [00](00-overview.md), [01](01-grid-tiling.md), [06](06-caching.md) ·
 **Depended on by:** [09](09-run-manifest.md)
 
-Where work runs, how it fans out, and what happens when it fails.
+Where work runs, how it fans out, and what happens when it fails. Three executors — local, SLURM,
+AWS — over one work-list interface.
 
 ---
 
-## 1. Split plane
+## 1. Executors
+
+Stratum is a Python package with a CLI. **The whole pipeline runs on one machine**; the other
+backends exist because some runs are too large for one machine, not because the pipeline depends on
+them.
+
+| Executor | Dispatch | For |
+|---|---|---|
+| `local` | Process pool. **Default.** | Development, a zone, anything being debugged |
+| `slurm` | Job array over a shared filesystem | An existing institutional allocation |
+| `aws` | Step Functions → Lambda and Batch | Continental/global runs, bursty campaigns |
+
+The executor is a **CLI flag or deployment profile, never a manifest field**. Where a run executes
+is a platform decision; the same manifest must give the same result on a laptop and on a 10,000-way
+fan-out, which a manifest naming its own executor could not promise. Same boundary as
+[ADR-0002](../decisions/ADR-0002-terraform-manifest-boundary.md).
+
+### The portability seam
+
+Stage 1 emits a **work list**: a flat file of independent items, each naming a (granule, tile) or a
+(tile, epoch, block). Every executor does the same thing with it — run each item somewhere. Items
+never communicate, and each writes to a content-addressed key.
+
+```
+plan  ──▶  work list  ──▶  [ executor ]  ──▶  content-addressed artifacts
+```
+
+Consequences worth stating:
+
+- A run interrupted locally can be finished on a cluster; completed items are cache hits.
+- `stratum exec --plan … --stage … --index N` is the single worker entrypoint. A SLURM array task
+  and a Lambda invocation both reduce to it, which is what keeps the three paths from diverging.
+- Storage is a URI or a path. `{root}/cache/...` is a directory or an `s3://` prefix; layout and
+  keys are identical.
+
+### SLURM
+
+A work list *is* a job array. Stages become dependent array jobs.
+
+```bash
+stratum plan -m manifest.yaml --out $SCRATCH/run-01
+
+sbatch --array=0-724%64 --cpus-per-task=4 --mem=16G --time=00:30:00 \
+       --wrap "stratum exec --plan $SCRATCH/run-01 --stage regrid --index \$SLURM_ARRAY_TASK_ID"
+```
+
+| Concern | Mapping |
+|---|---|
+| Fan-out | `--array=0-N`, throttled with `%K` |
+| Stage ordering | `--dependency=afterok:<jobid>` |
+| Shared state | Cache directory on the shared filesystem; content addressing means concurrent tasks cannot collide |
+| Retries | `--requeue`; a retried item recomputes to the same key |
+| Partial failure | Failed array indices are individually re-submittable — the work-list index *is* the identifier |
+
+**Size for a block, not a tile.** Existing cluster jobs ask for 32 GB and long walltimes because they
+materialize a whole tile; a 512×512 block is ~1 GB, so short, small, high-concurrency array tasks are
+the better shape and fail more cheaply. Set `--cpus-per-task` to match what the regrid actually uses
+— the KD-tree query is compute-bound and takes a worker count.
+
+Credential expiry (~1 h) argues for short array tasks here just as it argues for Lambda on AWS.
+
+## 2. AWS split plane
+
 
 Serverless is right for three of the five stages and wrong for the two that matter most. The
 honest answer is a split, not a choice.
@@ -45,7 +108,7 @@ measured per-stage constants refined from prior runs.
 
 ---
 
-## 2. State machine
+## 3. State machine
 
 ```
 Plan                # Lambda: manifest -> frozen index -> work list -> S3
@@ -76,7 +139,7 @@ prefix across states without a chain of Pass states.
 
 ---
 
-## 3. Failure handling
+## 4. Failure handling
 
 Neither existing pipeline retries anything. `watch.sh` infers a job id by regexing a log filename,
 counts finished bins, and greps stderr for `error|fail|oom` — so any library warning containing
@@ -98,7 +161,7 @@ We do better by construction, not by adding a supervisor:
 
 ---
 
-## 4. Credentials
+## 5. Credentials
 
 EMIT data lives in `lp-prod-protected` (us-west-2) behind Earthdata Login, and **S3 credentials
 are temporary — roughly one hour.**
@@ -112,7 +175,7 @@ AMD's 24-hour Slurm jobs would simply fail partway through if ported naively. Re
 
 ---
 
-## 5. Multiple runs, one deployment
+## 6. Multiple runs, one deployment
 
 Running five competing cost functions is a **manifest concern, not an infrastructure concern**.
 Terraform stands up one run-agnostic deployment; a run is a manifest plus a `run_id` that becomes
@@ -129,7 +192,7 @@ versus experimentation, or a different region — never for an experiment.
 
 ---
 
-## 6. Open questions
+## 7. Open questions
 
 1. Batch on Fargate or EC2? Fargate is simpler and now supports Graviton Spot; EC2 gives better
    instance selection for memory-heavy reduces and local NVMe for staging.

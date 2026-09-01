@@ -62,11 +62,11 @@ function is cheap.</p>
 
 <p>The first run over new ground pays for the geometry. Every run after that does not.</p>
 
-<pre><code>$ stratum submit -m base.yaml -p scorer-v1
+<pre><code>$ stratum run -m base.yaml -p scorer-v1
   Cache  GLT 0/725 hit  →  725 to build
   ~11 vCPU-hours · ~28 min
 
-$ stratum submit -m base.yaml -p scorer-v2
+$ stratum run -m base.yaml -p scorer-v2
   Cache  GLT 725/725 hit (100%)  →  0 to build
   ~0.9 vCPU-hours · ~4 min</code></pre>
 
@@ -89,9 +89,12 @@ run is nearly free over ground the first has already touched.</li>
 <p>Because tile bounds are derived from the grid rather than from data extents, a GLT built for one
 project is byte-identical to one built for another over the same ground.</p>
 
-<pre><code>s3://{bucket}/cache/...          <span class="c">shared, content-addressed, long-lived</span>
-s3://{bucket}/runs/{run_id}/...  <span class="c">run-scoped: frozen index, work lists, reports</span>
-s3://{bucket}/products/{run_id}/ <span class="c">delivered outputs</span></code></pre>
+<pre><code>{root}/cache/...          <span class="c">shared, content-addressed, long-lived</span>
+{root}/runs/{run_id}/...  <span class="c">run-scoped: frozen index, work lists, reports</span>
+{root}/products/{run_id}/ <span class="c">delivered outputs</span></code></pre>
+
+<p><code>{root}</code> is a local directory or an <code>s3://</code> prefix — the layout and the keys
+are identical either way, which is what lets a locally started run be finished on a cluster.</p>
 
 <h2 id="inspecting">Inspecting the cache</h2>
 
@@ -162,8 +165,8 @@ retention policy is set per deployment; these are the defaults.</p>
 <p>Rarely needed — a correct key makes it unnecessary — but available when you are debugging the
 cache itself:</p>
 
-<pre><code>stratum submit -m manifest.yaml --no-cache            <span class="c"># ignore hits, rebuild everything</span>
-stratum submit -m manifest.yaml --no-cache-from glt   <span class="c"># rebuild GLTs and downstream</span></code></pre>
+<pre><code>stratum run -m manifest.yaml --no-cache            <span class="c"># ignore hits, rebuild everything</span>
+stratum run -m manifest.yaml --no-cache-from glt   <span class="c"># rebuild GLTs and downstream</span></code></pre>
 
 <p>If you find yourself reaching for these routinely, something is missing from a cache key. That
 is a bug worth reporting rather than working around.</p>

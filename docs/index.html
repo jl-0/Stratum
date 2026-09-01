@@ -36,8 +36,12 @@ which observation wins.</p>
 observations. It gives you back a mosaic — as a data product, a rendered image, and a provenance
 record that says exactly which granules went into it.</p>
 
-<pre><code>stratum plan   -m manifest.yaml     <span class="c"># what would run, and what it would cost</span>
-stratum submit -m manifest.yaml     <span class="c"># run it</span></code></pre>
+<pre><code>stratum plan -m manifest.yaml     <span class="c"># what would run, and what it would cost</span>
+stratum run  -m manifest.yaml     <span class="c"># run it - on this machine, by default</span></code></pre>
+
+<p>It is an ordinary Python package: the whole pipeline runs locally with no infrastructure. Larger
+runs change only <em>where the work is dispatched</em> — a cluster job array, or AWS — not the code,
+the manifest, or the result.</p>
 
 <p>The rule for choosing is the part you write. Everything else — finding granules, putting them on
 a common grid, fanning the work out, caching, cataloguing — is the framework's job.</p>
@@ -187,9 +191,10 @@ a plugin package:</p>
     <h3>Caching &amp; reruns</h3>
     <p>What invalidates what, how to check a cache hit, and how to keep iteration fast.</p>
   </a>
-  <a class="card" href="guide/deployment.html">
-    <h3>Deployment</h3>
-    <p>For operators — AWS topology, where work runs, credentials, failure handling.</p>
+  <a class="card" href="guide/scaling.html">
+    <h3>Running at scale</h3>
+    <p>The same pipeline local, on SLURM, or on AWS. Executors, credentials, failure handling, and
+    what Terraform owns.</p>
   </a>
   <a class="card" href="reference/manifest.html">
     <h3>Manifest reference</h3>

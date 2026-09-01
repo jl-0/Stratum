@@ -18,7 +18,7 @@
       { id: 'guide/running',    href: 'guide/running.html',    label: 'Running a mosaic' },
       { id: 'guide/plugins',    href: 'guide/plugins.html',    label: 'Writing plugins' },
       { id: 'guide/caching',    href: 'guide/caching.html',    label: 'Caching & reruns' },
-      { id: 'guide/deployment', href: 'guide/deployment.html', label: 'Deployment' }
+      { id: 'guide/scaling',    href: 'guide/scaling.html',    label: 'Running at scale' }
     ]},
     { section: 'Reference', items: [
       { id: 'reference/manifest', href: 'reference/manifest.html', label: 'Manifest' },

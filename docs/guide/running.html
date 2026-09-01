@@ -24,21 +24,28 @@
 
 <h2 id="workflow">The workflow</h2>
 
-<pre><code><span class="c"># 1. See what would run. Reads the index; provisions nothing.</span>
+<pre><code><span class="c"># 1. See what would run. Reads the index; starts nothing.</span>
 stratum plan -m manifest.yaml
 
-<span class="c"># 2. Run it.</span>
-stratum submit -m manifest.yaml
+<span class="c"># 2. Run it. On this machine, by default.</span>
+stratum run -m manifest.yaml
 
-<span class="c"># 3. Watch it.</span>
-stratum status --run cm-zones-2026-annual-r3
-
-<span class="c"># 4. Read the report.</span>
-stratum report --run cm-zones-2026-annual-r3</code></pre>
+<span class="c"># 3. Read the report.</span>
+stratum report --run cuprite-2024</code></pre>
 
 <p>The manifest is the entire interface. It is versioned in git, reviewed like code, and hashed
 into the provenance record — so a run can be traced back to the exact document that produced
 it.</p>
+
+<div class="key">
+  <span class="label">This runs on your machine</span>
+  <p>Stratum is an ordinary Python package. <code>stratum run</code> executes the whole pipeline
+  locally by default — no cloud account, no cluster, no infrastructure to stand up. Storage is a
+  directory instead of a bucket.</p>
+  <p>Bigger runs change <em>where the work is dispatched</em>, not the code, the manifest, or the
+  result: <code>--executor slurm</code> or <code>--executor aws</code>. See
+  <a href="scaling.html">Running at scale</a>.</p>
+</div>
 
 <h2 id="manifest">A minimal manifest</h2>
 
@@ -63,7 +70,7 @@ time:
   deliver: P1Y            <span class="c"># so no temporal reduction happens at all</span>
 
 inputs:
-  index: s3://emit-l3/index/emit-granules.parquet
+  index: ./index/emit-granules.parquet    <span class="c"># local file or s3:// URI</span>
   roles:
     geometry: {collection: EMITL1BOBS, var: obs}
     mineral:
@@ -82,7 +89,7 @@ scorer:
   ref: min_view_zenith
 
 outputs:
-  bucket: s3://emit-l3-products
+  bucket: ./products        <span class="c"># a local path; s3:// works the same way</span>
   formats: [cog]
   stac: true
 
@@ -147,8 +154,8 @@ Plan is valid. Submit will pause for approval.</code></pre>
   max_vcpu_hours: 400
   on_exceed: require_approval      <span class="c"># require_approval | fail | warn</span></code></pre>
 
-<p>With <code>require_approval</code>, a submitted run that exceeds a ceiling pauses before
-provisioning compute and waits for a human. Approve or reject it with:</p>
+<p>With <code>require_approval</code>, a run that exceeds a ceiling pauses before it provisions
+anything and waits for a human. Approve or reject it with:</p>
 
 <pre><code>stratum approve --run cm-zones-2026-annual-r3
 stratum reject  --run cm-zones-2026-annual-r3</code></pre>
@@ -233,14 +240,14 @@ to be routine; see <a href="caching.html">Caching &amp; reruns</a>.</p>
 
 <h2 id="outputs">What you get back</h2>
 
-<pre><code>s3://{bucket}/products/{run_id}/
+<pre><code>{outputs.bucket}/products/{run_id}/
   {tile}/
     {tile}_{period}_data.tif        <span class="c"># bands your reducer declared</span>
     {tile}_{period}_image.tif       <span class="c"># RGBA rendering</span>
     {tile}_{period}_legend.json     <span class="c"># class table or ramp stops</span>
     {tile}_{period}.json            <span class="c"># STAC item</span>
 
-s3://{bucket}/runs/{run_id}/
+{outputs.bucket}/runs/{run_id}/
   index.parquet                     <span class="c"># the frozen granule set</span>
   provenance.json                   <span class="c"># what ran, against what</span>
   report.md                         <span class="c"># the human-readable summary</span>
@@ -276,10 +283,23 @@ mystery in the product.</p>
 index, the container image by digest, the plugin wheel by content hash, and the content version of
 every ancillary source.</p>
 
-<pre><code>stratum submit --from-provenance s3://.../runs/cuprite-2024/provenance.json</code></pre>
+<pre><code>stratum run --from-provenance ./runs/cuprite-2024/provenance.json</code></pre>
 
 <p>This re-runs against the frozen index rather than re-querying, so it reproduces the original
-result rather than asking the same question of a catalogue that has since changed.</p>
+result rather than asking the same question of a catalogue that has since changed. It works across
+executors too — a run planned locally can be reproduced on a cluster, and vice versa.</p>
+
+<h2 id="bigger">When one machine is not enough</h2>
+
+<p>Nothing about the pipeline changes; only the dispatcher does. Blocks are already sized to fit a
+single worker, so the same code path runs everywhere.</p>
+
+<pre><code>stratum run -m manifest.yaml --executor slurm --max-concurrent 64
+stratum run -m manifest.yaml --executor aws</code></pre>
+
+<p>The cache is content-addressed and shared, so a run you started locally and stopped can be
+finished on a cluster — completed items are hits and get skipped. See
+<a href="scaling.html">Running at scale</a>.</p>
 
 </div>
 <nav class="pager" aria-label="Pagination"></nav>
