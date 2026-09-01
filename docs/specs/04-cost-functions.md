@@ -293,6 +293,32 @@ Parameters, following AMD's `stack:` block, which is the only working precedent:
 | `ignore` | Classes excluded from the tally | `stack.ignore: [0, -4]` |
 | `tie_break` | `earliest` \| `latest` \| `highest_score` \| `nodata` | *(absent)* |
 
+### Decision order, normatively
+
+Snapshots all sit on the identical block grid, so nothing spatial remains to resolve. For one cell,
+given the per-epoch value, `valid` and `score`:
+
+1. **Discard** epochs where `valid` is false. The count remaining is `n_epochs`, and it is the
+   denominator for `agreement`.
+2. **Exclude** values listed in `ignore` from the tally. They stay counted in `n_epochs` —
+   "observed, nothing identified" is evidence of observation, and conflating it with "never
+   observed" fabricates agreement ([11 §2](11-types.md)).
+3. **Tally** the remaining values; take the modal class.
+4. **Suppress** to nodata if the modal count is below `min_count`.
+5. **On a tie**, apply `tie_break`:
+   - `earliest` / `latest` — the tied class appearing in the earliest / latest epoch;
+   - `highest_score` — the tied class holding the single highest `score` across its epochs;
+   - `nodata` — refuse to choose; write nodata.
+
+`agreement` is `modal_count / n_epochs`, so ignored-but-observed epochs lower it. That is
+deliberate: goethite five times out of ten looks is less certain than goethite five times out of
+five.
+
+Note the asymmetry with `Scorer`. A scorer **ranks** and takes an argmax — one observation beats the
+rest. A reducer **aggregates**; for `ModeThroughTime` that is a vote, and no single epoch "wins". A
+winner-take-all reducer is expressible (argmax over `snaps.score`) but is a different product, and a
+less defensive one: a single well-scoring epoch takes the cell with no corroboration.
+
 > **Open.** Whether AMD's `freq-N` is a frequency *rank* or a time *period* is unresolved, and it
 > decides how much of mode-through-time is genuinely new. See the README's open questions.
 

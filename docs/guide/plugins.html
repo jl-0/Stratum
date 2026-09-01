@@ -295,6 +295,88 @@ must not count toward agreement. Check it rather than testing values against a s
 <p><code>snaps.score</code> lets you weight epochs by the confidence that produced them instead of
 treating them equally.</p>
 
+<h3 id="reducer-decide">How a cell is decided</h3>
+
+<div class="key">
+  <span class="label">Nothing "wins" here by default</span>
+  <p>A <code>Scorer</code> ranks and takes an argmax — one observation beats the others. A
+  <code>Reducer</code> is handed a vector of values, one per epoch, and <strong>aggregates</strong>
+  it. For <code>ModeThroughTime</code> that is a vote, not a contest.</p>
+</div>
+
+<p>Every snapshot is already on the identical block grid, so there is no spatial overlap left to
+resolve — for one cell you simply have up to <em>N</em> values, plus validity and the score that won
+each. Worked through, for a cell over twelve monthly epochs:</p>
+
+<pre><code>epoch    1    2    3    4    5    6    7    8    9   10   11   12
+value    -   goe  goe   0   hem  goe   -    -   goe  hem  goe   0
+valid    F    T    T    T    T    T    F    F    T    T    T    T</code></pre>
+
+<p>With <code>{min_count: 3, ignore: [0]}</code>:</p>
+
+<div class="tw">
+<table>
+<thead><tr><th>Step</th><th>Result</th></tr></thead>
+<tbody>
+<tr><td>Drop epochs where <code>valid</code> is false — nothing was ever observed there</td><td>Epochs 1, 7, 8 out. <strong>9 valid epochs.</strong></td></tr>
+<tr><td>Drop values listed in <code>ignore</code> from the <em>tally</em> — but keep them counted as observed. The sensor looked and identified nothing, which is not the same as never looking.</td><td>Epochs 4 and 12 excluded from the count</td></tr>
+<tr><td>Tally what remains</td><td>goethite 5, hematite 2</td></tr>
+<tr><td>Take the modal class, if its count reaches <code>min_count</code></td><td>goethite (5 ≥ 3) ✓</td></tr>
+</tbody>
+</table>
+</div>
+
+<pre><code>mineral_id    goethite
+agreement     0.56        <span class="c"># 5 of the 9 epochs that saw this cell</span>
+n_epochs      9
+runner_up_id  hematite</code></pre>
+
+<p>Had the modal count fallen below <code>min_count</code>, the cell would be written as nodata —
+the class is real but too thinly supported to assert.</p>
+
+<h4 id="ties">Ties</h4>
+
+<p>When two classes tie for the mode, <code>tie_break</code> decides. Choose it deliberately:</p>
+
+<div class="tw">
+<table>
+<thead><tr><th><code>tie_break</code></th><th>Picks the tied class that</th><th>Use when</th></tr></thead>
+<tbody>
+<tr><td><code>earliest</code></td><td>appears in the earliest epoch</td><td>Stability matters more than currency</td></tr>
+<tr><td><code>latest</code></td><td>appears in the latest epoch</td><td>The most recent look should govern</td></tr>
+<tr><td><code>highest_score</code></td><td>holds the single best <code>snaps.score</code> among its epochs</td><td>You trust the scorer's own confidence — this is where the persisted score band earns its keep</td></tr>
+<tr><td><code>nodata</code></td><td><em>none</em> — the cell is written as nodata</td><td>A genuine tie is a real ambiguity and you would rather say so than pick</td></tr>
+</tbody>
+</table>
+</div>
+
+<h4 id="winner-take-all">If you do want a winner</h4>
+
+<p>Nothing stops a reducer being winner-take-all. Take the epoch with the best score and pass its
+value straight through:</p>
+
+<pre><code><span class="k">class</span> BestSingleLook:
+    <span class="c"># Across the window, the observation the scorer liked most wins.</span>
+    outputs = (
+        BandSpec(<span class="k">"mineral_id"</span>, <span class="k">"uint16"</span>,  <span class="k">"class from the best-scoring epoch"</span>),
+        BandSpec(<span class="k">"score"</span>,      <span class="k">"float32"</span>, <span class="k">"the score that won"</span>),
+        BandSpec(<span class="k">"n_epochs"</span>,   <span class="k">"uint8"</span>,   <span class="k">"epochs contributing"</span>),
+    )
+
+    <span class="k">def</span> reduce(self, snaps, aux):
+        score = np.where(snaps.valid, snaps.score, -np.inf)
+        best  = np.argmax(score, axis=0)
+        take  = <span class="k">lambda</span> a: np.take_along_axis(a, best[<span class="k">None</span>], 0)[0]
+        <span class="k">return</span> {
+            <span class="k">"mineral_id"</span>: take(snaps[<span class="k">"mineral_id"</span>]),
+            <span class="k">"score"</span>:      take(snaps.score),
+            <span class="k">"n_epochs"</span>:   snaps.valid.sum(axis=0),
+        }</code></pre>
+
+<p>That is a legitimate product — roughly "the best look in the window" — but note what it gives up.
+One bad epoch that happened to score well takes the cell outright, with no corroboration. Mode is
+the more defensive choice, which is why it is the baseline.</p>
+
 <div class="note">
   <span class="label">Reduce continuous quantities where you can</span>
   <p>Voting over class labels discards information that voting over band depths or fit values
