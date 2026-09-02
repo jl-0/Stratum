@@ -48,7 +48,7 @@ soil_fraction = "stratum_emit.masks:SoilFraction"
 
 [project.entry-points."stratum.readers"]
 EMITL2BMIN   = "stratum_emit.readers:L2BMin"
-EMITL1BOBS   = "stratum_emit.readers:L1BObs"
+EMITL1BRAD   = "stratum_emit.readers:L1BRad"
 EMITL2AMASK  = "stratum_emit.readers:L2AMask"
 EMITL2BFRCOV = "stratum_emit.readers:L2BFrcov"
 

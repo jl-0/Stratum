@@ -1,8 +1,13 @@
 """Built-in granule filters (04 section 2, 02 section 4).
 
-Every filter is vectorised over the index frame and never sees a granule. Missing metadata is a
+Every filter is vectorised over a frame and never sees a granule. Missing metadata is a
 declared policy - `reject | keep | fail` - never the accidental result of a truth test, and the
 chain reports what each filter removed.
+
+Filters are granule-level predicates, so `apply_filters` evaluates them on ONE ROW PER GRANULE
+(`granule_level`): the index holds a row per (granule, collection), and a second collection
+indexed beside the one that carries `cloud_fraction` must neither trip `on_missing: fail` on
+its own rows nor double the counts in the report (02 section 4; 12 section 8, question 11).
 """
 from __future__ import annotations
 
@@ -148,6 +153,48 @@ class ColumnIn:
         return f"{self.column} == {vals!r} (on_missing: {self.on_missing})"
 
 
+def _first_present(values: pd.Series) -> Any:
+    """The first value that is not None, NaN or `""` (the index's spelling of an absent
+    string attribute, 02 section 2); the first value when every one is missing."""
+    for v in values:
+        if not (v is None or v == "" or (isinstance(v, float) and np.isnan(v))):
+            return v
+    return values.iloc[0] if len(values) else None
+
+
+def granule_level(frame: pd.DataFrame) -> pd.DataFrame:
+    """One row per `granule_id` from an index frame with a row per (granule, collection): each
+    scalar column takes the first present value across the granule's rows (rows ordered by
+    collection name), `attributes` is the union with the first row's values winning, and the
+    `assets`/`checksums` maps are the union. A frame without `granule_id`, or with one row per
+    id already, is returned as it is."""
+    if "granule_id" not in frame or frame["granule_id"].is_unique:
+        return frame
+    ordered = (frame.sort_values(["granule_id", "collection"], kind="stable")
+               if "collection" in frame else frame.sort_values("granule_id", kind="stable"))
+    maps = [c for c in ("attributes", "assets", "checksums") if c in ordered]
+    rows: list[dict[str, Any]] = []
+    for _, group in ordered.groupby("granule_id", sort=True):
+        row: dict[str, Any] = {}
+        for col in ordered.columns:
+            if col in maps:
+                merged: dict[str, Any] = {}
+                for m in group[col]:
+                    if isinstance(m, Mapping):
+                        merged = {**m, **merged}
+                row[col] = merged
+            else:
+                row[col] = _first_present(group[col])
+        rows.append(row)
+    out = pd.DataFrame(rows, columns=list(ordered.columns))
+    for col in out.columns:                                  # keep dtypes (datetimes, floats)
+        try:
+            out[col] = out[col].astype(ordered[col].dtype)
+        except (TypeError, ValueError):
+            pass
+    return out
+
+
 def build_filters(manifest: Manifest) -> list[GranuleFilter]:
     """Instantiate `granule_filter` in manifest order. `{ref, params}` resolves through the
     plugin registry (04 section 7); the plugin's own `on_missing` is whatever it accepts."""
@@ -172,14 +219,21 @@ def build_filters(manifest: Manifest) -> list[GranuleFilter]:
 
 def apply_filters(frame: pd.DataFrame,
                   filters: Sequence[GranuleFilter]) -> tuple[pd.DataFrame, list[FilterReport]]:
-    """Run the chain in order; each report counts what that filter removed from what reached it."""
+    """Run the chain in order over the granule-level view of `frame` (`granule_level`); each
+    report counts the GRANULES that filter removed from what reached it. Returns the rows of
+    `frame` whose granule survived, so a granule's other collections' rows go with it."""
     reports: list[FilterReport] = []
+    granules = granule_level(frame)
     for f in filters:
-        keep = np.asarray(f.keep(frame), dtype=bool)
-        if keep.shape != (len(frame),):
+        keep = np.asarray(f.keep(granules), dtype=bool)
+        if keep.shape != (len(granules),):
             raise FilterError(f"{f.describe()}: keep() returned shape {keep.shape} for "
-                              f"{len(frame)} granules")
+                              f"{len(granules)} granules")
         reports.append(FilterReport(f.describe(), int((~keep).sum()),
                                     getattr(f, "on_missing", None)))
-        frame = frame[keep]
-    return frame, reports
+        granules = granules[keep]
+    if granules is frame:
+        return frame, reports
+    if "granule_id" not in frame:
+        return granules, reports
+    return frame[frame["granule_id"].isin(set(granules["granule_id"]))], reports

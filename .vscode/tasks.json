@@ -1,0 +1,16 @@
+{
+  // Drops you into the walkthrough when the codespace opens. A task terminal is
+  // a real pty, so the prompts work. Requires "task.allowAutomaticTasks": "on",
+  // set in .devcontainer/devcontainer.json.
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "Stratum demo",
+      "type": "shell",
+      "command": ".devcontainer/get-started.sh",
+      "presentation": { "reveal": "always", "panel": "dedicated", "focus": false, "clear": true },
+      "runOptions": { "runOn": "folderOpen" },
+      "problemMatcher": []
+    }
+  ]
+}

@@ -57,7 +57,7 @@ def test_plan_counts_and_files(e2e: tuple[Path, PlanResult]) -> None:
     reduce_items = read_work(result.run_dir, "reduce")
     assert all(len(it["epochs"]) == 2 for it in reduce_items)
     regrid = read_work(result.run_dir, "regrid")
-    assert regrid[0]["collection"] == "EMITL1BOBS" and regrid[0]["asset"] == "OBS"
+    assert regrid[0]["collection"] == "EMITL1BRAD" and regrid[0]["asset"] == "OBS"
     assert "Class-table fingerprints" in result.report and "| filter |" in result.report
 
 

@@ -185,7 +185,7 @@ primary Critical Minerals input. An `EMIT_L2B_MIN_*.nc` falls through to
 `ValueError: Unknown file type`. AMD avoided this by reading cluster ENVI `.img`.
 
 That reader now exists — `stratum_emit.readers:L2BMin`, covering both files of a record
-(`MIN`, `MINUNCERT`) — beside `L1BObs`, `L2AMask` and `L2BFrcov` ([12 §3](12-data-access.md)); the
+(`MIN`, `MINUNCERT`) — beside `L1BRad`, `L2AMask` and `L2BFrcov` ([12 §3](12-data-access.md)); the
 `tetrapy` flavour of [02 §5](02-granule-index.md) is a registry override away. Substring dispatch
 is itself fragile once files are staged into cache-keyed paths — Stratum passes product type
 explicitly from the role declaration instead.

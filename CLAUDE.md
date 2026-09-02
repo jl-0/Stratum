@@ -1,9 +1,11 @@
 # Stratum — working notes for Claude
 
 Cost-function-driven mosaic engine for imaging spectroscopy. **The first slice exists** (built
-2026-09-02, `src/stratum` + `src/stratum_emit`, 242 tests): a local run over staged granules,
-plan through publish. `docs/specs/` is still the contract; the build contract it was written
-against is [`docs/notes/2026-09-02-first-slice-plan.md`](docs/notes/2026-09-02-first-slice-plan.md).
+2026-09-02, `src/stratum` + `src/stratum_emit`, 285 tests): a local run over staged granules,
+plan through publish, and — the same day — a run from NASA's CMR catalogue with granules
+downloaded over HTTPS on first touch (`examples/nevada-cmr/`). `docs/specs/` is still the
+contract; the build contract it was written against is
+[`docs/notes/2026-09-02-first-slice-plan.md`](docs/notes/2026-09-02-first-slice-plan.md).
 
 Read [`docs/specs/00-overview.md`](docs/specs/00-overview.md) before doing anything substantive;
 it fixes the vocabulary the rest of the repo assumes.
@@ -135,6 +137,36 @@ Established by reading code and data. Do not re-derive; do not assume the opposi
   need nothing.
 - **`spec_io` has no L2B mineral reader** and no S3 support — the latter blocked by two guards
   (`os.path.exists`, `click.Path(exists=True)`), not by architecture.
+- **CMR has no `EMITL1BOBS`.** OBS is the second asset of an `EMITL1BRAD.001` record, beside
+  the 1.85 GB RAD file that a mosaic run must never fetch — so the collection is `EMITL1BRAD`,
+  the role is `{collection: EMITL1BRAD, asset: OBS}`, and `patterns` lists only the OBS asset.
+  `EMITL2AMASK` is published at collection version `002` (the mask role pins `version: "002"`).
+  `EMITL2BFRCOV.001` is per-fraction GeoTIFFs (`FRCOVBARE`/`PV`/`NPV` + `UNC` twins, `FRCOVQC`),
+  not NetCDF, and has no reader yet. Verified against CMR 2026-09-02.
+- **`patterns` is the one shape for every source**, `{collection: {asset: glob}}`. Locally the
+  glob runs on disk; against CMR it is an `fnmatch` over each record's file names, and a file
+  matching no glob is neither indexed nor downloaded — that rule, not a special case, is what
+  keeps the RAD file off the network. The granule id is what the first asset's glob matched,
+  derived the same way by both sources, so use the **same globs** locally and against CMR or the
+  two indexes' ids differ (`EMIT_L2B_MIN_*.nc` → `001_2026…`, `EMIT_L2B_MIN_001_*.nc` → `2026…`).
+- **`cloud_fraction` is a fraction in [0, 1].** CMR publishes `CloudCover` as an integer percent;
+  `CMRSource` stores `CloudCover / 100` in the column and the percent in
+  `attributes.cloud_cover`. The manifest's `max_cloud_fraction: 0.8` means 80 %; a percent in
+  the column dropped every granule once.
+- **A CMR index is scoped; a local one is not.** `index_scope` passes the manifest's AOI bbox
+  and `[time.start, time.end)` to a catalogue source; a local source indexes its whole
+  directory. CMR intersects the footprint *polygon* while a local build has only the header
+  bounding box, so a CMR index can hold fewer granules over the same tile (12 vs 14, June 2026)
+  and the extras contribute no pixels. `stratum plan` builds a missing index from `local` or
+  `cmr` alike.
+- **Credentials: `~/.netrc` works, and nothing is ever logged.** `stratum.access.auth`
+  tries `netrc` (`urs.earthdata.nasa.gov`) then `EARTHDATA_USERNAME`/`EARTHDATA_PASSWORD`,
+  builds its own `earthaccess.Auth` (never `earthaccess.login()`), is never called at import, on
+  a local run or by an index build (a CMR search is anonymous), and re-logins once on 401/403.
+  Errors name strategies and exception types, never a token or password. The asset cache is
+  `$STRATUM_ASSET_CACHE`, else `{root}/assets` — `--asset-cache` on `run`/`exec` sets the
+  variable so spawned workers inherit it; the planner downloads one geometry asset plus every
+  contributing granule's class-table asset into it, and the run hits them.
 - **Wrap SpectralUtil, never fork it.** EMIT-AMD depends on a personal fork for a CLI upstream now
   ships; do not repeat that.
 
@@ -167,7 +199,10 @@ trial-data/        local granules for trial runs - git-ignored, never committed
 
 `examples/trial-nevada/` is the first-slice trial run (one tile, June 2026, `MinViewZenith`);
 its `out/` is a full local root - `cache/`, `runs/`, `products/` - and `parity.py` is the
-SpectralUtil `build_obs_nc` comparison. `examples/zones.yaml` is the AOI zone registry.
+SpectralUtil `build_obs_nc` comparison. `examples/nevada-cmr/` is the same tile from CMR,
+January-August 2026, monthly votes - its `README.md` carries the credentials walk-through and the
+measured download volume and timings; its `index/`, `out/` (5 GB of assets after a run) are
+git-ignored. `examples/zones.yaml` is the AOI zone registry.
 
 ---
 
@@ -412,8 +447,10 @@ the two non-negotiable tests are real — and is recorded in
 (in / out) and §4 (the internal signatures). In: manifest, index, `LocalSource`, the four EMIT
 readers, KD-tree regrid wrapping SpectralUtil, streaming resolve with sensor- and map-space masks,
 the schema-driven reducer, publish (data COGs, categorical/continuous mappers, legends, STAC,
-provenance), the `local` executor and the CLI. Out, refused with the spec section named:
-`CMRSource`, S3/HTTPS assets, prepared assets, aux data, `stack`/`tile` scorers, `Reducer`
+provenance), the `local` executor and the CLI. Added the same day, beyond the contract:
+`CMRSource`, HTTPS assets behind Earthdata Login staged into a node-local asset cache, and the
+`examples/nevada-cmr` run ([12 §4–5](docs/specs/12-data-access.md)). Still out, refused with the
+spec section named: S3 assets, prepared assets, aux data, `stack`/`tile` scorers, `Reducer`
 plugins, `threshold`/`composite` mappers, `stratum render`, patches, `approve`, `slurm`/`aws`.
 No V002 output was available locally; a SpectralUtil `build_obs_nc` parity run stands in and
 matches cell for cell (`docs/notes/heritage.md`, "First measurements").

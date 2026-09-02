@@ -14,6 +14,7 @@ import multiprocessing
 import os
 import time
 import traceback
+from collections.abc import Mapping
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from datetime import UTC, datetime
 from pathlib import Path
@@ -26,6 +27,7 @@ from stratum.plan.document import (
     STAGES,
     BudgetExceeded,
     RunPlan,
+    read_plan,
     read_work,
     results_path,
 )
@@ -81,10 +83,14 @@ def run_stage(run_dir: Path | str, stage: str, workers: int | None = None) -> li
     return results
 
 
-def budget_gate(run: RunPlan) -> None:
+def budget_gate(run: RunPlan | Mapping[str, Any]) -> None:
     """09 section 4: over budget stops a run unless `on_exceed: warn`. `require_approval`
-    would park it for `stratum approve` (08 section 3), which is a later slice, so it refuses."""
-    b = run.budget
+    would park it for `stratum approve` (08 section 3), which is a later slice, so it refuses.
+    Accepts the raw `plan.json` document as well as a `RunPlan`: a refused plan carries no
+    worker context (the planner stops before inspecting or staging anything), so the gate has
+    to run before `load_run` would try to rebuild one."""
+    doc = run.document if isinstance(run, RunPlan) else run
+    b = doc["budget"]
     if not b.get("over"):
         return
     if b.get("on_exceed") == "warn":
@@ -92,15 +98,15 @@ def budget_gate(run: RunPlan) -> None:
     why = "; ".join(b.get("problems", []))
     hint = ("stratum approve is a later slice (08 section 3); set budget.on_exceed: warn to "
             "proceed" if b.get("on_exceed") == "require_approval" else "budget.on_exceed is fail")
-    raise BudgetExceeded(f"run {run.run_id} is over budget: {why}. {hint}")
+    raise BudgetExceeded(f"run {doc['run_id']} is over budget: {why}. {hint}")
 
 
 def run_all(run_dir: Path | str, workers: int | None = None) -> dict[str, Any]:
     """Every stage in order, then Finalize: the STAC collection, `provenance.json` (10 section
     2) and an execution section appended to `report.md`. Returns the execution record."""
     run_dir = Path(run_dir).resolve()
+    budget_gate(read_plan(run_dir))
     run = load_cached(run_dir)
-    budget_gate(run)
     started = datetime.now(UTC)
     execution: dict[str, Any] = {"stages": {}, "cache_hits": {}, "failed_items": []}
     for stage in STAGES:
@@ -119,9 +125,13 @@ def run_all(run_dir: Path | str, workers: int | None = None) -> dict[str, Any]:
                 "description") or f"Stratum products for run {run.run_id}")
 
     counts = run.document["counts"]
+    store_cache = getattr(run.context.store, "asset_cache", None)
     execution.update({"tiles": counts["tiles"], "epochs": counts["epochs"],
                       "blocks": counts["blocks"], "workers": workers or os.cpu_count() or 1,
-                      "executor": "local"})
+                      "executor": "local",
+                      # where remote assets were staged (12 section 4): recorded so a reader of
+                      # the provenance knows where the bytes went; it enters no cache key
+                      "asset_cache": str(store_cache) if store_cache is not None else None})
     record = provenance_record(run, started, finished, execution)
     prov = write_provenance(run_dir, record)
     with (run_dir / REPORT_NAME).open("a") as fh:

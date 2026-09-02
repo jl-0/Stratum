@@ -223,7 +223,13 @@ class BandAliasSpec(Strict):
 
 class SourceSpec(Strict):
     """How the index is built - read by `stratum index build`, ignored by a run (12 section 6).
-    A local run needs no catalogue: `{kind: local, root, patterns}` (12 section 5)."""
+    A local run needs no catalogue: `{kind: local, root, patterns}` (12 section 5).
+
+    `patterns` is one shape for every kind: `{collection: {asset: glob}}`. For `local` the glob
+    runs on disk; for `cmr` it is matched against each record's file names, a file matching no
+    pattern is not indexed, and a collection with no entry is not searched - so a `cmr` source
+    needs `patterns` to search anything (the planner says so; the model does not insist, so a
+    manifest that only names its source still validates)."""
 
     kind: Literal["cmr", "stac", "local", "parquet"]
     provider: str | None = None
@@ -243,8 +249,10 @@ class SourceSpec(Strict):
                              "(12 section 5)")
         if self.pattern and self.patterns:
             raise ValueError("give pattern or patterns, not both")
-        if self.kind != "local" and (self.root or self.pattern or self.patterns):
-            raise ValueError("root, pattern and patterns apply to kind: local only")
+        if self.kind != "local" and (self.root or self.pattern):
+            raise ValueError("root and pattern apply to kind: local only")
+        if self.kind not in ("local", "cmr") and self.patterns:
+            raise ValueError("patterns apply to kind: local and kind: cmr only (12 section 5)")
         return self
 
 

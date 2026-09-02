@@ -45,8 +45,8 @@ because they run in different places, at different times, with different failure
   and nothing else. That is what lets a run be reproduced months later &mdash; and it is what stops
   several thousand workers hammering a public API the moment your fan-out gets interesting.</p>
   <p><strong>This is about metadata, not pixels.</strong> Workers pull granule data straight from
-  S3 when they need it. What is settled ahead of time is <em>which</em> granules and <em>where</em>
-  they live &mdash; the URL list &mdash; not the bytes. See
+  the archive when they need it. What is settled ahead of time is <em>which</em> granules and
+  <em>where</em> they live &mdash; the URL list &mdash; not the bytes. See
   <a href="#when">When the bytes actually move</a>.</p>
 </div>
 
@@ -178,10 +178,10 @@ cheaper path when it can.</p>
 <table>
 <thead><tr><th>Kind</th><th>Use when</th><th>Needs an account?</th></tr></thead>
 <tbody>
-<tr><td><code>local</code></td><td>Granules are already on disk &mdash; a laptop run, a cluster scratch directory, a test fixture set</td><td>No</td></tr>
-<tr><td><code>cmr</code></td><td>Pulling from NASA's archive. The default for EMIT</td><td>Earthdata Login</td></tr>
-<tr><td><code>stac</code></td><td>Any STAC catalogue, including CMR-STAC</td><td>Depends on the catalogue</td></tr>
-<tr><td><code>parquet</code></td><td>Someone already built an index and you are pointing at it</td><td>No</td></tr>
+<tr><td><code>local</code> <span class="chip chip-locked">built</span></td><td>Granules are already on disk &mdash; a laptop run, a cluster scratch directory, a test fixture set</td><td>No</td></tr>
+<tr><td><code>cmr</code> <span class="chip chip-locked">built</span></td><td>Pulling from NASA's archive. The default for EMIT</td><td>Earthdata Login to download. The index build itself is anonymous</td></tr>
+<tr><td><code>stac</code> <span class="chip chip-open">not yet</span></td><td>Any STAC catalogue, including CMR-STAC</td><td>Depends on the catalogue</td></tr>
+<tr><td><code>parquet</code> <span class="chip chip-open">not yet</span></td><td>Someone already built an index and you are pointing at it</td><td>No</td></tr>
 </tbody>
 </table>
 </div>
@@ -197,7 +197,7 @@ cheaper path when it can.</p>
       EMITL2BMIN:
         MIN: <span class="k">"EMIT_L2B_MIN_001_*.nc"</span>
         MINUNCERT: <span class="k">"EMIT_L2B_MINUNCERT_001_*.nc"</span>
-      EMITL1BOBS:
+      EMITL1BRAD:
         OBS: <span class="k">"EMIT_L1B_OBS_001_*.nc"</span></code></pre>
 
 <p><code>stratum index build</code> walks the directory, reads each file's header once, and writes
@@ -207,6 +207,19 @@ MIN and MINUNCERT files of one granule become one record with two assets. No net
 Earthdata account, no catalogue. Nothing downstream can tell the difference &mdash; which is the
 test that this seam is in the right place.</p>
 
+<div class="key">
+  <span class="label"><code>patterns</code> is the same for every source</span>
+  <p><code>{collection: {asset: glob}}</code> is how you tell any source which files make up a
+  granule. On disk the glob runs over the directory; against the archive it is matched against the
+  file names listed in each catalogue record. <strong>A file that matches no glob is never indexed
+  and never downloaded.</strong> That is the whole mechanism by which the 1.85 GB radiance file
+  sitting beside every OBS file stays off the network: <code>EMITL1BRAD</code> lists only
+  <code>OBS</code>. The granule id is what the <em>first</em> asset's glob matched, derived the
+  same way by both sources &mdash; so use the same globs locally and against the archive, or the two
+  indexes name the same granule differently (<code>EMIT_L2B_MIN_*.nc</code> gives
+  <code>001_2026…</code>, <code>EMIT_L2B_MIN_001_*.nc</code> gives <code>2026…</code>).</p>
+</div>
+
 <p>Two things a directory cannot tell you: the cloud fraction (it is <code>None</code> for every
 granule, so a <code>max_cloud_fraction</code> filter with the default <code>on_missing: fail</code>
 refuses everything) and a catalogue checksum (none is recorded). <code>--since</code> on
@@ -215,11 +228,34 @@ refuses everything) and a catalogue checksum (none is recorded). <code>--since</
 <h3 id="cmr">From NASA's archive</h3>
 
 <pre><code>inputs:
-  index_location: s3://emit-l3/index/
+  index_location: ./index                <span class="c"># built here on first use; delete it to query the archive again</span>
   source:
     kind: cmr
-    provider: LPCLOUD      <span class="c"># the DAAC that distributes EMIT</span>
-    prefer: direct         <span class="c"># direct (s3://) where possible, else https</span></code></pre>
+    provider: LPCLOUD                    <span class="c"># the DAAC that distributes EMIT; the default</span>
+    prefer: https                        <span class="c"># download over HTTPS with Earthdata Login. direct (s3://) is not built and is refused</span>
+    patterns:                            <span class="c"># required: which FILES of each record to index; nothing else is ever fetched</span>
+      EMITL2BMIN:
+        MIN: <span class="k">"EMIT_L2B_MIN_001_*.nc"</span>
+        MINUNCERT: <span class="k">"EMIT_L2B_MINUNCERT_001_*.nc"</span>
+      EMITL1BRAD:
+        OBS: <span class="k">"EMIT_L1B_OBS_001_*.nc"</span>   <span class="c"># the RAD file of the same record is deliberately unlisted</span></code></pre>
+
+<p>The index build queries the catalogue for each collection under <code>patterns</code>,
+<strong>scoped to the manifest's area and time range</strong> &mdash; the query is cheap and the
+answer is frozen per run, so there is nothing to gain by indexing the whole mission. A directory,
+by contrast, is indexed whole. Each row carries the footprint polygon, the acquisition time, the
+cloud cover, the software build, the HTTPS URL of every matching file and its SHA-512 checksum. No
+pixel is downloaded and no login happens: a catalogue search is anonymous. A role's
+<code>version:</code> pin is folded into the search, so a pinned collection is queried at that
+version and an unpinned one records whatever the catalogue returns.</p>
+
+<p>Two things differ from a directory. Cloud cover is real here &mdash; stored as a fraction in
+<code>[0, 1]</code>, so <code>max_cloud_fraction: 0.8</code> means 80&nbsp;% &mdash; and the
+catalogue matches your area against the granule's footprint <em>polygon</em>, where a directory
+build has only the header bounding box. An archive index can therefore hold slightly fewer
+granules over the same tile; the extras touch the box and not the footprint, and contribute no
+pixels. A worked example with measured sizes and times is <code>examples/nevada-cmr/</code> in
+the repository.</p>
 
 <details class="explainer">
 <summary>What are CMR, a DAAC, and Earthdata Login?</summary>
@@ -270,9 +306,9 @@ index:</p>
 <thead><tr><th>What the bridge does</th><th>Why it cannot be skipped</th></tr></thead>
 <tbody>
 <tr><td>Maps UMM-G fields onto the index schema</td><td>Not one-to-one, and lossy in places</td></tr>
-<tr><td>Resolves assets to <a href="concepts.html#roles">roles</a></td><td>UMM-G types URLs by <em>access method</em>, not by role. Choosing the <code>s3://</code> entry over the HTTPS one, and deciding which file is <code>mineral</code> and which is <code>mask</code>, is our policy</td></tr>
-<tr><td>Applies the missing-metadata policy</td><td>Cloud fraction is a top-level field on every L2B MIN granule and simply absent on some other collections. Absent must arrive as <em>null</em>, never <code>0.0</code> &mdash; see <a href="running.html#missing">Missing metadata</a></td></tr>
-<tr><td>Holds an explicit session</td><td><code>earthaccess.login()</code> sets module-level global state, which is wrong in a process pool and worse in a Lambda</td></tr>
+<tr><td>Resolves files to asset names</td><td>UMM-G types URLs by <em>access method</em>, not by role. Which file is <code>MIN</code> and which is <code>OBS</code> comes from your <code>patterns</code>; the HTTPS link is the one indexed, and the direct-access <code>s3://</code> link is kept in the row's attributes as <code>s3:&lt;asset&gt;</code> for later</td></tr>
+<tr><td>Applies the missing-metadata policy</td><td>Cloud cover is a top-level field on every L2B MIN granule and simply absent on some other collections. Absent must arrive as <em>null</em>, never <code>0.0</code> &mdash; see <a href="running.html#missing">Missing metadata</a>. Present, it is scaled from the catalogue's percent to a fraction</td></tr>
+<tr><td>Holds an explicit session</td><td><code>earthaccess.login()</code> sets module-level global state, which is wrong in a process pool and worse in a Lambda. Stratum builds its own login object, and only when a download needs it</td></tr>
 </tbody>
 </table>
 </div>
@@ -283,12 +319,13 @@ index:</p>
 
 <pre><code>stratum index build -m manifest.yaml                  <span class="c"># first build, from inputs.source</span>
 stratum index build -m manifest.yaml --since 2026-09-01  <span class="c"># incremental refresh</span>
-stratum index verify -m manifest.yaml                 <span class="c"># do the asset URIs still resolve?</span></code></pre>
+stratum index verify -m manifest.yaml                 <span class="c"># do the asset URIs still resolve? (not built yet)</span></code></pre>
 
 <p><code>--since</code> does more than make refreshes cheap. Upstream reprocessing re-delivers
 granules with the same identifiers and different contents, and an incremental refresh is how that
 becomes visible: the granule comes back as updated, the index records a new last-seen timestamp, and
-<code>verify</code> reports it.</p>
+<code>verify</code> will report it. Against the archive <code>--since</code> is the catalogue's
+revision date; against a directory it is file modification time.</p>
 
 <div class="warn">
   <span class="label">Without that, the archive changes underneath you silently</span>
@@ -306,8 +343,8 @@ modes behind one interface:</p>
 <table>
 <thead><tr><th>Mode</th><th>What happens</th><th>When</th></tr></thead>
 <tbody>
-<tr><td><strong>Stage in</strong></td><td>The worker copies that one asset to its own scratch and gets a path back</td><td>The default. Works with any code that expects a filename</td></tr>
-<tr><td><strong>Stream</strong></td><td>Reads become HTTP range requests; only the touched bytes move</td><td>Once the asset is in a windowable layout. Stratum's own COGs are; the delivered L2B science bands are one gzip chunk each and are not, until prepared &mdash; see the note above</td></tr>
+<tr><td><strong>Stage in</strong> <span class="chip chip-locked">built</span></td><td>The worker downloads that one asset into a node-local <a href="#asset-cache">asset cache</a> and gets a path back</td><td>The default. Works with any code that expects a filename. <code>file://</code> and <code>https://</code> today; <code>s3://</code> is refused</td></tr>
+<tr><td><strong>Stream</strong> <span class="chip chip-open">not yet</span></td><td>Reads become HTTP range requests; only the touched bytes move</td><td>Once the asset is in a windowable layout. Stratum's own COGs are; the delivered L2B science bands are one gzip chunk each and are not, until prepared &mdash; see the note above</td></tr>
 </tbody>
 </table>
 </div>
@@ -333,6 +370,42 @@ later blocks   <span class="c">same worker        -&gt; asset cache hit; no seco
   nothing has to be resident before you invoke <code>stratum run</code>. A worker that never touches
   a granule never fetches it, and a granule no block reaches is never downloaded at all.</p>
 </div>
+
+<p>One exception, and it is deliberate: <code>stratum plan</code> validates the manifest against
+real granules, and against the archive that means downloading what it inspects &mdash; one geometry
+file for the sample-asset check, and every contributing granule's mineral file, because the class
+table it fingerprints lives inside the file. Those land in the same asset cache the workers use
+and are cache hits for the run, so the total download does not change; the first plan is simply
+where part of it happens. The plan report says how many files and how many bytes.</p>
+
+<h3 id="asset-cache">The asset cache</h3>
+
+<p>Remote assets are staged into one directory per machine. Where it is, in order of precedence:</p>
+
+<div class="tw">
+<table>
+<thead><tr><th>Setting</th><th>Effect</th></tr></thead>
+<tbody>
+<tr><td><code>--asset-cache PATH</code> on <code>stratum run</code> or <code>stratum exec</code></td><td>Sets <code>STRATUM_ASSET_CACHE</code> for the process and every worker it spawns</td></tr>
+<tr><td><code>STRATUM_ASSET_CACHE</code> in the environment</td><td>Used by the planner, the workers and the CLI alike</td></tr>
+<tr><td>Neither</td><td><code>{outputs.bucket}/assets/</code>, beside <code>cache/</code>, <code>runs/</code> and <code>products/</code></td></tr>
+</tbody>
+</table>
+</div>
+
+<p>Inside it a file lives at <code>{hex[:2]}/{hex[:16]}_{filename}</code>, keyed on the catalogue's
+SHA-512 &mdash; so two indexes naming the same bytes share one copy, and a re-delivered granule
+lands beside the old one instead of over it. An asset with no checksum is keyed on a hash of its
+URL under <code>uri/</code>. A download streams to a temporary file beside its target, is hashed
+as the bytes arrive, is compared with the catalogue checksum, and is renamed into place only if it
+matches; a mismatch deletes the partial file and fails the item. A reader therefore only ever
+sees a complete, verified file, and two workers racing for the same asset need no lock. A file
+already in the cache is <strong>trusted without re-hashing</strong>: it was verified when written,
+and the path is the digest. Delete the directory to re-download; nothing else references it, and
+its location never enters a cache key.</p>
+
+<p>Opening an <code>https://</code> asset with no cache configured is an error naming this rule,
+not a silent download to a temporary directory. Opening an <code>s3://</code> asset is refused.</p>
 
 <p>The line is <strong>metadata versus pixels</strong>, and the two have opposite economics:</p>
 
@@ -360,9 +433,9 @@ small, static and touched by every block, so they are warped during planning.</p
 <table>
 <thead><tr><th>Access path</th><th>What you need</th><th>Lifetime</th></tr></thead>
 <tbody>
-<tr><td>LP DAAC over HTTPS</td><td>An Earthdata token, or a <code>~/.netrc</code> entry</td><td>Long</td></tr>
-<tr><td>LP DAAC direct S3</td><td>Temporary AWS credentials, exchanged with your Earthdata token</td><td><strong>About one hour</strong></td></tr>
-<tr><td>Your own buckets</td><td>A task role or instance profile</td><td>Refreshed for you</td></tr>
+<tr><td>LP DAAC over HTTPS <span class="chip chip-locked">built</span></td><td>A <code>~/.netrc</code> line for <code>urs.earthdata.nasa.gov</code> (or <code>$NETRC</code>), else <code>EARTHDATA_USERNAME</code> and <code>EARTHDATA_PASSWORD</code> in the environment &mdash; tried in that order</td><td>Long</td></tr>
+<tr><td>LP DAAC direct S3 <span class="chip chip-open">not yet</span></td><td>Temporary AWS credentials, exchanged with your Earthdata token</td><td><strong>About one hour</strong></td></tr>
+<tr><td>Your own buckets <span class="chip chip-open">not yet</span></td><td>A task role or instance profile</td><td>Refreshed for you</td></tr>
 </tbody>
 </table>
 </div>
@@ -376,9 +449,18 @@ small, static and touched by every block, so they are warped during planning.</p
   expiry and retries once, so no plugin has to know about it.</p>
 </div>
 
+<p>The login happens on the first download and never before: not at import, not on a local run,
+and not when the index is built. Each worker process logs in for itself. A download refused with
+<code>401</code> or <code>403</code> triggers exactly one fresh login and one retry; a second
+refusal fails the item with the URL and both status codes. <strong>No credential is ever written
+down</strong> &mdash; not in a log, the plan, the report, provenance or an error message; a failed
+login names the strategies it tried and nothing more. The setup walk-through is in
+<code>examples/nevada-cmr/README.md</code>.</p>
+
 <p>Direct S3 access to the archive works only from inside the same AWS region the data lives in
 (<code>us-west-2</code>). From elsewhere it fails in a way that reads like a permissions error, so
-Stratum checks the region and falls back to HTTPS rather than surfacing the confusing message.</p>
+Stratum will check the region and fall back to HTTPS rather than surfacing the confusing message.
+That mode is not built; <code>prefer: direct</code> is refused.</p>
 
 <h2 id="reader">Adding a reader</h2>
 
@@ -444,11 +526,16 @@ registry is for, and what filename dispatch cannot express.</p>
         <span class="c">"""Yields catalogue records. Pages internally; may be very long."""</span>
 
     <span class="k">def</span> assets(self, record) -&gt; Mapping[str, str]:
-        <span class="c">"""Role -> URI. The source owns this policy; the index stores the result."""</span></code></pre>
+        <span class="c">"""Asset name -> URI. The source owns this policy; the index stores the result."""</span>
 
-<p><code>search</code> pages internally and yields rather than returning a list &mdash; a
-full-mission EMIT query is far larger than anything worth holding in memory, and CMR requires
-cursor-based paging past the first few thousand results anyway.</p>
+    <span class="k">def</span> checksums(self, record) -&gt; Mapping[str, str]:
+        <span class="c">"""Asset name -> catalogue checksum; empty when there is none."""</span></code></pre>
+
+<p><code>search</code> yields records rather than returning a list. The archive source today
+fetches each collection's result set before yielding from it, which is fine for the
+area-and-time-scoped queries the planner issues; a full-mission query is far larger than anything
+worth holding in memory, and CMR requires cursor-based paging past the first few thousand results
+anyway, so a streaming page iterator is the follow-up if unscoped builds are ever wanted.</p>
 
 <div class="note">
   <span class="label">These are not science hooks</span>

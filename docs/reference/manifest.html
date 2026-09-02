@@ -153,15 +153,23 @@ in the plan report.</p>
 <h2 id="inputs">inputs</h2>
 
 <pre><code>inputs:
-  index_location: s3://emit-l3/index/   <span class="c"># what a RUN reads: a directory (granules.parquet inside)</span>
+  index_location: ./index                           <span class="c"># what a RUN reads: a directory (granules.parquet inside)</span>
   source:                                           <span class="c"># how that index is BUILT</span>
     kind: cmr
-    provider: LPCLOUD
-    prefer: direct
+    provider: LPCLOUD                               <span class="c"># default</span>
+    prefer: https                                   <span class="c"># the only built mode; direct is refused</span>
+    patterns:                                       <span class="c"># required for cmr: which files of a record are assets</span>
+      EMITL2BMIN:
+        MIN: "EMIT_L2B_MIN_001_*.nc"
+        MINUNCERT: "EMIT_L2B_MINUNCERT_001_*.nc"
+      EMITL1BRAD:
+        OBS: "EMIT_L1B_OBS_001_*.nc"                <span class="c"># RAD is not listed: never indexed, never fetched</span>
+      EMITL2AMASK:
+        MASK: "EMIT_L2A_MASK_002_*.nc"
   readers:
     EMITL2BMIN: emit.readers:L2BMin                 <span class="c"># override the registry</span>
   roles:
-    geometry: {collection: EMITL1BOBS, var: obs}
+    geometry: {collection: EMITL1BRAD, asset: OBS, var: obs}
     mineral:
       collection: EMITL2BMIN
       var: group_1_mineral_id
@@ -171,34 +179,34 @@ in the plan report.</p>
         key: index
         attributes: [name, record, library, group, url]
     mineral_uncert: {collection: EMITL2BMIN, asset: MINUNCERT, var: group_1_band_depth_unc}
-    mask:  {collection: EMITL2AMASK,  var: mask}
-    frcov: {collection: EMITL2BFRCOV, var: soil}
+    mask:  {collection: EMITL2AMASK,  version: "002", var: mask}   <span class="c"># EMITL2AMASK is published at collection version 002</span>
+    frcov: {collection: EMITL2BFRCOV, asset: FRCOVBARE, var: soil}   <span class="c"># per-fraction GeoTIFFs; reader not built</span>
   geolocation: geometry                           <span class="c"># the role regrid takes loc from; default: the first sensor-space role</span>
   band_aliases:                                   <span class="c"># band: is a 0-BASED index into the role's variable</span>
     view_zenith:  {role: geometry, band: 2}       <span class="c"># L1B OBS band 2 = to-sensor zenith</span>
     solar_zenith: {role: geometry, band: 4}       <span class="c"># band 4 = to-sun zenith</span>
     # swir_2200:  {role: reflectance, match: {wavelength: 2200}, tolerance: 10}   <span class="c"># by a reader-reported attribute</span></code></pre>
 
-<p><code>index</code> and <code>source</code> are each optional, and at least one is required. A
-<code>band:</code> index is checked against the reader's band count at plan time; a
+<p><code>index_location</code> and <code>source</code> are each optional, and at least one is
+required. A <code>band:</code> index is checked against the reader's band count at plan time; a
 <code>match:</code> alias must select exactly one band.</p>
 
 <h3 id="source">source</h3>
 
-<p>Read by <code>stratum index build</code>, and recorded in provenance. <strong>Ignored by
-<code>stratum run</code></strong>, which touches only <code>index</code>. It lives here so one
-document drives both. See <a href="../guide/reading-data.html#sources">Where granules come
-from</a>.</p>
+<p>Read by <code>stratum index build</code>, and by <code>stratum plan</code> / <code>run</code>
+only to build the index when the file under <code>index_location</code> is absent. A run with an
+index touches nothing else. It lives here so one document drives both. See
+<a href="../guide/reading-data.html#sources">Where granules come from</a>.</p>
 
 <div class="tw">
 <table>
 <thead><tr><th>Field</th><th>Values</th><th>Notes</th></tr></thead>
 <tbody>
-<tr><td><code>kind</code></td><td><code>cmr</code> &middot; <code>stac</code> &middot; <code>local</code> &middot; <code>parquet</code></td><td>Which <code>GranuleSource</code> builds the index</td></tr>
-<tr><td><code>provider</code></td><td>e.g. <code>LPCLOUD</code></td><td><code>cmr</code> only — the DAAC distributing the collection</td></tr>
-<tr><td><code>prefer</code></td><td><code>direct</code> &middot; <code>https</code></td><td><code>direct</code> resolves to <code>s3://</code> URIs where offered. In-region only; falls back to HTTPS</td></tr>
+<tr><td><code>kind</code></td><td><code>cmr</code> &middot; <code>local</code> &middot; <code>stac</code> &middot; <code>parquet</code></td><td>Which <code>GranuleSource</code> builds the index. <code>cmr</code> and <code>local</code> are built; <code>stac</code> and <code>parquet</code> validate and are refused at plan time</td></tr>
+<tr><td><code>provider</code></td><td>e.g. <code>LPCLOUD</code></td><td><code>cmr</code> only — the DAAC distributing the collection. Default <code>LPCLOUD</code></td></tr>
+<tr><td><code>prefer</code></td><td><code>https</code> &middot; <code>direct</code></td><td><code>cmr</code> only. <code>https</code> (the default) indexes the HTTPS download URL of each asset. <code>direct</code> would resolve to <code>s3://</code> URIs; it is not built and is refused at plan time</td></tr>
 <tr><td><code>root</code></td><td>path</td><td><code>local</code> only — directory to walk, relative to the manifest</td></tr>
-<tr><td><code>patterns</code></td><td><code>{collection: {asset: glob}}</code></td><td><code>local</code> only. The granule id is what the glob's <code>*</code> matched, so the MIN and MINUNCERT files of one granule land in one record. Pin a collection version with the long form <code>{collection: {version: "001", assets: {asset: glob}}}</code></td></tr>
+<tr><td><code>patterns</code></td><td><code>{collection: {asset: glob}}</code></td><td><code>local</code> and <code>cmr</code>; required for both at build time (a <code>cmr</code> source without it validates and fails in <code>plan</code>). Locally the glob runs on disk; against the archive it is matched on each record's file names, and a file matching no glob is never indexed or fetched. The granule id is what the first asset's glob matched, so the MIN and MINUNCERT files of one granule land in one record. Pin a collection version with the long form <code>{collection: {version: "001", assets: {asset: glob}}}</code>; a role's <code>version:</code> is folded in for you</td></tr>
 <tr><td><code>pattern</code></td><td>glob</td><td><code>local</code> only — one glob, accepted only when every role reads a single collection</td></tr>
 </tbody>
 </table>
@@ -218,8 +226,8 @@ replacement.</p>
 <tbody>
 <tr><td><code>collection</code></td><td>yes</td><td>Index collection this role resolves to</td></tr>
 <tr><td><code>var</code></td><td>yes</td><td>Variable within the product</td></tr>
-<tr><td><code>asset</code></td><td>no</td><td>File within the granule record, e.g. <code>MINUNCERT</code>. Defaults to the collection's primary file</td></tr>
-<tr><td><code>version</code></td><td>no</td><td>Pins a <code>collection_version</code> when the index holds more than one</td></tr>
+<tr><td><code>asset</code></td><td>no</td><td>File within the granule record, e.g. <code>MINUNCERT</code>, or <code>OBS</code> for the geometry role of <code>EMITL1BRAD</code>. Defaults to the collection's primary file — the first asset listed in <code>patterns</code></td></tr>
+<tr><td><code>version</code></td><td>no</td><td>Pins a <code>collection_version</code> when the index holds more than one; against the archive the pin also narrows the search. Two roles may not pin one collection to different versions</td></tr>
 <tr><td><code>class_table</code></td><td>no</td><td>Present when the band is categorical</td></tr>
 </tbody>
 </table>
@@ -299,7 +307,7 @@ before compute is provisioned, and plugins may only read aliases declared here.<
 <tr><td><code>build_version</code></td><td>Filters on the granule's software build, e.g. <code>010635</code>. Optional — one collection spans many builds; the vintage guard is the class-table check below</td></tr>
 <tr><td><code>product_version</code></td><td>The granule's own product stamp from the file header, e.g. <code>V001</code>. Not a catalogue field; from CMR it equals the collection version</td></tr>
 <tr><td><code>collection_version</code></td><td>Pins the collection's version, e.g. <code>001</code>. Constant within a collection, so it is <strong>not</strong> a vintage predicate</td></tr>
-<tr><td><code>max_cloud_fraction</code></td><td>Upper bound on reported cloud fraction</td></tr>
+<tr><td><code>max_cloud_fraction</code></td><td>Upper bound on reported cloud cover as a <strong>fraction in <code>[0, 1]</code></strong> — <code>0.5</code> is 50&nbsp;%. The archive's integer percent is scaled on the way into the index; a directory source has no value at all, so <code>on_missing: fail</code> refuses every local granule</td></tr>
 <tr><td><code>max_solar_zenith</code></td><td>Upper bound on solar zenith angle</td></tr>
 <tr><td><code>month_in</code></td><td>Recurring seasonal window, as month numbers</td></tr>
 <tr><td><code>day_night</code></td><td><code>Day</code> or <code>Night</code></td></tr>
@@ -521,7 +529,7 @@ exist and are readable;</li>
 <li>contributing granules' class tables agree by fingerprint &mdash; the vintage check &mdash; or a remap is explicitly permitted;</li>
 <li>every filter's <code>on_missing</code> policy is explicit;</li>
 <li>every role's <code>collection</code> resolves to exactly one registered <code>GranuleReader</code>, and its <code>var</code> exists in that reader's variables;</li>
-<li>every asset URI scheme is supported and credentials for it are obtainable now;</li>
+<li>every asset URI scheme is supported — <code>file://</code> and <code>https://</code>; <code>s3://</code> is refused — and the sample asset opens, which against the archive is where a missing or bad Earthdata Login fails;</li>
 <li>readers agree on space &mdash; an ortho-native role is not being asked for a regrid;</li>
 <li>a collection the index holds under more than one <code>collection_version</code> is pinned with <code>version:</code>;</li>
 <li><code>budget</code> is present and finite.</li>

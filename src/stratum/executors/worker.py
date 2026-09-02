@@ -64,7 +64,12 @@ def regrid_item(item: Mapping[str, Any], run: RunPlan) -> tuple[CacheKey, bool]:
 
     def loc() -> LocArray:
         reader = ctx.reader(str(item["collection"]))
-        rctx = reader.open(ctx.store.open(str(item["uri"])))
+        # the geolocation asset's catalogue checksum, from the frozen GranuleRef (12 section 4);
+        # None for a local source, which the store accepts
+        ref = ctx.granules.get(gid)
+        checksum = (ref.checksums.get(f"{item['collection']}/{item['asset']}")
+                    if ref is not None else None)
+        rctx = reader.open(ctx.store.open(str(item["uri"]), checksum=checksum))
         try:
             arrays = reader.geolocation(rctx)
         finally:

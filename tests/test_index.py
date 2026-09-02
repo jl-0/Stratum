@@ -15,13 +15,19 @@ from stratum.access import LocalSource
 from stratum.access.sources import granule_id_from, split_pattern, version_token
 from stratum.index import (
     INDEX_SCHEMA,
+    SCOPE_KEY,
     build_index,
     freeze_index,
     granule_refs,
+    index_scope_record,
+    merge_index,
     query_index,
     read_index,
+    read_index_scope,
+    read_index_table,
     role_asset,
     role_uri,
+    scope_problems,
     write_index,
 )
 from stratum.types import GranuleRecord, GranuleRef
@@ -75,19 +81,19 @@ def test_local_source_over_reference_granule(tmp_path, ref_granule):
 
 def test_local_source_groups_assets_and_filters(make_granule, tmp_path):
     root = tmp_path / "granules"
-    a = "001_20260610T100000_2600001_001"
-    b = "001_20260710T100000_2600002_002"
-    make_granule(f"EMIT_L2B_MIN_{a}.nc", directory=root)
-    make_granule(f"EMIT_L2B_MINUNCERT_{a}.nc", kind="minuncert", directory=root)
-    make_granule(f"EMIT_L2B_MIN_{b}.nc", directory=root, start="2026-07-10T10:00:00+0000",
+    a = "20260610T100000_2600001_001"
+    b = "20260710T100000_2600002_002"
+    make_granule(f"EMIT_L2B_MIN_001_{a}.nc", directory=root)
+    make_granule(f"EMIT_L2B_MINUNCERT_001_{a}.nc", kind="minuncert", directory=root)
+    make_granule(f"EMIT_L2B_MIN_001_{b}.nc", directory=root, start="2026-07-10T10:00:00+0000",
                  end="2026-07-10T10:00:16+0000", bbox=(-112.0, 40.0, -111.5, 40.5), build="010636")
     src = LocalSource(root, PATTERNS)
     recs = {r.attributes["granule_id"]: r for r in src.search(collections=[MIN])}
     assert set(recs) == {a, b}
     by_id = {Path(r.native_id).name: r for r in recs.values()}
-    ra = by_id[f"EMIT_L2B_MIN_{a}.nc"]
+    ra = by_id[f"EMIT_L2B_MIN_001_{a}.nc"]
     assert set(src.assets(ra)) == {"MIN", "MINUNCERT"}            # one record, two files
-    rb = by_id[f"EMIT_L2B_MIN_{b}.nc"]
+    rb = by_id[f"EMIT_L2B_MIN_001_{b}.nc"]
     assert set(src.assets(rb)) == {"MIN"}                          # MINUNCERT may be missing
     assert rb.attributes["build_version"] == "010636"
     # bbox, time and collection filters
@@ -139,13 +145,13 @@ def test_index_round_trip_query_and_freeze(make_granule, tmp_path):
     assert table.num_rows == 2
     assert table.column("cloud_fraction").null_count == 2            # None, not 0.0
     assert table.column("granule_id").to_pylist() == [
-        "001_20260610T100000_2600001_001", "001_20260710T100000_2600002_002"]
+        "20260610T100000_2600001_001", "20260710T100000_2600002_002"]
 
     path = write_index(table, tmp_path / "idx" / "index.parquet")
     assert b"geo" in pq.read_schema(path).metadata
     frame = read_index(path)
     assert isinstance(frame, pd.DataFrame) and len(frame) == 2
-    row = frame.set_index("granule_id").loc["001_20260610T100000_2600001_001"]
+    row = frame.set_index("granule_id").loc["20260610T100000_2600001_001"]
     assert isinstance(row["geometry"], shapely.Polygon)
     assert row["geometry"].bounds == pytest.approx((-118.5, 41.2, -117.9, 41.8))
     assert row["bbox"] == pytest.approx((-118.5, 41.2, -117.9, 41.8))
@@ -175,11 +181,86 @@ def test_index_round_trip_query_and_freeze(make_granule, tmp_path):
     assert fpath == run_dir / "index.parquet"
     assert digest == "sha256:" + hashlib.sha256(fpath.read_bytes()).hexdigest()
     frozen = read_index(fpath)
-    assert len(frozen) == 1 and frozen.loc[0, "granule_id"] == "001_20260610T100000_2600001_001"
+    assert len(frozen) == 1 and frozen.loc[0, "granule_id"] == "20260610T100000_2600001_001"
     assert frozen.loc[0, "assets"] == row["assets"]
     assert pd.isna(frozen.loc[0, "cloud_fraction"])
     _, digest2 = freeze_index(frozen, tmp_path / "runs" / "r2")
     assert digest2 == digest                                          # deterministic bytes
+
+
+def test_local_patterns_match_the_shipped_manifest_globs():
+    """06 section 4 / 12 section 5: an index built from LOCAL_PATTERNS must share granule ids -
+    the GLT key term - with one built from the example manifests, so the globs are the same."""
+    import yaml
+
+    doc = yaml.safe_load(Path("examples/nevada-cmr/manifest.yaml").read_text())
+    shipped = doc["inputs"]["source"]["patterns"]
+    for collection, assets in shipped.items():
+        assert LOCAL_PATTERNS[collection] == assets
+    name = "EMIT_L2B_MIN_001_20260825T151308_2623710_050.nc"
+    assert granule_id_from(name, LOCAL_PATTERNS[MIN]["MIN"]) == "20260825T151308_2623710_050"
+
+
+# ------------------------------------------------------------------------------------ scope
+def test_index_records_its_scope_and_checks_containment(make_granule, tmp_path):
+    """02 section 6 / 12 section 5: the file says what it was built for; a manifest reaching
+    outside that - a wider bbox or window, a collection not indexed, another source kind - is
+    a named problem, and a scope-less index is one problem of its own."""
+    table = build_index(_source(make_granule, tmp_path), collections=[MIN])
+    bare = write_index(table, tmp_path / "bare.parquet")
+    assert read_index_scope(bare) is None
+    assert scope_problems(None, source="cmr", collections=[MIN], bbox=None, start=None,
+                          end=None) == [("the index records no build scope; rebuild it with "
+                                         "`stratum index build`")]
+    scope = index_scope_record(source="cmr", provider="LPCLOUD", collections=[MIN, "EMITL1BRAD"],
+                               bbox=(-118, 41, -117, 42),
+                               start=datetime(2026, 1, 1, tzinfo=UTC),
+                               end=datetime(2026, 9, 1, tzinfo=UTC),
+                               built_at=datetime(2026, 9, 2, tzinfo=UTC))
+    path = write_index(table, tmp_path / "scoped.parquet", scope)
+    assert SCOPE_KEY in pq.read_schema(path).metadata and b"geo" in pq.read_schema(path).metadata
+    assert read_index_scope(path) == {
+        "source": "cmr", "provider": "LPCLOUD", "collections": ["EMITL1BRAD", MIN],
+        "bbox": [-118.0, 41.0, -117.0, 42.0], "start": "2026-01-01T00:00:00+00:00",
+        "end": "2026-09-01T00:00:00+00:00", "built_at": "2026-09-02T00:00:00+00:00"}
+    assert len(read_index(path)) == 2                                      # rows unaffected
+    inside = {"source": "cmr", "collections": [MIN], "bbox": (-117.9, 41.1, -117.2, 41.9),
+              "start": datetime(2026, 6, 1, tzinfo=UTC), "end": datetime(2026, 7, 1, tzinfo=UTC)}
+    assert scope_problems(read_index_scope(path), **inside) == []
+    assert scope_problems(read_index_scope(path), **{**inside, "source": None}) == []
+    wider = scope_problems(read_index_scope(path), **{**inside, "end": datetime(2026, 10, 1, tzinfo=UTC)})
+    assert wider == [("time.end 2026-10-01T00:00:00+00:00 is after the indexed end "
+                      "2026-09-01T00:00:00+00:00")]
+    assert scope_problems(read_index_scope(path), **{**inside, "bbox": (-119, 41, -117, 42)})[0]\
+        .startswith("AOI bbox")
+    assert scope_problems(read_index_scope(path), **{**inside, "start": datetime(2025, 12, 31, tzinfo=UTC)})[0]\
+        .startswith("time.start")
+    assert scope_problems(read_index_scope(path), **{**inside, "collections": [MIN, "EMITL2AMASK"]}) == [
+        f"collections ['EMITL2AMASK'] were not indexed (it holds ['EMITL1BRAD', '{MIN}'])"]
+    assert scope_problems(read_index_scope(path), **{**inside, "source": "local"}) == [
+        "built from a 'cmr' source, the manifest names 'local'"]
+    # an unscoped (local) record contains every request
+    local = index_scope_record(source="local", collections=[MIN])
+    assert local["bbox"] is None and local["start"] is None and local["end"] is None
+    assert scope_problems(local, **{**inside, "source": "local", "bbox": (-180, -90, 180, 90)}) == []
+
+
+def test_merge_index_replaces_revised_rows_and_keeps_the_rest(make_granule, tmp_path):
+    """12 section 5: a `--since` refresh replaces rows by (collection, collection_version,
+    granule_id) and keeps every other row; the replaced rows carry the new last_seen."""
+    src = _source(make_granule, tmp_path)
+    old = build_index(src, collections=[MIN], last_seen=datetime(2026, 9, 1, tzinfo=UTC))
+    assert old.num_rows == 2
+    delta = build_index(src, collections=[MIN], last_seen=datetime(2026, 9, 3, tzinfo=UTC),
+                        start=datetime(2026, 7, 1, tzinfo=UTC))        # the July granule only
+    assert delta.num_rows == 1
+    merged = read_index(write_index(merge_index(read_index_table(write_index(old, tmp_path / "o.parquet")),
+                                                delta), tmp_path / "m.parquet"))
+    assert len(merged) == 2
+    seen = merged.set_index("granule_id")["last_seen"]
+    assert seen["20260610T100000_2600001_001"] == pd.Timestamp("2026-09-01", tz="UTC")
+    assert seen["20260710T100000_2600002_002"] == pd.Timestamp("2026-09-03", tz="UTC")
+    assert merge_index(old, delta.slice(0, 0)).num_rows == 2            # an empty delta is a no-op
 
 
 # ----------------------------------------------------------------------------- GranuleRef
@@ -187,8 +268,8 @@ def test_granule_refs_merge_min_and_minuncert_and_resolve_roles(make_granule, tm
     frame = read_index(write_index(build_index(_source(make_granule, tmp_path), collections=[MIN]),
                                    tmp_path / "index.parquet"))
     refs = granule_refs(frame)
-    assert set(refs) == {"001_20260610T100000_2600001_001", "001_20260710T100000_2600002_002"}
-    ref = refs["001_20260610T100000_2600001_001"]
+    assert set(refs) == {"20260610T100000_2600001_001", "20260710T100000_2600002_002"}
+    ref = refs["20260610T100000_2600001_001"]
     assert isinstance(ref, GranuleRef)
     assert ref.collection == MIN
     assert set(ref.assets) == {f"{MIN}/MIN", f"{MIN}/MINUNCERT"}
@@ -206,36 +287,36 @@ def test_granule_refs_merge_min_and_minuncert_and_resolve_roles(make_granule, tm
     assert role_uri(ref, {"collection": MIN, "asset": "MINUNCERT"}) == ref.assets[f"{MIN}/MINUNCERT"]
     assert role_uri(ref, Role(MIN, "NOPE")) is None
     assert role_uri(ref, Role("EMITL1BOBS")) is None
-    other = refs["001_20260710T100000_2600002_002"]
+    other = refs["20260710T100000_2600002_002"]
     assert role_uri(other, Role(MIN, "MINUNCERT")) is None                      # file absent
 
 
 def test_granule_refs_merge_across_collections(make_granule, tmp_path):
     """Two collections sharing a granule id collapse to one ref keyed by the first collection."""
     root = tmp_path / "granules"
-    gid = "001_20260610T100000_2600001_001"
-    make_granule(f"EMIT_L2B_MIN_{gid}.nc", directory=root)
-    make_granule(f"EMIT_L1B_OBS_{gid}.nc", kind="obs", directory=root)
-    patterns = {MIN: LOCAL_PATTERNS[MIN], "EMITL1BOBS": LOCAL_PATTERNS["EMITL1BOBS"]}
+    gid = "20260610T100000_2600001_001"
+    make_granule(f"EMIT_L2B_MIN_001_{gid}.nc", directory=root)
+    make_granule(f"EMIT_L1B_OBS_001_{gid}.nc", kind="obs", directory=root)
+    patterns = {MIN: LOCAL_PATTERNS[MIN], "EMITL1BRAD": LOCAL_PATTERNS["EMITL1BRAD"]}
     src = LocalSource(root, patterns)
-    table = build_index(src, collections=["EMITL1BOBS", MIN])
+    table = build_index(src, collections=["EMITL1BRAD", MIN])
     assert table.num_rows == 2
     frame = read_index(write_index(table, tmp_path / "index.parquet"))
     refs = granule_refs(frame)
     assert list(refs) == [gid]
     ref = refs[gid]
-    assert ref.collection == "EMITL1BOBS"                       # first alphabetically
-    assert ref.attributes["collections"] == f"EMITL1BOBS,{MIN}"
-    assert set(ref.assets) == {"EMITL1BOBS/OBS", f"{MIN}/MIN"}
+    assert ref.collection == "EMITL1BRAD"                       # first alphabetically
+    assert ref.attributes["collections"] == f"EMITL1BRAD,{MIN}"
+    assert set(ref.assets) == {"EMITL1BRAD/OBS", f"{MIN}/MIN"}
     assert role_uri(ref, {"collection": MIN}) == ref.assets[f"{MIN}/MIN"]
-    assert role_uri(ref, {"collection": "EMITL1BOBS", "asset": "OBS"}) == ref.assets["EMITL1BOBS/OBS"]
+    assert role_uri(ref, {"collection": "EMITL1BRAD", "asset": "OBS"}) == ref.assets["EMITL1BRAD/OBS"]
 
 
 def test_granule_refs_reference_granule_under_both_asset_names(tmp_path, ref_granule):
     """The 52 MB file is symlinked, not copied, under the MIN and MINUNCERT names."""
-    gid = "001_20260825T151308_2623710_050"
-    _link(ref_granule, tmp_path / f"EMIT_L2B_MIN_{gid}.nc")
-    _link(ref_granule, tmp_path / f"EMIT_L2B_MINUNCERT_{gid}.nc")
+    gid = "20260825T151308_2623710_050"
+    _link(ref_granule, tmp_path / f"EMIT_L2B_MIN_001_{gid}.nc")
+    _link(ref_granule, tmp_path / f"EMIT_L2B_MINUNCERT_001_{gid}.nc")
     src = LocalSource(tmp_path, PATTERNS)
     table = build_index(src, collections=[MIN])
     assert table.num_rows == 1
@@ -244,7 +325,7 @@ def test_granule_refs_reference_granule_under_both_asset_names(tmp_path, ref_gra
     assert ref.granule_id == gid and ref.build_version == "010635"
     assert set(ref.assets) == {f"{MIN}/MIN", f"{MIN}/MINUNCERT"}
     assert role_uri(ref, {"collection": MIN, "asset": "MINUNCERT"}).endswith(
-        f"EMIT_L2B_MINUNCERT_{gid}.nc")
+        f"EMIT_L2B_MINUNCERT_001_{gid}.nc")
     assert ref.bbox == pytest.approx(
         (-44.6449907578288, -25.845294599617095, -43.392975868556846, -24.5639991542513))
 
@@ -254,8 +335,8 @@ def test_granule_refs_carry_checksums_keyed_like_assets(make_granule, tmp_path):
     under the same `{collection}/{asset}` names as `assets`, and `role_asset` finds the entry a
     role reads. A local source records none, and the ref says so."""
     root = tmp_path / "granules"
-    gid = "001_20260610T100000_2600001_001"
-    make_granule(f"EMIT_L2B_MIN_{gid}.nc", directory=root)
+    gid = "20260610T100000_2600001_001"
+    make_granule(f"EMIT_L2B_MIN_001_{gid}.nc", directory=root)
     frame = read_index(write_index(build_index(LocalSource(root, PATTERNS), collections=[MIN]),
                                    tmp_path / "index.parquet"))
     assert granule_refs(frame)[gid].checksums == {}

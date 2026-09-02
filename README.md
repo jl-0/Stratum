@@ -2,9 +2,15 @@
 
 A cost-function-driven mosaic engine for imaging spectroscopy, built to run in the cloud.
 
+[![Open in GitHub Codespaces](https://github.com/codespaces/badge.svg)](https://codespaces.new/jl-0/Stratum?quickstart=1)
+Opens a codespace with the environment built and a walkthrough that runs a real mosaic from
+NASA's archive — see [`.devcontainer/README.md`](.devcontainer/README.md).
+
 > **Status: first slice built (2026-09-02).** A local run — staged granules, one grid, the
 > streaming scorer, the built-in reducer, published COGs with STAC and provenance — exists and is
-> tested; the cloud and cluster paths are specified but not built. See
+> tested, and so does a run from NASA's CMR catalogue with granules downloaded on first touch:
+> see [`examples/nevada-cmr/README.md`](examples/nevada-cmr/README.md) for the credentials setup
+> and the measured sizes and times. The cloud and cluster paths are specified but not built. See
 > [`docs/status.html`](docs/status.html). "Stratum" is a working name.
 
 ## What this is

@@ -53,7 +53,7 @@ def test_work_lists_and_report(root: Path) -> None:
     assert "within budget" in report
     doc = result.document
     assert doc["class_tables"]["mineral_1"] and doc["collection_versions"] == {
-        "EMITL1BOBS": ["001"], "EMITL2BMIN": ["001"]}
+        "EMITL1BRAD": ["001"], "EMITL2BMIN": ["001"]}
 
 
 def test_epoch_without_candidates_has_no_items(root: Path) -> None:
@@ -93,10 +93,23 @@ def test_mixed_vintage_is_refused_with_fingerprints(root: Path) -> None:
                                 mixed_vintage_reason="testing the relaxation"))
 
 
-def test_budget_gate(root: Path) -> None:
+def test_budget_gate(root: Path, monkeypatch) -> None:
+    """09 section 4 / 12 section 4: a refused plan stops BEFORE the data-dependent checks -
+    against a catalogue source those download assets - so nothing is opened or staged; the
+    plan is still written (frozen index, report, budget verdict) and `run_all` refuses it."""
+    import stratum.plan.run as run_mod
+
+    inspected: list[int] = []
+    real = run_mod.inspect_granules
+    monkeypatch.setattr(run_mod, "inspect_granules",
+                        lambda *a, **k: inspected.append(1) or real(*a, **k))
     over = plan_run(write_manifest(root / "m.yaml", budget={
         "max_tiles": 1, "max_granules": 2, "max_vcpu_hours": 1, "on_exceed": "fail"}))
     assert over.over_budget and over.refused and "3 granules exceed" in over.budget_problems[0]
+    assert inspected == [] and over.document["inspected"] is False
+    assert over.document["staging"]["assets"] == 0 and "context" not in over.document
+    assert Path(over.document["index"]["frozen"]).is_file()
+    assert "OVER BUDGET" in over.report and "refused before the data-dependent checks" in over.report
     with pytest.raises(BudgetExceeded):
         run_all(over.run_dir, workers=1)
     approval = plan_run(write_manifest(root / "m.yaml", run_label="appr", budget={
@@ -107,6 +120,8 @@ def test_budget_gate(root: Path) -> None:
     warned = plan_run(write_manifest(root / "m.yaml", run_label="warn", budget={
         "max_tiles": 1, "max_granules": 2, "max_vcpu_hours": 1, "on_exceed": "warn"}))
     assert warned.over_budget and not warned.refused
+    assert inspected == [1] and warned.document["inspected"] is True      # warn proceeds
+    assert read_work(warned.run_dir, "regrid")
     r = CliRunner().invoke(main, ["plan", "-m", str(root / "m.yaml")])
     assert r.exit_code == 2 and "OVER BUDGET" in r.output, r.output
 
@@ -128,6 +143,32 @@ def test_plan_time_problems_fail_loudly(root: Path) -> None:
         plan_run(root / "bad2.yaml")
     with pytest.raises(NotImplementedError, match="12 section 4"):
         plan_run(write_manifest(root / "m.yaml", bucket="s3://somewhere/products"))
+
+
+def test_on_missing_fail_is_a_plan_error_not_a_traceback(root: Path) -> None:
+    """02 section 4: a local source has no cloud fraction, so `on_missing: fail` refuses the
+    plan - as a PlanError the CLI renders, naming the granules."""
+    with pytest.raises(PlanError, match="granule_filter refused") as e:
+        plan_run(write_manifest(root / "m.yaml", granule_filter=[
+            {"max_cloud_fraction": 0.5, "on_missing": "fail"}]))
+    assert "3 granule(s) lack the metadata" in str(e.value)
+    r = CliRunner().invoke(main, ["plan", "-m", str(root / "m.yaml")])
+    assert r.exit_code == 1 and "granule_filter refused" in r.output and "Traceback" not in r.output
+
+
+def test_plan_asset_cache_option_sets_the_environment(root: Path, monkeypatch) -> None:
+    """12 section 4: `stratum plan --asset-cache` names the same directory `run` will, so the
+    plan's staged assets are the run's hits."""
+    from stratum.access import ASSET_CACHE_ENV
+
+    monkeypatch.setenv(ASSET_CACHE_ENV, "")           # "" is unset, and monkeypatch restores it
+    r = CliRunner().invoke(main, ["plan", "-m", str(write_manifest(root / "m.yaml")),
+                                  "--asset-cache", str(root / "shared-assets"), "--json"])
+    assert r.exit_code == 0, r.output
+    import json
+
+    assert json.loads(r.output)["run_id"].startswith("e2e-")
+    assert Path(__import__("os").environ[ASSET_CACHE_ENV]) == (root / "shared-assets").resolve()
 
 
 def test_empty_selection_is_an_error(root: Path) -> None:
@@ -190,7 +231,7 @@ def test_local_source_pattern_shorthand_and_long_form(root: Path) -> None:
     long = manifest_doc()
     long["inputs"]["source"]["patterns"] = {
         "EMITL2BMIN": {"version": "007", "assets": {"MIN": MIN_GLOB}},
-        "EMITL1BOBS": {"OBS": OBS_GLOB}}
+        "EMITL1BRAD": {"OBS": OBS_GLOB}}
     (root / "long.yaml").write_text(yaml.safe_dump(long, sort_keys=False))
     records = list(local_source(load_manifest(root / "long.yaml")).search(
         collections=["EMITL2BMIN"]))

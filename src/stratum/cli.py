@@ -38,6 +38,17 @@ def _todo(section: str) -> None:
     raise NotImplementedError(f"see docs/reference/cli.html#{section}")
 
 
+def _set_asset_cache(path: str | None) -> None:
+    """`--asset-cache` becomes `$STRATUM_ASSET_CACHE` for this process and every spawned
+    worker, which is the one place `asset_cache_for` reads it (12 section 4)."""
+    if path is not None:
+        import os
+
+        from stratum.access import ASSET_CACHE_ENV
+
+        os.environ[ASSET_CACHE_ENV] = str(Path(path).expanduser().resolve())
+
+
 def _run_dir(run: str, root: str | None) -> Path:
     """`--run` is a run directory, or a run id under `{root}/runs/`."""
     p = Path(run)
@@ -60,11 +71,16 @@ def main() -> None:
 @click.option("-m", "--manifest", required=True, type=click.Path(exists=True))
 @click.option("-p", "--patch", multiple=True)
 @click.option("--out", type=click.Path())
+@click.option("--asset-cache", type=click.Path(), default=None,
+              help="Node-local directory the plan stages remote assets into (12 section 4); "
+                   "default $STRATUM_ASSET_CACHE, else {root}/assets. Name the same one on run.")
 @click.option("--json", "as_json", is_flag=True, help="Print the plan summary as JSON.")
-def plan(manifest: str, patch: tuple[str, ...], out: str | None, as_json: bool) -> None:
+def plan(manifest: str, patch: tuple[str, ...], out: str | None, asset_cache: str | None,
+         as_json: bool) -> None:
     """Resolve a manifest, freeze the granule set, write the work list, report the fan-out."""
     from stratum.plan import plan_run
 
+    _set_asset_cache(asset_cache)
     result = _guarded(plan_run, manifest, out, patch)
     if as_json:
         click.echo(json.dumps({"run_id": result.run_id, "run_dir": str(result.run_dir),
@@ -85,13 +101,18 @@ def plan(manifest: str, patch: tuple[str, ...], out: str | None, as_json: bool) 
 @click.option("--executor", type=click.Choice(["local", "slurm", "aws"]), default="local")
 @click.option("--workers", type=int, default=None, help="local: pool size; default one per core.")
 @click.option("--out", type=click.Path(), help="Run directory; default {root}/runs/{run_id}.")
+@click.option("--asset-cache", type=click.Path(), default=None,
+              help="Node-local directory remote assets are staged into (12 section 4); "
+                   "default $STRATUM_ASSET_CACHE, else {root}/assets.")
 @click.option("--dry-run", is_flag=True, help="Equivalent to plan.")
 def run(manifest: str | None, patch: tuple[str, ...], from_provenance: str | None,
-        executor: str, workers: int | None, out: str | None, dry_run: bool) -> None:
+        executor: str, workers: int | None, out: str | None, asset_cache: str | None,
+        dry_run: bool) -> None:
     """Plan and execute every stage."""
     from stratum.executors import ExecutionError, executor_available, run_all
     from stratum.plan import BudgetExceeded, plan_run
 
+    _set_asset_cache(asset_cache)
     _guarded(executor_available, executor)
     if from_provenance is not None:
         _guarded(_todo, "run")  # --from-provenance re-runs a frozen index: 10 section 2
@@ -123,10 +144,14 @@ def run(manifest: str | None, patch: tuple[str, ...], from_provenance: str | Non
 @click.option("--stage", required=True,
               type=click.Choice(["regrid", "resolve", "reduce", "publish"]))
 @click.option("--index", "item", required=True, type=int)
-def exec_(plan_dir: str, stage: str, item: int) -> None:
+@click.option("--asset-cache", type=click.Path(), default=None,
+              help="Node-local directory remote assets are staged into (12 section 4); "
+                   "default $STRATUM_ASSET_CACHE, else {root}/assets.")
+def exec_(plan_dir: str, stage: str, item: int, asset_cache: str | None) -> None:
     """The single worker entrypoint: one work item of one stage (08 section 1)."""
     from stratum.executors import exec_item
 
+    _set_asset_cache(asset_cache)
     result = _guarded(exec_item, plan_dir, stage, item)
     click.echo(json.dumps(result, sort_keys=True))
 
@@ -250,18 +275,32 @@ def index() -> None:
 @click.option("-m", "--manifest", required=True, type=click.Path(exists=True))
 @click.option("--collection", multiple=True, help="Restrict to these collections.")
 @click.option("--since", type=click.DateTime(), default=None,
-              help="Only rows updated since this instant (a local source: file mtime).")
+              help="Refresh an existing index: fetch only rows revised since this instant (a "
+                   "local source: file mtime) and merge them in; every other row is kept.")
 def index_build(manifest: str, collection: tuple[str, ...], since: datetime | None) -> None:
-    """Populate inputs.index_location from inputs.source (a local directory in this slice)."""
+    """Populate inputs.index_location from inputs.source: a local directory, or CMR scoped to
+    the manifest's AOI and time range (12 section 5). Metadata only - no pixel is fetched.
+    With --since the revised rows replace their earlier versions in the existing index."""
+    from stratum.index import read_index
     from stratum.manifest import load_manifest
     from stratum.plan import build_index_from_manifest
 
     m = load_manifest(manifest)
+    src = m.inputs.source
+    if src is not None:
+        click.echo(f"source: {src.kind}" + (f" ({src.provider})" if src.provider else ""))
     path = _guarded(build_index_from_manifest, m, collections=collection or None, since=since)
-    from stratum.index import read_index
-
     frame = read_index(path)
     click.echo(f"wrote {path}: {len(frame)} row(s), {frame['granule_id'].nunique()} granule(s)")
+    for name, rows in frame.groupby("collection", sort=True):
+        versions = ", ".join(sorted(set(rows["collection_version"].astype(str))))
+        sums = sum(1 for c in rows["checksums"] if c)
+        click.echo(f"  {name:14} {len(rows):6} row(s)  version {versions or '-':6}  "
+                   f"{sums} with checksums  {rows['datetime'].min():%Y-%m-%dT%H:%M} .. "
+                   f"{rows['datetime'].max():%Y-%m-%dT%H:%M}")
+    if len(frame):
+        click.echo(f"time span: {frame['datetime'].min().isoformat()} .. "
+                   f"{frame['datetime'].max().isoformat()}")
 
 
 @index.command("query")

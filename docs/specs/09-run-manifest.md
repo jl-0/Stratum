@@ -62,9 +62,20 @@ inputs:
   source:                                           # how that index is BUILT - see 12
     kind: cmr
     provider: LPCLOUD
-    prefer: direct                                  # direct (s3://) | https
+    prefer: https                                   # https (built) | direct (s3://, refused)
+    patterns:                                       # required for cmr: which FILES of each record are
+      EMITL2BMIN:                                   # indexed; a file matching no glob is never fetched
+        MIN: "EMIT_L2B_MIN_001_*.nc"
+        MINUNCERT: "EMIT_L2B_MINUNCERT_001_*.nc"
+      EMITL1BRAD:
+        OBS: "EMIT_L1B_OBS_001_*.nc"                # the 1.85 GB RAD file is deliberately unlisted
+      EMITL2AMASK:
+        MASK: "EMIT_L2A_MASK_002_*.nc"
+      EMITL2BFRCOV:
+        FRCOVBARE: "EMIT_L2B_FRCOVBARE_001_*.tif"
   roles:
-    geometry:       {collection: EMITL1BOBS,  var: obs}
+    geometry:       {collection: EMITL1BRAD,  asset: OBS, var: obs}   # CMR has no EMITL1BOBS: OBS is
+                                                                     # the 2nd asset of EMITL1BRAD.001
     mineral:
       collection: EMITL2BMIN
       var: group_1_mineral_id
@@ -75,8 +86,10 @@ inputs:
         attributes: [name, record, library, group, url]
     mineral_depth:  {collection: EMITL2BMIN,  var: group_1_band_depth}
     mineral_uncert: {collection: EMITL2BMIN,  asset: MINUNCERT, var: group_1_band_depth_unc}
-    mask:           {collection: EMITL2AMASK, var: mask}
-    frcov:          {collection: EMITL2BFRCOV, var: soil}   # already orthorectified
+    mask:           {collection: EMITL2AMASK, version: "002", var: mask}   # EMITL2AMASK is published
+                                                                          # at collection version 002
+    frcov:          {collection: EMITL2BFRCOV, asset: FRCOVBARE, var: soil}   # already orthorectified;
+                    # ships per-fraction GeoTIFFs (FRCOVBARE/PV/NPV + UNC twins, FRCOVQC) - reader not built
   # geolocation: geometry                    # the role regrid takes loc from; default: the
   #                                          # first sensor-space role above - see 03 section 3
   band_aliases:                 # 0-based band indices into the L1B OBS `obs` variable:
@@ -175,7 +188,7 @@ misspelt key is an error with a location. Choices the build settled:
 | `time.deliver` | Normalised to the long form at load, so `P1Y` and `{every: P1Y, window: P1Y, align: exact}` produce the same merged document and the same hash; `window` defaults to `every`, and `deliver` itself defaults to the epoch. The rules in §5 are checked by the model |
 | `time.align` | `start` (default) or `calendar`: `calendar` anchors the epoch lattice on the epoch's calendar unit and truncates the first epoch at `start`. Month arithmetic is computed from `start` in one step and clamps to month end (31 Jan + 2 × P1M = 31 Mar); month- and day-based durations are incommensurable. `center` places surplus epochs half before and half after, the odd one after; windows clip to `[start, end)` |
 | `inputs.geolocation` | The role regrid takes `loc` from; defaults to the first sensor-space role in `inputs.roles` order ([03 §3](03-regrid-glt.md)). Must name a role |
-| `inputs.index_location` / `inputs.source` | Both optional, at least one required. `index_location` is a **directory**; the index file inside has a fixed name (`granules.parquet`), so a user never names it. `source` for `kind: local` takes `root` plus either one `pattern` (honoured only when every role reads one collection) or `patterns` ([12 §5](12-data-access.md)) |
+| `inputs.index_location` / `inputs.source` | Both optional, at least one required. `index_location` is a **directory**; the index file inside has a fixed name (`granules.parquet`), so a user never names it. `source` for `kind: local` takes `root` plus either one `pattern` (honoured only when every role reads one collection) or `patterns`; for `kind: cmr` it takes `provider` (default `LPCLOUD`), `prefer` (`https` only; `direct` is refused at plan time) and the same `patterns` — legal in the model, required by the planner, and matched against each record's file names so an unlisted file is never indexed. `root`/`pattern` are `local`-only; `patterns` is refused for `stac`/`parquet`, which are not built ([12 §5–6](12-data-access.md)) |
 | `band_aliases` | `band:` is a **0-based** index, validated against the reader's band count at plan time; `match:` selects the single band whose reported attribute equals the value (string comparison, or within `tolerance`) and fails unless exactly one matches ([11 §5](11-types.md)). EMIT L1B OBS: 0 path length, 1 to-sensor azimuth, **2 to-sensor zenith**, 3 to-sun azimuth, **4 to-sun zenith**, 5 phase, 6 slope, 7 aspect, 8 cosine i, 9 UTC time, 10 earth–sun distance |
 | `granule_filter` | The four built-ins plus `product_version`, `collection_version` and `day_night`. `on_missing` is `reject \| keep \| fail`, `fail` when omitted — so `{max_solar_zenith: 70}` is valid and means `fail`; `on_missing` on `month_in` is a schema error, since nothing can be missing. A `{ref, params}` entry resolves a `GranuleFilter` plugin |
 | `snapshot.layers.*.aggregate` | Parameters are validated per `(kind, method)`: `vote` takes `min_count` / `ignore` / `tie_break`; `percentile` requires `p` in `[0, 100]`; `inverse_variance` requires `unc`; `conditional_on` and `spread` apply to any delivered continuous method and not to `none`. A parameter a method does not take is an error ([13 §4](13-snapshot-schema.md)) |
@@ -215,7 +228,11 @@ alongside the manifest diff.
 **The gate as built** (`stratum/plan/run.py`, `stratum/executors/local.py`): `plan_run` never
 raises on budget. It records `{over, problems, on_exceed}` in `plan.json` and the report,
 `stratum plan` exits `2` when over, and `stratum run` refuses before the first stage unless
-`on_exceed: warn`. `require_approval` refuses too, naming `stratum approve` as the later slice
+`on_exceed: warn`. The gate sits **before the data-dependent checks**: a plan that is over
+budget and not `warn` stops there — frozen index, report and verdict written, `inspected:
+false` in `plan.json`, no worker context, no work lists — so against a catalogue source it
+downloads nothing ([12 §4](12-data-access.md)); `warn` proceeds through inspection and
+staging. `require_approval` refuses too, naming `stratum approve` as the later slice
 ([08 §3](08-execution.md)); `warn` proceeds with the exceedance reported. Only `max_tiles` and
 `max_granules` gate today; vCPU-hours are reported as "not estimated" until per-stage constants
 exist ([08 §2](08-execution.md)). Two selection rules sit in front of the count: the query bbox
@@ -301,10 +318,17 @@ digits after the `sha256:` prefix.
    `{label}-{hash[7:15]}` (§5).
 5. `aoi.geometry` — a polygon file — appears in the example on the site but is not modelled;
    `extra="forbid"` rejects it. Add it when a consumer needs it.
-6. `EMITL1BOBS` is a local collection name only: CMR has no such short name — the OBS file is
-   the second asset of an `EMITL1BRAD.001` record. A `CMRSource` must map
-   `{collection: EMITL1BRAD, asset: OBS}` onto it ([12 §5](12-data-access.md), question 7), and
-   the example manifests will have to say so once that source exists.
+6. ~~`EMITL1BOBS` is a local collection name only: CMR has no such short name — the OBS file is
+   the second asset of an `EMITL1BRAD.001` record.~~ **Resolved:** the manifests, the reader
+   registry and the index all say `EMITL1BRAD`; the geometry role is
+   `{collection: EMITL1BRAD, asset: OBS, var: obs}` and `patterns` lists only the OBS asset, so
+   the 1.85 GB RAD file is never indexed or fetched ([12 §5](12-data-access.md), question 7).
+   Two neighbouring facts fixed at the same time (verified against CMR 2026-09-02):
+   `EMITL2AMASK` is published at collection version `002`, so the mask role pins
+   `version: "002"` — the live case for the pin in [02 §5](02-granule-index.md); and
+   `EMITL2BFRCOV.001` ships per-fraction GeoTIFFs (`FRCOVBARE`, `FRCOVPV`, `FRCOVNPV`, each with
+   an `UNC` twin, plus `FRCOVQC`), so the frcov role names `asset: FRCOVBARE` — the reader for
+   those files is not built.
 7. The zone registry's contents are not in the manifest hash, so moving a zone's box keeps the
    `run_id`. The frozen index still changes, and provenance records it; whether run identity
    should track the registry the way it tracks `@ref:` enumerations is a one-line change in

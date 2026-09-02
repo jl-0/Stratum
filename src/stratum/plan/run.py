@@ -1,15 +1,18 @@
 """The plan stage (00 section 2 stage 1; 09 sections 4-5; 02 sections 3, 6; 12 section 7).
 
-    manifest -> validate -> index (read, or built for a local source) -> query -> filters ->
-    role assets -> plan-time checks against real granules -> vintage check -> freeze ->
-    work lists -> budget gate -> plan.json + report.md
+    manifest -> validate -> index (read and scope-checked, or built) -> query -> filters ->
+    role assets -> freeze -> budget gate -> plan-time checks against real granules ->
+    vintage check -> work lists -> plan.json + report.md
 
 Everything that can fail cheaply fails here, before a worker exists. Nothing here reads a pixel
 band: the data-dependent checks open headers, `variables()` and embedded class tables only.
+The budget gate (09 section 4) sits BEFORE those checks: against a catalogue source they
+download real assets, and an over-budget plan must refuse before the first byte.
 """
 from __future__ import annotations
 
 import dataclasses
+import logging
 from collections import Counter
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
@@ -22,18 +25,31 @@ import pandas as pd
 import yaml
 from rasterio.warp import transform_bounds
 
-from stratum.access import AssetStore, LocalSource, reader_for
+from stratum.access import (
+    AssetStore,
+    CachedAsset,
+    CMRSource,
+    LocalSource,
+    asset_cache_for,
+    reader_for,
+)
 from stratum.cache import CacheRoot
 from stratum.classes import Enumeration, EnumerationError, Remap, identity_enumeration
-from stratum.filters import FilterReport, apply_filters, build_filters
+from stratum.filters import FilterError, FilterReport, apply_filters, build_filters
 from stratum.index import (
     INDEX_FILE,
     build_index,
     freeze_index,
     granule_refs,
+    index_scope_record,
+    merge_index,
     query_index,
     read_index,
+    read_index_scope,
+    read_index_table,
+    role_asset,
     role_uri,
+    scope_problems,
     write_index,
 )
 from stratum.manifest import Manifest, load_manifest, manifest_hash, validate_static
@@ -69,13 +85,18 @@ from stratum.types import (
     Epoch,
     GranuleReader,
     GranuleRef,
+    GranuleSource,
     LayerSpec,
     SnapshotSchema,
     TileRef,
     VarSpec,
 )
 
+log = logging.getLogger(__name__)
+
 Bbox = tuple[float, float, float, float]
+#: Threads the planner stages class-table assets with (12 section 7).
+PLAN_FETCH_WORKERS = 8
 
 
 @dataclass
@@ -124,16 +145,19 @@ def storage_root(m: Manifest) -> Path:
 
 
 # ------------------------------------------------------------------------------------------ index
-def local_patterns(m: Manifest) -> dict[str, Mapping[str, Any]]:
-    """`inputs.source.patterns` as LocalSource takes it. The one-glob form 12 section 5
-    documents, `pattern:`, names no collection or asset, so it is accepted only when every role
-    reads ONE collection and agrees on its asset: it becomes `{collection: {asset: pattern}}`,
-    the asset named as the roles name it (or after the collection when none does)."""
+def source_patterns(m: Manifest) -> dict[str, Mapping[str, Any]]:
+    """`inputs.source.patterns` as a source takes it, `{collection: {asset: glob}}` for every
+    kind (12 section 5). The one-glob form, `pattern:`, names no collection or asset, so it is
+    accepted only when every role reads ONE collection and agrees on its asset: it becomes
+    `{collection: {asset: pattern}}`, the asset named as the roles name it (or after the
+    collection when none does)."""
     src = m.inputs.source
     assert src is not None
     if src.patterns:
         return dict(src.patterns)
-    assert src.pattern is not None
+    if src.pattern is None:
+        raise PlanError(f"inputs.source (kind: {src.kind}) declares no patterns: "
+                        "{collection: {asset: glob}}; nothing would be indexed (12 section 5)")
     collections = sorted({r.collection for r in m.inputs.roles.values()})
     assets = sorted({r.asset for r in m.inputs.roles.values() if r.asset})
     if len(collections) != 1 or len(assets) > 1:
@@ -143,31 +167,140 @@ def local_patterns(m: Manifest) -> dict[str, Mapping[str, Any]]:
     return {collections[0]: {assets[0] if assets else collections[0]: src.pattern}}
 
 
+local_patterns = source_patterns   # the first-slice name
+
+
+def pin_role_versions(m: Manifest, patterns: Mapping[str, Mapping[str, Any]],
+                      ) -> dict[str, Mapping[str, Any]]:
+    """Fold a role's `version:` into the collection's patterns entry (the long form, 12 section
+    5) so a catalogue search is filtered on it and an unpinned one is not. Two roles pinning
+    different versions of one collection, or a pin disagreeing with the long form, is a plan-time
+    error (02 section 5)."""
+    out: dict[str, Mapping[str, Any]] = {}
+    pins: dict[str, set[str]] = {}
+    for role in m.inputs.roles.values():
+        if role.version:
+            pins.setdefault(role.collection, set()).add(str(role.version))
+    for collection, versions in pins.items():
+        if len(versions) > 1:
+            raise PlanError(f"roles pin {collection} to versions {sorted(versions)}; a collection "
+                            "resolves to one version per run (02 section 5)")
+    for collection, spec in patterns.items():
+        pinned = next(iter(pins.get(collection, ())), None)
+        long_form = "assets" in spec and isinstance(spec["assets"], Mapping)
+        if pinned is None:
+            out[collection] = spec
+        elif long_form:
+            declared = spec.get("version")
+            if declared is not None and str(declared) != pinned:
+                raise PlanError(f"inputs.source.patterns.{collection} pins version {declared!r} "
+                                f"but a role pins {pinned!r} (02 section 5)")
+            out[collection] = {**spec, "version": pinned}
+        else:
+            out[collection] = {"version": pinned, "assets": dict(spec)}
+    return out
+
+
+def source_from_manifest(m: Manifest) -> GranuleSource:
+    """`inputs.source` as a `GranuleSource`, dispatching on `kind` (12 section 5-6): `local`
+    walks `root`; `cmr` searches with `patterns` (role `version:` pins folded in) over
+    `provider`, https URLs only - `prefer: direct` is refused naming 12 section 4; `stac` and
+    `parquet` are later slices."""
+    src = m.inputs.source
+    if src is None:
+        raise PlanError("inputs.source is not set; nothing to build the index from "
+                        "(12 section 6)")
+    if src.kind == "local":
+        assert src.root is not None
+        return LocalSource(resolve_local(m, src.root, "inputs.source.root"), source_patterns(m))
+    if src.kind == "cmr":
+        if src.prefer == "direct":
+            raise NotImplementedError("inputs.source.prefer: direct - s3:// access is in-region "
+                                      "only and a later slice; use prefer: https (12 section 4)")
+        return CMRSource(pin_role_versions(m, source_patterns(m)),
+                         provider=src.provider or "LPCLOUD", prefer=src.prefer or "https")
+    raise NotImplementedError(f"inputs.source.kind: {src.kind} is a later slice (12 section 5)")
+
+
 def local_source(m: Manifest) -> LocalSource:
+    """The first-slice entry point: `source_from_manifest` for a `local` source only."""
     src = m.inputs.source
     if src is None or src.kind != "local":
         raise PlanError("inputs.source is not a local source; build the index with "
                         "`stratum index build` from a catalogue source (12 section 5)")
-    assert src.root is not None
-    return LocalSource(resolve_local(m, src.root, "inputs.source.root"), local_patterns(m))
+    source = source_from_manifest(m)
+    assert isinstance(source, LocalSource)
+    return source
+
+
+def index_scope(m: Manifest, source: GranuleSource) -> dict[str, Any]:
+    """What an index build asks the source for. A catalogue source is scoped to the manifest's
+    AOI bbox and time range - the query is cheap and the answer is frozen per run - while a
+    local source indexes its whole directory (12 section 5)."""
+    if isinstance(source, LocalSource):
+        return {}
+    return {"bbox": m.aoi_bbox(), "start": m.time.start, "end": m.time.end}
 
 
 def build_index_from_manifest(m: Manifest, *, collections: Sequence[str] | None = None,
                               since: datetime | None = None, path: Path | None = None) -> Path:
-    """`stratum index build`: populate `inputs.index_location` from `inputs.source`. Only the `local`
-    kind exists in this slice. `plan_run` calls this implicitly when the index file is absent
-    and the source is local, so a laptop run is one command."""
-    source = local_source(m)
-    wanted = list(collections) if collections else list(source.collections)
-    if since is not None:
-        records = list(source.search(collections=wanted, updated_since=since))
-        from stratum.index.build import row_from_record, table_from_rows  # local: rare path
-        seen = datetime.now(UTC)
-        table = table_from_rows([row_from_record(source, r, seen) for r in records])
-    else:
-        table = build_index(source, collections=wanted)
+    """`stratum index build`: populate `inputs.index_location` from `inputs.source` - a local
+    directory, or CMR over the manifest's AOI and time range (`index_scope`) - and record that
+    scope in the file so `plan_run` can refuse a manifest the index does not cover (02 section
+    6). `plan_run` calls this implicitly when the index file is absent, so a run is one command.
+
+    `since` is a refresh, not a rebuild: it reaches the source as `updated_since` (revision
+    date, or file mtime) and the rows that come back REPLACE their earlier versions in the
+    existing index, keyed on (collection, collection_version, granule_id); every other row is
+    kept, and the scope stays the one the index was built with (12 section 5). A refresh needs
+    an existing index whose scope covers the manifest - a wider manifest is a full rebuild."""
+    source = source_from_manifest(m)
+    wanted = list(collections) if collections else list(getattr(source, "collections", ()))
+    scope_kw = index_scope(m, source)
     target = path if path is not None else index_path(m)
-    return write_index(table, target)
+    src = m.inputs.source
+    assert src is not None
+    existing = None
+    if since is not None:
+        if not target.is_file():
+            raise PlanError(f"--since refreshes an existing index, and {target} does not exist; "
+                            "build it first without --since (12 section 5)")
+        scope = read_index_scope(target)
+        problems = scope_problems(scope, source=src.kind, collections=wanted, **scope_kw)
+        if problems:
+            raise PlanError(f"--since cannot widen an index; {target} does not cover this "
+                            "manifest (rebuild it without --since):\n  - "
+                            + "\n  - ".join(problems))
+        existing = read_index_table(target)
+    else:
+        scope = index_scope_record(source=src.kind, provider=src.provider, collections=wanted,
+                                   **scope_kw)
+    table = build_index(source, collections=wanted, updated_since=since, **scope_kw)
+    skipped = getattr(source, "skipped", None)
+    if skipped:
+        log.warning("index build skipped records with no primary file: %s", dict(skipped))
+    if existing is not None:
+        log.info("index refresh: %d revised row(s) merged into %d", table.num_rows,
+                 existing.num_rows)
+        table = merge_index(existing, table)
+    return write_index(table, target, scope)
+
+
+def check_index_scope(m: Manifest, idx_path: Path, collections: Sequence[str]) -> None:
+    """A run reads whatever index `inputs.index_location` holds, so before planning against it
+    the planner checks that the index was built for at least this manifest: same source kind,
+    every collection the roles read, an AOI bbox and `[time.start, time.end)` inside the ones
+    indexed (02 section 6; 12 section 5). Widening `time.end` after the build would otherwise
+    plan silently against the narrower index. Refuses with the reasons and the fix."""
+    src = m.inputs.source
+    problems = scope_problems(read_index_scope(idx_path), source=src.kind if src else None,
+                              collections=collections, bbox=m.aoi_bbox(),
+                              start=m.time.start, end=m.time.end)
+    if problems:
+        raise PlanError(f"index {idx_path} does not cover this manifest:\n  - "
+                        + "\n  - ".join(problems)
+                        + "\nRebuild it with `stratum index build -m <manifest>` (or delete it "
+                        "and let `stratum plan` build it) (02 section 6, 12 section 5)")
 
 
 def index_path(m: Manifest) -> Path:
@@ -235,20 +368,33 @@ class Inspection:
     remaps: dict[str, dict[str, Remap]]
     class_tables: dict[str, dict[str, list[str]]]     # layer -> fingerprint -> granule ids
     sensor_shape: tuple[int, ...]
+    staged: list[dict[str, Any]] = field(default_factory=list)   # remote assets fetched at plan
 
 
 class _Opener:
-    """One open reader context per asset URI, closed together."""
+    """One open reader context per asset URI, closed together. Every open goes through the
+    store with the asset's catalogue checksum, so a remote asset is staged into the node-local
+    asset cache exactly as a worker would stage it (12 section 4) and is a cache hit for the
+    run; `staged` records each remote asset the planner touched, for the report."""
 
     def __init__(self, store: AssetStore, readers: Mapping[str, GranuleReader]) -> None:
         self.store, self.readers = store, readers
         self.contexts: dict[str, Any] = {}
+        self.staged: list[dict[str, Any]] = []
+        self._seen: set[str] = set()
 
-    def open(self, collection: str, uri: str) -> tuple[GranuleReader, Any]:
+    def open(self, collection: str, uri: str, checksum: str | None = None
+             ) -> tuple[GranuleReader, Any]:
         reader = self.readers[collection]
         ctx = self.contexts.get(uri)
         if ctx is None:
-            ctx = self.contexts[uri] = reader.open(self.store.open(uri))
+            handle = self.store.open(uri, checksum=checksum)
+            if isinstance(handle, CachedAsset) and uri not in self._seen:
+                self._seen.add(uri)
+                path = handle.path()
+                self.staged.append({"uri": uri, "path": str(path),
+                                    "bytes": path.stat().st_size if path else 0})
+            ctx = self.contexts[uri] = reader.open(handle)
         return reader, ctx
 
     def close(self) -> None:
@@ -318,9 +464,9 @@ def inspect_granules(m: Manifest, refs: Mapping[str, GranuleRef], readers: Mappi
     specs: dict[str, VarSpec] = {}
     try:
         # -- variables per role, on a sample granule (12 section 7)
-        sample = refs[order[0]]
         for name, role in roles.items():
             binding = RoleBinding.from_spec(role)
+            sample = refs[order[0]]
             uri = role_uri(sample, binding)
             if uri is None:
                 holder = next((g for g in order if role_uri(refs[g], binding) is not None), None)
@@ -329,7 +475,10 @@ def inspect_granules(m: Manifest, refs: Mapping[str, GranuleRef], readers: Mappi
                                     f"for collection {role.collection!r}")
                     continue
                 uri = role_uri(refs[holder], binding)
-            reader, ctx = opener.open(role.collection, uri)
+                sample = refs[holder]
+            key = role_asset(sample, binding)
+            reader, ctx = opener.open(role.collection, uri, sample.checksums.get(key) if key
+                                      else None)
             variables = reader.variables(ctx)
             if role.var not in variables:
                 problems.append(f"inputs.roles.{name}: variable {role.var!r} is not in "
@@ -386,10 +535,16 @@ def inspect_granules(m: Manifest, refs: Mapping[str, GranuleRef], readers: Mappi
             binding = RoleBinding.from_spec(roles[layer.source])
             tables: dict[str, ClassTable] = {}
             by_granule: dict[str, str] = {}
+            # every contributing granule's class-table asset is needed (the vintage check);
+            # against a catalogue source that is one download per granule, so they are staged
+            # together through a thread pool rather than one at a time (12 section 7)
+            store.prefetch(_role_assets(refs, order, binding), workers=PLAN_FETCH_WORKERS)
             for gid in order:
                 uri = role_uri(refs[gid], binding)
                 assert uri is not None  # needed roles were filtered on asset availability
-                reader, ctx = opener.open(binding.collection, uri)
+                key = role_asset(refs[gid], binding)
+                reader, ctx = opener.open(binding.collection, uri,
+                                          refs[gid].checksums.get(key) if key else None)
                 table = reader.class_table(ctx, table_spec.path, table_spec.key,
                                            table_spec.attributes)
                 if table is None:
@@ -415,7 +570,21 @@ def inspect_granules(m: Manifest, refs: Mapping[str, GranuleRef], readers: Mappi
                             extends=tuple(m.snapshot.extends))
     validate_schema(schema)
     return Inspection(schema=schema, aliases=aliases, band_counts=band_counts, remaps=remaps,
-                      class_tables=class_tables, sensor_shape=sensor_shape)
+                      class_tables=class_tables, sensor_shape=sensor_shape,
+                      staged=list(opener.staged))
+
+
+def _role_assets(refs: Mapping[str, GranuleRef], order: Sequence[str],
+                 binding: RoleBinding) -> list[tuple[str, str | None]]:
+    """`(uri, checksum)` of one role's asset on each granule, for `AssetStore.prefetch`."""
+    out: list[tuple[str, str | None]] = []
+    for gid in order:
+        uri = role_uri(refs[gid], binding)
+        if uri is None:
+            continue
+        key = role_asset(refs[gid], binding)
+        out.append((uri, refs[gid].checksums.get(key) if key else None))
+    return out
 
 
 def _resolve_tables(m: Manifest, layer: str, enum: Enumeration, tables: Mapping[str, ClassTable],
@@ -508,27 +677,33 @@ def plan_run(manifest_path: Path | str, out_dir: Path | str | None = None,
             raise PlanError(f"inputs.roles.{name}: {e}") from None
     geolocation_role = m.geolocation_role(lambda c: getattr(readers[c], "space", "sensor"))
 
-    # -- the index (02 sections 3, 6)
+    # -- the index (02 sections 3, 6): built when absent, and never planned against unless
+    #    its recorded scope covers this manifest (a wider AOI or time window is a rebuild)
     idx_path = index_path(m)
+    collections = sorted({r.collection for r in m.inputs.roles.values()})
     built = False
     if not idx_path.is_file():
-        if m.inputs.source is not None and m.inputs.source.kind == "local":
-            build_index_from_manifest(m, path=idx_path)
+        if m.inputs.source is not None:
+            build_index_from_manifest(m, path=idx_path)      # local directory, or a scoped CMR query
             built = True
         else:
-            raise PlanError(f"index {idx_path} does not exist; build it with `stratum index build`"
-                            " (12 section 5)")
+            raise PlanError(f"index {idx_path} does not exist and inputs.source is not set; build "
+                            "it with `stratum index build` (12 section 5)")
+    check_index_scope(m, idx_path, collections)
     frame = read_index(idx_path)
-    collections = sorted({r.collection for r in m.inputs.roles.values()})
     aoi_boxes = m.aoi_boxes(grid)
     selected = query_index(frame, bbox=m.aoi_bbox(), start=m.time.start, end=m.time.end,
                            collections=collections)
     selected = pin_versions(m, selected)
     n_queried = int(selected["granule_id"].nunique())
 
-    # -- filters (04 section 2, 02 section 4)
+    # -- filters (04 section 2, 02 section 4): per granule, and `on_missing: fail` is a plan
+    #    refusal, not a traceback
     filters = build_filters(m)
-    selected, reports = apply_filters(selected, filters)
+    try:
+        selected, reports = apply_filters(selected, filters)
+    except FilterError as e:
+        raise PlanError(f"granule_filter refused the selection: {e}") from None
     refs = granule_refs(selected)
 
     # -- the AOI is its tiles, not the box around them (09 section 4, 02 section 6): a granule
@@ -564,8 +739,62 @@ def plan_run(manifest_path: Path | str, out_dir: Path | str | None = None,
         raise PlanError(f"{len(outside)} granule(s) fall outside every epoch, e.g. {outside[:3]} "
                         "(11 section 4)")
 
-    # -- the data-dependent checks and per-granule class resolution
-    store = AssetStore()
+    # -- freeze (02 section 6)
+    frozen_path, frozen_hash = freeze_index(selected, run_dir)
+
+    # -- the budget gate (09 section 4) comes BEFORE the data-dependent checks: against a
+    #    catalogue source those download real assets, and an over-budget plan that is going to
+    #    be refused must not pay for a single byte first. `on_exceed: warn` proceeds.
+    budget_problems: list[str] = []
+    if len(tiles) > m.budget.max_tiles:
+        budget_problems.append(f"{len(tiles)} tiles exceed budget.max_tiles {m.budget.max_tiles}")
+    if len(refs) > m.budget.max_granules:
+        budget_problems.append(f"{len(refs)} granules exceed budget.max_granules "
+                               f"{m.budget.max_granules}")
+    build_versions = dict(sorted(Counter(r.build_version for r in refs.values()).items()))
+    collection_versions = {c: sorted(set(selected.loc[selected["collection"] == c,
+                                                      "collection_version"].astype(str)))
+                           for c in collections}
+    asset_cache = asset_cache_for(root)
+    doc: dict[str, Any] = {
+        "plan_schema_version": PLAN_SCHEMA_VERSION,
+        "run_id": run_id, "run_label": m.run_label, "manifest_hash": mhash,
+        "manifest_path": str(manifest_path), "root": str(root), "run_dir": str(run_dir),
+        "products_dir": str(root / "products" / run_id),
+        "planned_at": iso(datetime.now(UTC)),
+        "tiles": [[t.tx, t.ty] for t in tiles],
+        "epochs": [epoch_to_doc(e) for e in epochs],
+        "periods": [period_to_doc(p) for p in periods],
+        "index": {"source": str(idx_path), "built": built, "frozen": str(frozen_path),
+                  "hash": frozen_hash, "granule_count": len(refs),
+                  "rows": len(selected)},
+        "filters": [dataclasses.asdict(r) for r in reports],
+        "build_versions": build_versions,
+        "collection_versions": collection_versions,
+        "budget": {"max_tiles": m.budget.max_tiles, "max_granules": m.budget.max_granules,
+                   "max_vcpu_hours": m.budget.max_vcpu_hours, "on_exceed": m.budget.on_exceed,
+                   "over": bool(budget_problems), "problems": budget_problems},
+    }
+    if budget_problems and m.budget.on_exceed != "warn":
+        counts = {"tiles": len(tiles), "epochs": len(epochs), "periods": len(periods),
+                  "blocks": 0, "granules": len(refs), "granules_queried": n_queried,
+                  **{f"work_{s}": 0 for s in STAGES}}
+        doc.update({"inspected": False, "counts": counts, "class_tables": {}, "band_counts": {},
+                    "staging": {"asset_cache": str(asset_cache) if asset_cache is not None
+                                else None, "assets": 0, "bytes": 0, "uris": []}})
+        write_plan(run_dir, doc)
+        report = render_report(doc)
+        (run_dir / REPORT_NAME).write_text(report)
+        return PlanResult(run_id=run_id, run_dir=run_dir, root=root, document=doc,
+                          report=report, over_budget=True, budget_problems=budget_problems,
+                          counts=counts)
+
+    # -- the data-dependent checks and per-granule class resolution. The store stages remote
+    #    assets into the same node-local cache the workers use (12 section 4): a catalogue
+    #    source pays for one geometry asset (the sample-asset check, 12 section 7) and every
+    #    contributing granule's class-table asset (the vintage check, 02 section 3) here,
+    #    and those are cache hits for the run
+    store = AssetStore(asset_cache)
     inspection = inspect_granules(m, refs, readers, needed, geolocation_role, store)
     max_distance = resolve_max_distance(grid, m.grid.max_distance)
 
@@ -585,54 +814,29 @@ def plan_run(manifest_path: Path | str, out_dir: Path | str | None = None,
         regrid_method=m.grid.regrid_method, regrid_algo_version=REGRID_ALGO_VERSION,
         reader_overrides=overrides)
 
-    # -- freeze (02 section 6)
-    frozen_path, frozen_hash = freeze_index(selected, run_dir)
-
     # -- work lists (plan section 4)
     work = build_work_lists(ctx, refs, tiles, epochs, periods, aoi_boxes, geolocation_role)
     for stage in STAGES:
         write_work(run_dir, stage, work[stage])
     blocks = {(tuple(it["tile"]), tuple(it["block"])) for it in work["resolve"]}
 
-    # -- budget (09 section 4)
-    budget_problems: list[str] = []
-    if len(tiles) > m.budget.max_tiles:
-        budget_problems.append(f"{len(tiles)} tiles exceed budget.max_tiles {m.budget.max_tiles}")
-    if len(refs) > m.budget.max_granules:
-        budget_problems.append(f"{len(refs)} granules exceed budget.max_granules "
-                               f"{m.budget.max_granules}")
-
     counts = {"tiles": len(tiles), "epochs": len(epochs), "periods": len(periods),
               "blocks": len(blocks), "granules": len(refs), "granules_queried": n_queried,
               **{f"work_{s}": len(work[s]) for s in STAGES}}
-    build_versions = dict(sorted(Counter(r.build_version for r in refs.values()).items()))
-    collection_versions = {c: sorted(set(selected.loc[selected["collection"] == c,
-                                                      "collection_version"].astype(str)))
-                           for c in collections}
-    doc: dict[str, Any] = {
-        "plan_schema_version": PLAN_SCHEMA_VERSION,
-        "run_id": run_id, "run_label": m.run_label, "manifest_hash": mhash,
-        "manifest_path": str(manifest_path), "root": str(root), "run_dir": str(run_dir),
-        "products_dir": str(root / "products" / run_id),
-        "planned_at": iso(datetime.now(UTC)),
+    doc.update({
+        "inspected": True,
         "context": context_to_doc(ctx),
         "outputs": outputs,
-        "tiles": [[t.tx, t.ty] for t in tiles],
-        "epochs": [epoch_to_doc(e) for e in epochs],
-        "periods": [period_to_doc(p) for p in periods],
         "band_counts": inspection.band_counts,
-        "index": {"source": str(idx_path), "built": built, "frozen": str(frozen_path),
-                  "hash": frozen_hash, "granule_count": len(refs),
-                  "rows": len(selected)},
-        "filters": [dataclasses.asdict(r) for r in reports],
-        "build_versions": build_versions,
-        "collection_versions": collection_versions,
+        # remote assets the planner staged (12 section 4 / 7); the cache directory is where
+        # bytes land and enters no key
+        "staging": {"asset_cache": str(asset_cache) if asset_cache is not None else None,
+                    "assets": len(inspection.staged),
+                    "bytes": int(sum(a["bytes"] for a in inspection.staged)),
+                    "uris": [a["uri"] for a in inspection.staged]},
         "class_tables": inspection.class_tables,
         "counts": counts,
-        "budget": {"max_tiles": m.budget.max_tiles, "max_granules": m.budget.max_granules,
-                   "max_vcpu_hours": m.budget.max_vcpu_hours, "on_exceed": m.budget.on_exceed,
-                   "over": bool(budget_problems), "problems": budget_problems},
-    }
+    })
     write_plan(run_dir, doc)
     report = render_report(doc)
     (run_dir / REPORT_NAME).write_text(report)
@@ -752,16 +956,29 @@ def render_report(doc: Mapping[str, Any]) -> str:
     lines += ["", "### Collection versions", ""]
     lines += [f"- {col}: {', '.join(v) or '-'}" for col, v in doc["collection_versions"].items()]
     lines += ["", "### Class-table fingerprints (the vintage check, 02 section 3)", ""]
-    if not doc["class_tables"]:
+    if doc.get("inspected") is False:
+        lines.append("- not checked: the plan is over budget and was refused before the "
+                     "data-dependent checks, so nothing was opened or downloaded (09 section 4)")
+    elif not doc["class_tables"]:
         lines.append("- no categorical layers")
     for layer, tables in doc["class_tables"].items():
         for fp, gids in tables.items():
             lines.append(f"- {layer}: `{fp}` on {len(gids)} granule(s)")
+    staging = doc.get("staging") or {}
+    if staging.get("assets"):
+        lines += ["", "### Assets staged at plan time (12 section 7)", "",
+                  (f"- {staging['assets']} remote asset(s), {staging['bytes'] / 1e6:.0f} MB, "
+                   f"into `{staging['asset_cache']}` - one geometry asset for the sample-asset "
+                   "check plus every contributing granule's class-table asset for the vintage "
+                   "check; all are cache hits for the run")]
     lines += ["", "## Fan-out", "",
               f"- tiles: {c['tiles']}", f"- epochs: {c['epochs']}", f"- periods: {c['periods']}",
-              f"- blocks with observations: {c['blocks']}", "",
-              "| stage | work items |", "|---|---|"]
-    lines += [f"| {s} | {c[f'work_{s}']} |" for s in STAGES]
+              f"- blocks with observations: {c['blocks']}", ""]
+    if doc.get("inspected") is False:
+        lines.append("- work lists not written: the plan was refused at the budget gate")
+    else:
+        lines += ["| stage | work items |", "|---|---|"]
+        lines += [f"| {s} | {c[f'work_{s}']} |" for s in STAGES]
     status = ("OVER BUDGET" if b["over"] else "within budget")
     lines += ["", "## Budget", "",
               f"- tiles: {c['tiles']} / {b['max_tiles']}",
@@ -773,9 +990,10 @@ def render_report(doc: Mapping[str, Any]) -> str:
 
 
 __all__ = [
-    "Inspection", "PlanResult", "block_lonlat_bounds", "build_index_from_manifest",
-    "build_work_lists", "index_path", "inspect_granules", "instantiate", "is_uri",
-    "local_patterns", "local_source", "outputs_document", "pin_versions", "plan_run",
-    "render_report", "resolve_local", "roles_needed", "storage_root", "strip_none",
-    "tile_lonlat_bounds",
+    "PLAN_FETCH_WORKERS", "Inspection", "PlanResult", "block_lonlat_bounds",
+    "build_index_from_manifest", "build_work_lists", "check_index_scope", "index_path",
+    "index_scope", "inspect_granules", "instantiate", "is_uri",
+    "local_patterns", "local_source", "outputs_document", "pin_role_versions", "pin_versions",
+    "plan_run", "render_report", "resolve_local", "roles_needed", "source_from_manifest",
+    "source_patterns", "storage_root", "strip_none", "tile_lonlat_bounds",
 ]

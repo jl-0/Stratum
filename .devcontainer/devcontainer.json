@@ -1,0 +1,79 @@
+{
+  // The ROOT configuration: what Codespaces uses for the badge link, the green
+  // "Create codespace" button and ?quickstart=1. A named config under
+  // .devcontainer/<name>/ alone would silently fall back to the universal image.
+  "name": "Stratum demo",
+  "image": "mcr.microsoft.com/devcontainers/base:ubuntu-24.04",
+
+  // No docker-in-docker: Stratum is a Python package, and pixi builds the whole
+  // environment (GDAL, netCDF4, rasterio) from conda-forge inside this container.
+  //
+  // Sizing: regrid holds a 3600x3600 tile's cell centres plus a KD-tree per
+  // worker (~1 GB each) and the local executor starts one worker per core; the
+  // demo downloads ~5.6 GB of granules and caches ~100 MB of artifacts. 4 cores
+  // makes regrid about 2.5 minutes; 2 cores roughly doubles it.
+  "hostRequirements": {
+    "cpus": 4,
+    "memory": "16gb",
+    "storage": "32gb"
+  },
+
+  // Installs pixi, checks out the SpectralUtil submodule and solves the
+  // environment. Runs during a prebuild too, so a prebuilt codespace opens with
+  // the environment ready. Nothing here needs a credential, which is the
+  // requirement for anything that runs in a prebuild.
+  "onCreateCommand": ".devcontainer/scripts/setup-env.sh && .devcontainer/scripts/install-welcome.sh",
+
+  // pixi lands in ~/.pixi/bin; the installer also appends it to ~/.bashrc, this
+  // covers non-interactive shells and the folder-open task.
+  "remoteEnv": {
+    "PATH": "${containerEnv:HOME}/.pixi/bin:${containerEnv:PATH}"
+  },
+
+  // Earthdata Login. The walkthrough accepts either a ~/.netrc entry (written for
+  // you by the login step) or these two variables, which you can set once as
+  // Codespaces user secrets so every codespace has them:
+  //   https://github.com/settings/codespaces  ->  Secrets  ->  EARTHDATA_USERNAME,
+  //   EARTHDATA_PASSWORD (grant them to this repository).
+  // Nothing reads them except earthaccess, and Stratum never writes them anywhere.
+  "secrets": {
+    "EARTHDATA_USERNAME": { "description": "Earthdata Login username (optional; the walkthrough can log in interactively instead)" },
+    "EARTHDATA_PASSWORD": { "description": "Earthdata Login password (optional)" }
+  },
+
+  "forwardPorts": [8080],
+  "portsAttributes": {
+    "8080": {
+      "label": "Stratum results",
+      "onAutoForward": "notify",
+      "protocol": "http"
+    }
+  },
+
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "ms-python.python",
+        // Renders the mermaid diagram in START-HERE.md in the web client.
+        "bierner.markdown-mermaid"
+      ],
+      "settings": {
+        "workbench.startupEditor": "none",
+        "workbench.secondarySideBar.defaultVisibility": "hidden",
+        // .vscode/tasks.json opens the walkthrough terminal on folder open;
+        // without this VS Code asks first, which for a demo means it never runs.
+        "task.allowAutomaticTasks": "on",
+        "explorer.openEditors.visible": 0,
+        // START-HERE.md opens rendered; every other .md still opens as source.
+        "workbench.editorAssociations": {
+          "**/START-HERE.md": "vscode.markdown.preview.editor"
+        },
+        "python.defaultInterpreterPath": "${workspaceFolder}/.pixi/envs/default/bin/python"
+      }
+    },
+    "codespaces": {
+      // Governs the web client only; the desktop app ignores it.
+      "openFiles": [".devcontainer/START-HERE.md"]
+    }
+  }
+}

@@ -37,20 +37,20 @@ GeoParquet, one row per granule per collection.
 | Column | Type | Notes |
 |---|---|---|
 | `granule_id` | string | Natural key, e.g. `001_20230203T184949_2303413_009` |
-| `collection` | string | `EMITL2BMIN`, `EMITL2ARFL`, `EMITL2AMASK`, `EMITL1BOBS` |
+| `collection` | string | `EMITL2BMIN`, `EMITL2ARFL`, `EMITL2AMASK`, `EMITL1BRAD` |
 | `datetime` | timestamp UTC | Acquisition start |
 | `end_datetime` | timestamp UTC | |
 | `geometry` | polygon | Footprint, EPSG:4326 |
 | `bbox` | float[4] | Denormalized for cheap prefilter |
-| `cloud_fraction` | float | Nullable — **nullness is meaningful**, see §4 |
+| `cloud_fraction` | float | A **fraction in [0, 1]** — from CMR, `CloudCover / 100`, the integer percent kept in `attributes.cloud_cover`; `null` for a local source. Nullable — **nullness is meaningful**, see §4 |
 | `build_version` | string | Granule software build, e.g. `010635`; filterable, not hard-coded |
 | `product_version` | string | Granule product stamp, e.g. `V001` |
 | `collection_version` | string | The **collection's** version, e.g. `001`. Same for every row in a collection |
 | `day_night` | string | Nullable; `Day` / `Night` |
 | `last_seen` | timestamp UTC | When the index build last observed this row — see §3 |
-| `assets` | map<string,string> | asset name → URI, e.g. `MIN`, `MINUNCERT`. A role names one; see §5 |
-| `checksums` | map<string,string> | asset name → catalogue checksum. Asset identity in cache keys ([12 §4](12-data-access.md)) |
-| `attributes` | map<string,string> | Everything else the source returned, verbatim — `SOLAR_ZENITH`, `ORBIT`, `SCENE`, … Filterable by name; promoted to a column only with a reason |
+| `assets` | map<string,string> | asset name → URI, e.g. `MIN`, `MINUNCERT`. A role names one; see §5. From CMR the HTTPS `GET DATA` URL; from a directory a `file://` URI |
+| `checksums` | map<string,string> | asset name → catalogue checksum, `sha512:<hex>` from CMR; empty for a local source. Asset identity in cache keys ([12 §4](12-data-access.md)) |
+| `attributes` | map<string,string> | Everything else the source returned, verbatim — `SOLAR_ZENITH`, `ORBIT`, `SCENE`, … Filterable by name; promoted to a column only with a reason. From CMR also `granule_ur`, `cloud_cover` and the direct-access link per asset as `s3:<asset>` |
 
 `build_version` is granule-level — CMR exposes it as `SOFTWARE_BUILD_VERSION` — and is filterable.
 `product_version` is the file's own stamp and, from CMR, tracks the collection version.
@@ -148,7 +148,7 @@ Instead the manifest declares roles, and the index resolves them:
 ```yaml
 inputs:
   roles:
-    geometry:       {collection: EMITL1BOBS,  var: obs}
+    geometry:       {collection: EMITL1BRAD, asset: OBS, var: obs}
     mineral:        {collection: EMITL2BMIN,  var: group_1_mineral_id}
     mineral_uncert: {collection: EMITL2BMIN,  asset: MINUNCERT, var: group_1_band_depth_unc}
     mask:           {collection: EMITL2AMASK, var: mask}
@@ -177,8 +177,15 @@ This is not optional. A CMR query today and tomorrow return different answers; w
 "reproducible" run reproduces nothing. Frozen, a run names exactly the granules it consumed,
 permanently, and a later re-run can be *verified* rather than merely repeated.
 
-The index build itself is a separate periodic job, so a run never depends on CMR being reachable.
-How that job talks to CMR — and how UMM-G maps onto the schema in §2 — is
+The index build itself is a separate step, so a run never depends on CMR being reachable:
+`stratum index build`, or `stratum plan` when the index file is absent. As built a build from a
+catalogue source is **scoped** to the manifest's AOI bbox and `[time.start, time.end)` — the
+query is cheap and the answer is frozen per run — while a local source indexes its whole
+directory. The scope is written into the file, and the plan stage **refuses an index whose
+recorded scope does not cover the manifest** (a wider area or window, a collection not built,
+another source kind): an existing index is reused only when it can answer the question being
+asked, never silently with fewer granules. A `--since` refresh replaces revised rows in place
+and keeps the rest. How that step talks to CMR — and how UMM-G maps onto the schema in §2 — is
 [12 §5](12-data-access.md).
 
 ---

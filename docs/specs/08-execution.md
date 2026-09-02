@@ -203,6 +203,18 @@ AMD's 24-hour Slurm jobs would simply fail partway through if ported naively. Re
 - Batch jobs must assume refresh is needed; Lambda's 15-minute ceiling makes it a non-issue there,
   which is a quiet argument for routing to Lambda where possible.
 
+**As built (2026-09-02, HTTPS only).** `stratum/access/auth.py` is the one place a credential is
+read: `earthdata_login()` tries `~/.netrc` (or `$NETRC`) for `urs.earthdata.nasa.gov`, then
+`EARTHDATA_USERNAME` / `EARTHDATA_PASSWORD`, building its own `earthaccess.Auth` rather than
+touching module state; the result is cached per process, never obtained at import, and never
+on a local-only run or an index build (a CMR search is anonymous). A spawned worker logs in
+afresh on its first remote asset. The `AssetStore` re-logins **once** on a `401`/`403` and
+retries the request; a second refusal is an `AssetFetchError` with the URL and both statuses.
+Nothing logs, stores or raises a token or password — `EarthdataLoginError` names strategies and
+exception types only, and no credential reaches `plan.json`, the report or provenance. Secrets
+Manager, the S3 credential exchange and the refresh wrapper are not built; `s3://` is refused
+([12 §4](12-data-access.md)).
+
 ---
 
 ## 6. Multiple runs, one deployment

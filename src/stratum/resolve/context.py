@@ -71,9 +71,12 @@ class NullAux(AuxAccessor):
 
 class Store(Protocol):
     """The part of `AssetStore` resolve uses (12 section 4). Duck-typed so a test can hand in
-    an in-memory store."""
+    an in-memory store. `checksum` is the index's catalogue digest for the asset
+    (`GranuleRef.checksums`), which a remote store verifies on first touch and keys its
+    node-local cache on; a local store accepts and ignores it."""
 
-    def open(self, uri: str, *, etag: str | None = None) -> AssetHandle: ...
+    def open(self, uri: str, *, etag: str | None = None,
+             checksum: str | None = None) -> AssetHandle: ...
 
 
 @dataclass(frozen=True)

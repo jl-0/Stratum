@@ -125,11 +125,14 @@ class FakeStore:
     def __init__(self, uris: Sequence[str]) -> None:
         self.uris = set(uris)
         self.opened: list[str] = []
+        self.checksums: dict[str, str | None] = {}   # what resolve passed per URI (12 section 4)
 
-    def open(self, uri: str, *, etag: str | None = None) -> FakeAsset:
+    def open(self, uri: str, *, etag: str | None = None,
+             checksum: str | None = None) -> FakeAsset:
         if uri not in self.uris:
             raise FileNotFoundError(uri)
         self.opened.append(uri)
+        self.checksums[uri] = checksum
         return FakeAsset(uri=uri, etag=etag)
 
 

@@ -7,13 +7,15 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import netCDF4 as nc
 import numpy as np
 import pytest
 from affine import Affine
 
 from stratum.access import AssetStore, LocalAsset, clear_cache, reader_for, to_uri
+from stratum.access.store import AssetCacheUnconfigured
 from stratum.types import ClassTable, EmbeddedGLT, LocArray, SensorWindow
-from stratum_emit.readers import L1BObs, L2AMask, L2BFrcov, L2BMin
+from stratum_emit.readers import L1BRad, L2AMask, L2BFrcov, L2BMin
 
 
 def _open(path: Path):
@@ -130,8 +132,9 @@ def test_minuncert_is_read_by_the_same_reader(make_granule):
 
 
 # --------------------------------------------------------------------------- other collections
-def test_l1b_obs_reports_band_names_and_reads_3d(make_granule):
-    reader = L1BObs()
+def test_l1b_rad_reads_the_obs_asset_with_band_names(make_granule):
+    """EMITL1BRAD's OBS asset (12 section 3): there is no EMITL1BOBS collection."""
+    reader = L1BRad()
     with reader.open(AssetStore().open(str(make_granule("EMIT_L1B_OBS_001_a.nc", kind="obs")))) as ctx:
         specs = reader.variables(ctx)
         cube = reader.read(ctx, "obs", SensorWindow(0, 0, 2, 3))
@@ -140,6 +143,30 @@ def test_l1b_obs_reports_band_names_and_reads_3d(make_granule):
     assert cube.shape == (2, 3, 3)
     assert cube.mask[0].all() and not cube.mask[1].any()
     assert cube[1, 2, 1] == pytest.approx(1 * 5 + 2 + 100)
+
+
+def test_l1b_rad_reports_a_rad_assets_variables_without_crashing(tmp_path: Path):
+    """The same reader may be handed the record's RAD file (`radiance` over `wavelengths`,
+    no `observation_bands`): it must report that file's variables, not fail on the header."""
+    path = tmp_path / "EMIT_L1B_RAD_001_a.nc"
+    with nc.Dataset(path, "w") as ds:
+        ds.createDimension("downtrack", 4)
+        ds.createDimension("crosstrack", 3)
+        ds.createDimension("bands", 2)
+        rad = ds.createVariable("radiance", "f4", ("downtrack", "crosstrack", "bands"),
+                                fill_value=-9999.0)
+        rad[:] = 1.0
+        params = ds.createGroup("sensor_band_parameters")
+        wl = params.createVariable("wavelengths", "f4", ("bands",))
+        wl[:] = [400.0, 410.0]
+    reader = L1BRad()
+    with reader.open(AssetStore().open(str(path))) as ctx:
+        specs = reader.variables(ctx)
+        cube = reader.read(ctx, "radiance", SensorWindow(0, 0, 2, 2))
+        assert reader.geolocation(ctx) is None and reader.glt(ctx) is None
+    assert set(specs) == {"radiance"}
+    assert specs["radiance"].shape == (4, 3, 2) and specs["radiance"].band_attrs == {}
+    assert cube.shape == (2, 2, 2) and not cube.mask.any()
 
 
 def test_l2a_mask_reports_mask_band_names(make_granule):
@@ -168,7 +195,7 @@ def test_reader_registry_by_collection_and_override():
     clear_cache()
     r = reader_for("EMITL2BMIN")
     assert isinstance(r, L2BMin) and reader_for("EMITL2BMIN") is r     # cached per process
-    assert isinstance(reader_for("EMITL1BOBS"), L1BObs)
+    assert isinstance(reader_for("EMITL1BRAD"), L1BRad)
     assert isinstance(reader_for("EMITL2AMASK"), L2AMask)
     assert isinstance(reader_for("EMITL2BFRCOV"), L2BFrcov)
     over = reader_for("TETRAPY_L2B", {"TETRAPY_L2B": "stratum_emit.readers:L2BMin"})
@@ -193,11 +220,16 @@ def test_asset_store_local_forms(tmp_path):
     assert to_uri(f) == f.absolute().as_uri()
     with pytest.raises(FileNotFoundError):
         store.open(str(tmp_path / "missing.nc"))
-    for uri in ("s3://bucket/key.nc", "https://data.lpdaac.earthdatacloud.nasa.gov/x.nc"):
-        with pytest.raises(NotImplementedError, match="12 section 4"):
-            store.open(uri)
-        with pytest.raises(NotImplementedError, match="12 section 4"):
-            store.credentials_for(uri)
+    # s3:// is in-region only and comes later; https:// stages into the node-local asset cache,
+    # so without one configured it refuses before any network call (12 section 4).
+    with pytest.raises(NotImplementedError, match="12 section 4"):
+        store.open("s3://bucket/key.nc")
+    with pytest.raises(NotImplementedError, match="12 section 4"):
+        store.credentials_for("s3://bucket/key.nc")
+    https = "https://data.lpdaac.earthdatacloud.nasa.gov/x.nc"
+    with pytest.raises(AssetCacheUnconfigured, match="12 section 4"):
+        store.open(https)
+    assert store.credentials_for(https).kind in ("netrc", "bearer")
 
 
 # ------------------------------------------------------------------------- reference granule

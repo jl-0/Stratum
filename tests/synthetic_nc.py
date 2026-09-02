@@ -220,9 +220,9 @@ def manifest_doc(*, granules: str = "./granules", bucket: str = "./out", run_lab
             "index_location": "./index",
             "source": {"kind": "local", "root": granules,
                        "patterns": {"EMITL2BMIN": {"MIN": MIN_GLOB},
-                                    "EMITL1BOBS": {"OBS": OBS_GLOB}}},
+                                    "EMITL1BRAD": {"OBS": OBS_GLOB}}},
             "roles": {
-                "geometry": {"collection": "EMITL1BOBS", "var": "obs"},
+                "geometry": {"collection": "EMITL1BRAD", "asset": "OBS", "var": "obs"},
                 "mineral": {"collection": "EMITL2BMIN", "var": "group_1_mineral_id",
                             "class_table": {"source": "embedded", "path": "/mineral_metadata",
                                             "key": "index",

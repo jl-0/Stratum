@@ -250,7 +250,7 @@ AWS.</p>
 <table>
 <thead><tr><th>Executor</th><th>Where the credential lives</th></tr></thead>
 <tbody>
-<tr><td><code>local</code></td><td>Your <code>~/.netrc</code> or environment, as <code>earthaccess</code> expects</td></tr>
+<tr><td><code>local</code></td><td>Your <code>~/.netrc</code> (tried first) or <code>EARTHDATA_USERNAME</code>/<code>EARTHDATA_PASSWORD</code>, as <code>earthaccess</code> expects. Read on the first download, never at import; one re-login on <code>401</code>/<code>403</code>; never logged or written to a run directory. Built.</td></tr>
 <tr><td><code>slurm</code></td><td>Same, on the shared filesystem. Long array tasks must refresh.</td></tr>
 <tr><td><code>aws</code></td><td>Secrets Manager, never in the image</td></tr>
 </tbody>

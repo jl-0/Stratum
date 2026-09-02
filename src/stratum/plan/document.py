@@ -27,7 +27,7 @@ from typing import Any
 import numpy as np
 import pyarrow as pa
 
-from stratum.access import AssetStore
+from stratum.access import AssetStore, asset_cache_for
 from stratum.cache import CacheRoot
 from stratum.classes import Remap
 from stratum.plugins import resolve
@@ -227,11 +227,14 @@ def context_to_doc(ctx: PlanContext) -> dict[str, Any]:
 
 
 def context_from_doc(doc: Mapping[str, Any], root: Path) -> PlanContext:
-    """The worker's `PlanContext`: a real `CacheRoot` under `root` and a real `AssetStore`."""
+    """The worker's `PlanContext`: a real `CacheRoot` under `root` and a real `AssetStore`
+    staging remote assets into `asset_cache_for(root)` - `$STRATUM_ASSET_CACHE`, else
+    `{root}/assets` (12 section 4). The store logs in through `stratum.access.auth` on the
+    first https open, never here, so a spawned worker builds this cheaply."""
     return PlanContext(
         grid=grid_from_doc(doc["grid"]),
         cache=CacheRoot(root),
-        store=AssetStore(),
+        store=AssetStore(asset_cache_for(root)),
         granules={gid: granule_from_doc(g) for gid, g in doc["granules"].items()},
         roles={name: RoleBinding(**r) for name, r in doc["roles"].items()},
         aliases={name: AliasBinding(**a) for name, a in doc["aliases"].items()},

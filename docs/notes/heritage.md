@@ -166,13 +166,38 @@ earliest wins) on 3000 random valid cells: 3000/3000. The one structural differe
 zeroed nothing here. With `edge_trim` on (the main run) 4,723 cells seen only by a swath's outer
 seven columns become nodata; otherwise the main run equals the parity run wherever valid.
 
+**2026-09-02, the archive run** (`examples/nevada-cmr/`): the same tile from CMR, January–August
+2026, `P1M` epochs, `min_count: 2`, `max_cloud_fraction: 0.8`; nothing staged by hand. Same
+laptop, home connection.
+
+| Step | Measurement |
+|---|---|
+| `stratum index build` (CMR, scoped to the tile and eight months) | 4.1 s; 74 rows / 37 granules; anonymous, nothing downloaded |
+| `stratum plan` | 93 s; staged 34 remote assets = 1.55 GB (1 OBS for the sample-asset check, 33 MIN for the per-granule class-table check) into `out/assets`; 4 granules dropped by the cloud filter (89–98 % cloud); one fingerprint `sha256:fc392354…` on all 33, identical to the local trial's; builds `010634` (3) / `010635` (30) |
+| First `stratum run` | 131 s = re-plan ~2 s (34/34 hits) + regrid 99.2 s (32 OBS downloads ≈ 3.5 GB by parallel workers + 33 GLTs) + resolve 5.7 s (146 items) + reduce 20.8 s (25 items) + publish 3.8 s |
+| Download volume | `du -sh out/assets` 5.0 GB, 66 files; `out/cache` 241 MB; `out/products` 19 MB |
+| Effective throughput | ≈ 17 MB/s serial at plan time; ≈ 37 MB/s with parallel regrid workers |
+| Second `stratum run`, nothing changed | 14.1 s; regrid 33/33 hits (2.8 s), resolve 146/146 (3.0 s), reduce 25/25 (3.0 s), publish rewrites (3.7 s) |
+| Product sanity | 3600 × 3600; `n_epochs` 3–6 on every cell; voted fraction 0.329; mean `mineral_1_agreement` over voted cells 0.595; `depth_1` median 0.021, spread median 0.003; leaders Cummingtonite HS294.3B, Butlerite GDS25, Basalt_weathered BR93-43, Nanohematite BR93-34B2 — the same ids (20, 76, 40, 47, 45) as the local June trial |
+| June 2026 cross-check | the CMR index holds 12 of the local trial's 14 granule ids, identical; the two absent (`20260613T203446_2616413_011`, `20260621T172640_2617211_012`) touch the tile with the header bounding box but not with the footprint polygon CMR searches on |
+
+Two things this run fixed on the way: `CloudCover` is an integer percent and the index column is
+a fraction, so the first `CMRSource` stored `19.0` and `max_cloud_fraction: 0.8` dropped every
+granule (now `/100`, percent kept in `attributes.cloud_cover`); and the planner has to stage every
+contributing granule's class-table asset, not just one sample, because the vintage check reads
+the table out of each file — those bytes are the ones resolve needs anyway, so the run's total
+volume is unchanged and the first plan is simply where 1.55 GB of it lands.
+
 **Findings worth carrying.** (1) The delivered L2B is one gzip chunk per variable, so every
 observation read decodes the full 1664 × 1242 array — cheap at int16, but it is why prepared
 assets (12 §4) matter before a fan-out. (2) `ignore: [none]` over one epoch delivers 73.5 % of
 observed cells as nodata (13 §7). (3) The granule's `/mineral_metadata` has eleven duplicate
 names; `classes: source` suffixes the later one `#id`. (4) Products and GLTs fail GDAL's COG
 validator (no `LAYOUT=COG`, no overviews) while the STAC media type claims COG (03 §6). (5) CMR
-has no `EMITL1BOBS` short name; OBS is the second asset of `EMITL1BRAD.001` (12 §8).
+has no `EMITL1BOBS` short name; OBS is the second asset of `EMITL1BRAD.001`, which is what the
+manifests and the reader registry now say (12 §8, resolved 2026-09-02). In the same pass:
+`EMITL2AMASK` is published at collection version `002`, and `EMITL2BFRCOV.001` ships per-fraction
+GeoTIFFs rather than one NetCDF.
 
 ---
 

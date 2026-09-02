@@ -24,7 +24,7 @@
 
 <h2 id="workflow">The workflow</h2>
 
-<pre><code><span class="c"># 1. See what would run. Reads (or, for a directory of granules, builds) the index; starts nothing.</span>
+<pre><code><span class="c"># 1. See what would run. Reads the index, or builds it from inputs.source; starts no worker.</span>
 stratum plan -m manifest.yaml
 
 <span class="c"># 2. Run it. On this machine, by default; everything lands under outputs.bucket.</span>
@@ -81,10 +81,10 @@ inputs:
     patterns:               <span class="c"># {collection: {asset: glob}}; the granule id is what * matched</span>
       EMITL2BMIN:
         MIN: <span class="k">"EMIT_L2B_MIN_001_*.nc"</span>
-      EMITL1BOBS:
+      EMITL1BRAD:
         OBS: <span class="k">"EMIT_L1B_OBS_001_*.nc"</span>
   roles:
-    geometry: {collection: EMITL1BOBS, var: obs}
+    geometry: {collection: EMITL1BRAD, asset: OBS, var: obs}
     mineral:
       collection: EMITL2BMIN
       var: group_1_mineral_id
@@ -142,6 +142,32 @@ single epoch every aggregation is the identity, so this run is a plain mosaic; s
 that index is built — here from a directory of files you already have, which is what makes this
 manifest runnable with no network and no Earthdata account. Point it at NASA's archive instead and
 nothing else in the document changes; see <a href="reading-data.html">Reading data</a>.</p>
+
+<h3 id="from-archive">The same run from the archive</h3>
+
+<p>Swap the <code>source</code> block for <code>kind: cmr</code> with the same
+<code>patterns</code>, put an Earthdata Login in <code>~/.netrc</code>, and the three commands
+above are unchanged. What changes is where the time goes:</p>
+
+<div class="tw">
+<table>
+<thead><tr><th>Step</th><th>What it does against the archive</th><th>Downloads</th></tr></thead>
+<tbody>
+<tr><td><code>stratum index build</code></td><td>Queries the catalogue for the manifest's area and time range; writes footprints, times, cloud cover, builds, URLs and checksums. Anonymous; a few seconds</td><td>Nothing</td></tr>
+<tr><td><code>stratum plan</code></td><td>Selects and filters, then validates against real files: one geometry file, and every contributing granule's mineral file for the class-table check. This is the first login</td><td>Those files, into the asset cache</td></tr>
+<tr><td><code>stratum run</code></td><td>Re-plans (all cache hits), then regrid fetches each remaining geometry file on first touch in parallel; resolve, reduce and publish fetch nothing more</td><td>The rest of the geometry files</td></tr>
+</tbody>
+</table>
+</div>
+
+<p>Downloads land in <code>{outputs.bucket}/assets/</code> unless <code>--asset-cache</code> or
+<code>STRATUM_ASSET_CACHE</code> says otherwise, are verified against the catalogue checksum, and
+are reused by every later run. The plan report's <em>Assets staged at plan time</em> section says
+how many files and bytes the plan fetched; a cloud filter is meaningful here because the
+catalogue carries cloud cover for every granule. <code>examples/nevada-cmr/</code> in the
+repository is this run over one tile and eight months, with its README recording the measured
+sizes and times. See <a href="reading-data.html#cmr">From NASA's archive</a> and
+<a href="reading-data.html#asset-cache">The asset cache</a>.</p>
 
 <div class="reading">
   <span class="label">Further reading</span>
@@ -239,10 +265,13 @@ in order, and each one's effect is counted and reported.</p>
   - {build_version: "010635"}                     <span class="c"># optional — see below</span>
   - {month_in: [8, 9, 10, 11]}                    <span class="c"># recurring seasonal window</span></code></pre>
 
-<p>The built-in predicates are <code>max_cloud_fraction</code>, <code>max_solar_zenith</code>,
+<p>The built-in predicates are <code>max_cloud_fraction</code> (a fraction in <code>[0, 1]</code>:
+<code>0.5</code> is 50&nbsp;% cloud), <code>max_solar_zenith</code>,
 <code>month_in</code>, <code>build_version</code>, <code>product_version</code>,
 <code>collection_version</code> and <code>day_night</code>; a <code>{ref: …, params: …}</code>
-entry names a filter plugin. Two selection steps run after your filters and appear in the report
+entry names a filter plugin. Counts in the report are index <em>rows</em>, and a granule has one
+row per collection, so a filter that removes four granules indexed in two collections reports
+eight. Two selection steps run after your filters and appear in the report
 as rows of their own: granules that meet the query box but no tile of the area are dropped, and so
 are granules lacking an asset for a role the run will read — a mineral granule with no matching
 geometry file, say.</p>

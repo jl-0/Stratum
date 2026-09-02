@@ -26,9 +26,12 @@
   <span class="label">The first slice is built</span>
   <p>A local run exists end to end: <code>stratum run -m manifest.yaml</code> over granules on
   disk plans, regrids, resolves, reduces and publishes, with content-addressed caching, a STAC
-  item and collection, and a provenance record. 241 tests pass (<code>pixi run test</code>). The
-  cloud and cluster paths, catalogue sources, remote assets and the approval gate are specified
-  but <strong>not built</strong>; each refuses with its spec section named. The specs in
+  item and collection, and a provenance record. The same command over a <code>kind: cmr</code>
+  source discovers granules in NASA's catalogue and downloads them over HTTPS on first touch into
+  a checksum-verified asset cache. 282 tests pass and 3 live tests skip without
+  <code>STRATUM_LIVE=1</code> (<code>pixi run test</code>). The cloud and cluster paths, direct
+  S3 access, STAC and Parquet sources, prepared assets and the approval gate are specified but
+  <strong>not built</strong>; each refuses with its spec section named. The specs in
   <a href="specs/00-overview.md"><code>docs/specs/</code></a> remain the contract, and the code is
   authoritative for signatures.</p>
 </div>
@@ -43,10 +46,11 @@
 <tr><td>Plugin contracts</td><td><span class="chip chip-locked">built</span></td><td>All five science hooks and both access hooks are protocols in <code>hooks.py</code> / <code>types.py</code>; <code>streaming</code> scorers, sensor- and map-space masks and config mappers run. <code>stack</code>/<code>tile</code> scorers, <code>Reducer</code> plugins and <code>threshold</code>/<code>composite</code> mappers are refused at plan time.</td></tr>
 <tr><td>Snapshot schema</td><td><span class="chip chip-locked">built</span></td><td>Layers, enumerations, the full aggregation vocabulary; the built-in reducer runs it. <code>extends</code> is modelled but the ancestor probe is not built.</td></tr>
 <tr><td>Manifest schema</td><td><span class="chip chip-locked">built</span></td><td>Pydantic models, <code>@ref:</code> classes files, static validation, hash and <code>run_id</code>. Patch composition (<code>-p</code>) is parsed and refused; <code>aoi.geometry</code> is not modelled.</td></tr>
-<tr><td>Granule readers</td><td><span class="chip chip-locked">built</span></td><td>Registry keyed on collection; <code>L2BMin</code>, <code>L1BObs</code>, <code>L2AMask</code>, <code>L2BFrcov</code> in the plugin package. MASK is tested on synthetic files only; FRCOV opens but its ortho-native read path is a later slice.</td></tr>
-<tr><td>Asset store — staging</td><td><span class="chip chip-locked">built</span> local</td><td><code>file://</code> and bare paths; stage-in is the identity. <code>s3://</code> and <code>https://</code> refuse.</td></tr>
+<tr><td>Granule readers</td><td><span class="chip chip-locked">built</span></td><td>Registry keyed on collection; <code>L2BMin</code>, <code>L1BRad</code>, <code>L2AMask</code>, <code>L2BFrcov</code> in the plugin package. MASK is tested on synthetic files only; FRCOV opens but its ortho-native read path is a later slice.</td></tr>
+<tr><td>Asset store — staging</td><td><span class="chip chip-locked">built</span> local, https</td><td><code>file://</code> and bare paths open in place. <code>https://</code> behind Earthdata Login stages into a node-local asset cache (<code>$STRATUM_ASSET_CACHE</code>, else <code>{root}/assets</code>): temp file, SHA-512 verified as it streams, atomic rename, trusted on a hit; one re-login on <code>401</code>/<code>403</code>. <code>s3://</code> refuses.</td></tr>
+<tr><td>Earthdata Login</td><td><span class="chip chip-locked">built</span></td><td><code>stratum.access.auth</code>: <code>~/.netrc</code> then <code>EARTHDATA_USERNAME</code>/<code>PASSWORD</code>, own <code>Auth</code> object, cached per process, never at import or on a local run; no token or password is ever logged, stored or raised. The plan-time credential check is implicit — the first https open — rather than a call to <code>credentials_for</code>.</td></tr>
 <tr><td>Asset store — streaming, prepared assets</td><td><span class="chip chip-open">not started</span></td><td>Genuine range requests need a windowable layout — Stratum's own GeoTIFFs are, the delivered L2B science bands are not until prepared (spec 12 §4). Every observation read today decodes the whole variable.</td></tr>
-<tr><td>CMR source</td><td><span class="chip chip-open">not started</span></td><td>Stub. Bridge over <code>earthaccess</code>; must map the OBS asset of <code>EMITL1BRAD</code> onto the <code>EMITL1BOBS</code> role the manifests use.</td></tr>
+<tr><td>CMR source</td><td><span class="chip chip-locked">built</span></td><td>Bridge over <code>earthaccess.search_data</code>, anonymous, scoped to the manifest's AOI and time. <code>patterns</code> matches each record's file names, so an unlisted file (the 1.85 GB RAD) is never indexed; assets are HTTPS URLs with SHA-512 checksums, <code>s3:</code> links kept in attributes, <code>cloud_fraction</code> stored as a fraction. The manifests name the CMR short names (<code>EMITL1BRAD</code> with <code>asset: OBS</code>, <code>EMITL2AMASK</code> at <code>version: "002"</code>), so no collection mapping is needed. <code>prefer: direct</code>, STAC and Parquet sources refuse; the result list is materialised per collection, not streamed.</td></tr>
 <tr><td>Local source</td><td><span class="chip chip-locked">built</span></td><td>Directory walk, header read, <code>patterns: {collection: {asset: glob}}</code>. <code>stratum plan</code> builds a missing index from it.</td></tr>
 <tr><td>Granule index</td><td><span class="chip chip-locked">built</span></td><td>GeoParquet schema, build, query, freeze with sha256, refs. <code>index verify</code> is not built.</td></tr>
 <tr><td>Regrid wrapper</td><td><span class="chip chip-locked">built</span></td><td>KD-tree by wrapping SpectralUtil, one GLT per granule per tile, algorithm-version hash gate. <code>warp_embedded</code> is not built.</td></tr>
@@ -82,7 +86,9 @@
 <tr><td>Cache scope</td><td>Per deployment. Every run in a deployment shares it; deployments do not share with each other. Locally the deployment is a directory: <code>outputs.bucket</code> is the root</td></tr>
 <tr><td>Delivery boundary</td><td>Files plus a STAC catalogue under <code>products/{run_id}/{tx}_{ty}/{start}_{end}/</code>. MMGIS and DAAC ingestion are downstream steps that read it</td></tr>
 <tr><td>Legend</td><td>STAC <code>classification</code> is authoritative; the COG colour table and JSON sidecar derive from it. Data COGs ship single-band with a colour table <em>and</em> an RGBA rendering; a GeoTIFF colour table carries no alpha, so the data COG's only transparency is its nodata value</td></tr>
-<tr><td>Prepared assets</td><td>Every asset is transcoded once on first touch into tiled per-variable COGs, keyed on its checksum and shared by every run. A node-local asset cache fills by atomic rename and never locks. Not yet built</td></tr>
+<tr><td>Prepared assets</td><td>Every asset is transcoded once on first touch into tiled per-variable COGs, keyed on its checksum and shared by every run. Not yet built. The node-local asset cache it will sit on is built: filled by download-to-temp and atomic rename, keyed on the catalogue checksum, never locked</td></tr>
+<tr><td>Source patterns</td><td><code>patterns: {collection: {asset: glob}}</code> is the one shape for every source; against a catalogue the glob is matched on file names and an unmatched file is neither indexed nor fetched. The granule id is what the first asset's glob matched, the same rule locally and from CMR</td></tr>
+<tr><td>Catalogue index scope</td><td>An index built from a catalogue source is scoped to the manifest's AOI bbox and time range; a local source indexes its whole directory. <code>stratum plan</code> builds a missing index from either</td></tr>
 <tr><td>GLT</td><td>One per granule. Band 3 stays <code>1</code> so existing tooling opens the file; <code>granule_id</code> is in the metadata; a granule that misses the tile writes an all-zero GLT. Regrid by KD-tree, or by warping the product's own lookup table through the reader (<code>regrid_method</code>)</td></tr>
 <tr><td>Example grid</td><td>One arcsecond, 3600 cells per degree, 1&deg; tiles, <code>block_size: 720</code>. Tiles are cut on the cell lattice by cell-centre containment, so any resolution aligns; one that divides the tile keeps every tile the same shape</td></tr>
 <tr><td>Band aliases</td><td><code>band:</code> is a 0-based index, validated against the reader at plan time; <code>match:</code> selects by a reader-reported attribute. EMIT L1B OBS view zenith is band 2, solar zenith band 4</td></tr>
@@ -130,6 +136,30 @@ available locally, so the first slice was validated against the next best thing 
 <p>Parity against a real V002 cell is still owed once a V002 product for the tile is obtainable;
 the abstraction has passed the test that was available.</p>
 
+<h3 id="cmr-trial">Archive run</h3>
+
+<p>The second validation target is the same tile from NASA's CMR catalogue with nothing staged by
+hand: <code>examples/nevada-cmr/</code>, January&ndash;August 2026, monthly votes with
+<code>min_count: 2</code>, a cloud filter at 0.8. Measured 2026-09-02 on a laptop over a home
+connection:</p>
+
+<div class="tw">
+<table>
+<thead><tr><th>Step</th><th>Result</th></tr></thead>
+<tbody>
+<tr><td><code>stratum index build</code></td><td>4.1 s, 74 rows / 37 granules, no login, nothing downloaded</td></tr>
+<tr><td><code>stratum plan</code></td><td>93 s; 34 files, 1.55 GB staged (1 OBS for the sample check, 33 MIN for the class-table check); 4 granules dropped by the cloud filter; one class-table fingerprint on all 33, identical to the local trial's</td></tr>
+<tr><td>First <code>stratum run</code></td><td>131 s: re-plan 2 s (all hits), regrid 99 s (32 OBS downloads by parallel workers, 3.5 GB, 33 GLTs), resolve 6 s (146 items), reduce 21 s (25 items), publish 4 s. 5.0 GB and 66 files in <code>out/assets</code>; about 17 MB/s serial at plan time, about 37 MB/s with parallel regrid workers</td></tr>
+<tr><td>Second <code>stratum run</code>, nothing changed</td><td>14 s; regrid, resolve and reduce all hits</td></tr>
+<tr><td>Product</td><td>3600 &times; 3600; every cell observed in 3&ndash;6 of 8 months; 32.9&nbsp;% of cells reach the vote threshold, mean agreement 0.60 over those; the same leading classes as the local June trial</td></tr>
+<tr><td>Cross-check against the local trial</td><td>The archive index holds 12 of the local trial's 14 June granules with identical ids; the two absent touch the tile with their header bounding box but not with the footprint polygon the catalogue searches on, and contribute no pixels</td></tr>
+</tbody>
+</table>
+</div>
+
+<p>Direct S3 access remains open: <code>prefer: direct</code> and <code>s3://</code> assets refuse
+until the in-region mode and its one-hour credential refresh exist.</p>
+
 <h2 id="blocking">Open and blocking</h2>
 
 <div class="tw">
@@ -140,7 +170,7 @@ the abstraction has passed the test that was available.</p>
 <tr><td>Reduce over class labels, or over continuous quantities first?</td><td>The shape of the baseline reducer</td><td>Phil</td></tr>
 <tr><td>Zone selection for the pilot</td><td>The zone registry (<code>examples/zones.yaml</code>) holds approximate boxes; confirm before a delivered run</td><td>Dana</td></tr>
 <tr><td>Confirm the 7-column edge trim and slit-dust column counts</td><td>Built-in mask defaults in <code>stratum_emit</code>; <code>SlitDust</code> refuses until confirmed</td><td>Phil</td></tr>
-<tr><td>AWS account, quota and Earthdata credential path</td><td>All cloud work. Blocks nothing locally.</td><td>—</td></tr>
+<tr><td>AWS account and quota; how the Earthdata credential reaches a cloud worker</td><td>All cloud work. Blocks nothing locally: a <code>~/.netrc</code> or environment credential already serves laptop runs from the archive.</td><td>—</td></tr>
 </tbody>
 </table>
 </div>
@@ -156,13 +186,16 @@ open-questions list.</p>
 <tbody>
 <tr><td>With one epoch and <code>ignore: [none]</code>, every observed-but-nothing-identified cell delivers nodata, not <code>0</code>; only <code>n_epochs</code> distinguishes it from never observed. Deliver <code>none</code> instead, or document <code>ignore: []</code> for single-epoch products?</td><td><a href="specs/13-snapshot-schema.md">13</a> §7</td></tr>
 <tr><td>Products and GLTs are tiled GeoTIFFs without the COG header layout or overviews, while the STAC media type claims COG. Write through the COG driver, or stop calling them COGs?</td><td><a href="specs/03-regrid-glt.md">03</a> §6, <a href="specs/07-output-mapping.md">07</a></td></tr>
-<tr><td>CMR has no <code>EMITL1BOBS</code> short name; OBS is an asset of <code>EMITL1BRAD</code>. The manifests must change when a CMR source exists</td><td><a href="specs/12-data-access.md">12</a> §8, <a href="specs/09-run-manifest.md">09</a> §6</td></tr>
 <tr><td>Two class-table fingerprints in flight: the raw table's in plan/report/provenance, the product table's on the STAC item</td><td><a href="specs/13-snapshot-schema.md">13</a> §7</td></tr>
 <tr><td>Local sources have no asset checksum, so a re-delivered file under the same name is invisible to the observation key</td><td><a href="specs/06-caching.md">06</a> §8</td></tr>
 <tr><td>Regrid's KD-tree query runs single-threaded inside a pool that already fills the node; size <code>n_workers</code> from the allocation</td><td><a href="specs/03-regrid-glt.md">03</a> §6, <a href="specs/08-execution.md">08</a> §7</td></tr>
 <tr><td><code>max_vcpu_hours</code> is reported as "not estimated"; the router needs per-stage constants from the first measurements</td><td><a href="specs/08-execution.md">08</a> §7</td></tr>
 <tr><td><code>aoi.geometry</code> is on this site but not modelled</td><td><a href="specs/09-run-manifest.md">09</a> §6</td></tr>
 <tr><td>The STAC collection's <code>license</code> is not a manifest field and defaults to <code>various</code></td><td><a href="specs/10-provenance.md">10</a></td></tr>
+<tr><td>The CMR source materialises each collection's result list rather than streaming pages; fine for scoped builds, not for a full-mission one</td><td><a href="specs/12-data-access.md">12</a> §8</td></tr>
+<tr><td>Plan-time credential checking is implicit (the first https open); <code>credentials_for</code> exists but the planner does not call it</td><td><a href="specs/12-data-access.md">12</a> §8</td></tr>
+<tr><td>Filter reports count index rows, not granules, and a per-row <code>on_missing: fail</code> would trip on a collection without <code>CloudCover</code> indexed beside one with it</td><td><a href="specs/12-data-access.md">12</a> §8</td></tr>
+<tr><td>Direct S3 access (<code>prefer: direct</code>): in-region check, credential exchange and hourly refresh</td><td><a href="specs/12-data-access.md">12</a> §8</td></tr>
 </tbody>
 </table>
 </div>

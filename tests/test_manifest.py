@@ -21,6 +21,7 @@ from stratum.filters import (
     MonthIn,
     apply_filters,
     build_filters,
+    granule_level,
 )
 from stratum.manifest import Manifest, load_manifest, manifest_hash, validate_static
 from stratum.types import GridDef
@@ -50,7 +51,7 @@ def base_doc() -> dict[str, Any]:
             "source": {"kind": "local", "root": "./granules",
                        "patterns": {"EMITL2BMIN": {"MIN": "EMIT_L2B_MIN_*.nc"}}},
             "roles": {
-                "geometry": {"collection": "EMITL1BOBS", "var": "obs"},
+                "geometry": {"collection": "EMITL1BRAD", "asset": "OBS", "var": "obs"},
                 "mineral": {"collection": "EMITL2BMIN", "var": "group_1_mineral_id",
                             "class_table": {"source": "embedded", "path": "/mineral_metadata",
                                             "key": "index",
@@ -364,6 +365,32 @@ def test_filter_chain_reports_per_filter(tmp_path):
                                                              (0, None), (0, "keep")]
     assert reports[0].describe == "cloud_fraction <= 0.5 (on_missing: keep)"
     assert reports[2].describe == "month in [6, 7]"
+
+
+def test_filters_run_per_granule_not_per_row(tmp_path):
+    """02 section 4 / 12 section 8 question 11: the index holds a row per (granule,
+    collection). A mask collection indexed beside MIN carries no CloudCover; the granule's
+    MIN row does. `on_missing: fail` must not trip on the mask row, the report counts
+    granules, and a dropped granule takes all of its rows with it."""
+    rows = pd.DataFrame({
+        "granule_id": ["a", "a", "b", "b"],
+        "collection": ["EMITL2BMIN", "EMITL2AMASK", "EMITL2BMIN", "EMITL2AMASK"],
+        "datetime": pd.to_datetime(["2026-06-02"] * 4, utc=True),
+        "cloud_fraction": [0.1, None, 0.9, None],
+        "build_version": ["010635", "", "010635", ""],
+        "attributes": [{"SOLAR_ZENITH": "35.2"}, {}, {"SOLAR_ZENITH": "80"}, {}],
+        "assets": [{"MIN": "u1"}, {"MASK": "u2"}, {"MIN": "u3"}, {"MASK": "u4"}],
+    })
+    per_granule = granule_level(rows)
+    assert per_granule["granule_id"].tolist() == ["a", "b"]
+    assert per_granule["cloud_fraction"].tolist() == [0.1, 0.9]           # from the MIN row
+    assert per_granule["build_version"].tolist() == ["010635", "010635"]
+    assert per_granule.loc[0, "attributes"] == {"SOLAR_ZENITH": "35.2"}
+    assert per_granule.loc[0, "assets"] == {"MIN": "u1", "MASK": "u2"}
+    kept, reports = apply_filters(rows, [MaxCloudFraction(0.5), ColumnIn("build_version", "010635")])
+    assert kept["granule_id"].tolist() == ["a", "a"]                     # both of a's rows
+    assert [(r.removed, r.on_missing) for r in reports] == [(1, "fail"), (0, "fail")]
+    assert len(granule_level(frame())) == 4                            # unique ids: unchanged
 
 
 def test_filter_spec_shape(tmp_path):

@@ -1,7 +1,15 @@
-"""Build, write, read, query and freeze the index (02 sections 2, 3, 6)."""
+"""Build, write, read, query and freeze the index (02 sections 2, 3, 6).
+
+An index built from a catalogue is **scoped** to the manifest that built it (12 section 5), so
+the file records that scope in its parquet metadata (`SCOPE_KEY`): source kind, collections,
+bbox and `[start, end)`. `scope_problems` is how the planner refuses to plan a wider manifest
+against a narrower index instead of silently selecting fewer granules (02 section 6), and
+`merge_index` is how a `--since` refresh replaces the revised rows without discarding the rest.
+"""
 from __future__ import annotations
 
 import hashlib
+import json
 import math
 from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime
@@ -104,30 +112,116 @@ def table_from_rows(rows: Sequence[Mapping[str, Any]]) -> pa.Table:
 def build_index(source: GranuleSource, *, collections: Sequence[str],
                 bbox: tuple[float, float, float, float] | None = None,
                 start: datetime | None = None, end: datetime | None = None,
-                last_seen: datetime | None = None) -> pa.Table:
+                last_seen: datetime | None = None,
+                updated_since: datetime | None = None) -> pa.Table:
     """Stream a source's records into an index table. `last_seen` is one timestamp for the
-    whole build (02 section 3); it defaults to now."""
+    whole build (02 section 3); it defaults to now. `updated_since` is passed through to the
+    source - a catalogue's revision date, a directory's mtime - and is how a reprocessing
+    campaign gets noticed (12 section 5)."""
     seen = _utc(last_seen) if last_seen is not None else datetime.now(UTC)
     rows = [row_from_record(source, rec, seen)
             for rec in source.search(collections=list(collections), bbox=bbox, start=start,
-                                     end=end)]
+                                     end=end, updated_since=updated_since)]
     return table_from_rows(rows)
 
 
 INDEX_FILE = "granules.parquet"   # the fixed file name inside `inputs.index_location` (12 section 6)
+#: Parquet schema-metadata key under which an index records the scope it was built for.
+SCOPE_KEY = b"stratum:scope"
+#: A row's identity (02 section 2): what a `--since` refresh replaces.
+ROW_KEY: tuple[str, ...] = ("collection", "collection_version", "granule_id")
 
 
-def write_index(table: pa.Table, path: Path) -> Path:
-    """Parquet with the GeoParquet `geo` metadata (02 section 2). Sorted by (collection,
-    granule_id) so identical inputs give identical bytes."""
+def index_scope_record(*, source: str, collections: Sequence[str],
+                       bbox: tuple[float, float, float, float] | None = None,
+                       start: datetime | None = None, end: datetime | None = None,
+                       provider: str | None = None,
+                       built_at: datetime | None = None) -> dict[str, Any]:
+    """What an index was built for (12 section 5): the source kind, the collections searched,
+    and - for a catalogue source - the AOI bbox and `[start, end)`; None means unscoped (a local
+    source indexes its whole directory). Stored by `write_index` and checked by the planner."""
+    return {
+        "source": source,
+        "provider": provider,
+        "collections": sorted(str(c) for c in collections),
+        "bbox": [float(v) for v in bbox] if bbox is not None else None,
+        "start": _utc(start).isoformat() if start is not None else None,
+        "end": _utc(end).isoformat() if end is not None else None,
+        "built_at": _utc(built_at or datetime.now(UTC)).isoformat(),
+    }
+
+
+def scope_problems(scope: Mapping[str, Any] | None, *, source: str | None,
+                   collections: Sequence[str],
+                   bbox: tuple[float, float, float, float] | None,
+                   start: datetime | None, end: datetime | None) -> list[str]:
+    """Why a manifest asking for `collections` over `bbox` and `[start, end)` from a `source`
+    of that kind is NOT answered by an index built with `scope` (02 section 6, 12 section 5).
+    Empty when the request lies inside the scope. A scope-less index (built before scopes were
+    recorded) is one problem: nothing says what it covers."""
+    if scope is None:
+        return ["the index records no build scope; rebuild it with `stratum index build`"]
+    problems: list[str] = []
+    if source is not None and scope.get("source") not in (None, source):
+        problems.append(f"built from a {scope.get('source')!r} source, the manifest names "
+                        f"{source!r}")
+    missing = sorted(set(collections) - set(scope.get("collections") or []))
+    if missing:
+        problems.append(f"collections {missing} were not indexed (it holds "
+                        f"{scope.get('collections')})")
+    sb = scope.get("bbox")
+    if sb is not None and bbox is not None:
+        w, s_, e, n = (float(v) for v in bbox)
+        if w < sb[0] - 1e-9 or s_ < sb[1] - 1e-9 or e > sb[2] + 1e-9 or n > sb[3] + 1e-9:
+            problems.append(f"AOI bbox {[w, s_, e, n]} reaches outside the indexed bbox {sb}")
+    if scope.get("start") is not None and start is not None and \
+            _utc(start) < datetime.fromisoformat(scope["start"]):
+        problems.append(f"time.start {_utc(start).isoformat()} is before the indexed start "
+                        f"{scope['start']}")
+    if scope.get("end") is not None and end is not None and \
+            _utc(end) > datetime.fromisoformat(scope["end"]):
+        problems.append(f"time.end {_utc(end).isoformat()} is after the indexed end "
+                        f"{scope['end']}")
+    return problems
+
+
+def write_index(table: pa.Table, path: Path, scope: Mapping[str, Any] | None = None) -> Path:
+    """Parquet with the GeoParquet `geo` metadata (02 section 2) and, when given, the build
+    scope under `SCOPE_KEY` (12 section 5). Sorted by (collection, granule_id) so identical
+    inputs give identical bytes."""
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
-    if table.schema.metadata is None or b"geo" not in table.schema.metadata:
-        table = table.replace_schema_metadata(INDEX_SCHEMA.metadata)
+    metadata = dict(table.schema.metadata or {})
+    if b"geo" not in metadata:
+        metadata.update(INDEX_SCHEMA.metadata)
+    if scope is not None:
+        metadata[SCOPE_KEY] = json.dumps(dict(scope), sort_keys=True).encode()
+    table = table.replace_schema_metadata(metadata)
     if table.num_rows:
         table = table.sort_by([("collection", "ascending"), ("granule_id", "ascending")])
     pq.write_table(table, path)
     return path
+
+
+def read_index_scope(path: Path) -> dict[str, Any] | None:
+    """The scope `write_index` recorded, or None for an index written without one."""
+    metadata = pq.read_schema(Path(path)).metadata or {}
+    raw = metadata.get(SCOPE_KEY)
+    return json.loads(raw.decode()) if raw else None
+
+
+def merge_index(existing: pa.Table, delta: pa.Table) -> pa.Table:
+    """`existing` with every row whose identity (`ROW_KEY`: collection, collection_version,
+    granule_id) appears in `delta` replaced by the delta's row, and the rest kept - what a
+    `--since` refresh does, so an incremental build never drops the unrevised rows (12 section
+    5). The replaced rows carry the delta's `last_seen`."""
+    if delta.num_rows == 0:
+        return existing
+    keys = {tuple(str(row[k]) for k in ROW_KEY) for row in delta.to_pylist()}
+    keep = [tuple(str(row[k]) for k in ROW_KEY) not in keys for row in existing.to_pylist()]
+    kept = existing.filter(pa.array(keep, type=pa.bool_())) if existing.num_rows else existing
+    parts = [t.cast(INDEX_SCHEMA).replace_schema_metadata(None) for t in (kept, delta)]
+    return pa.concat_tables(parts).replace_schema_metadata(INDEX_SCHEMA.metadata)
 
 
 def frame_from_table(table: pa.Table) -> pd.DataFrame:
@@ -160,7 +254,12 @@ def table_from_frame(frame: pd.DataFrame) -> pa.Table:
 
 
 def read_index(path: Path) -> pd.DataFrame:
-    return frame_from_table(pq.read_table(Path(path), schema=INDEX_SCHEMA))
+    return frame_from_table(read_index_table(path))
+
+
+def read_index_table(path: Path) -> pa.Table:
+    """The index as an arrow table in `INDEX_SCHEMA` (the file's own metadata kept)."""
+    return pq.read_table(Path(path), schema=INDEX_SCHEMA)
 
 
 def query_index(frame: pd.DataFrame, *, bbox: tuple[float, float, float, float] | None = None,

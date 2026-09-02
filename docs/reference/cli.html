@@ -78,7 +78,7 @@ on a laptop, on a cluster, and as the worker entrypoint.</p>
 
 <h2 id="plan">stratum plan</h2>
 
-<pre><code>stratum plan -m manifest.yaml [--out PATH] [--json]</code></pre>
+<pre><code>stratum plan -m manifest.yaml [--out PATH] [--asset-cache PATH] [--json]</code></pre>
 
 <p>Validates the manifest, queries the index, applies filters, resolves tiles and epochs, resolves
 every categorical layer's classes against each contributing granule's embedded table, and writes
@@ -86,14 +86,23 @@ the run directory: <code>manifest.merged.yaml</code>, the frozen <code>index.par
 <code>plan.json</code>, <code>work/{stage}.jsonl</code> and <code>report.md</code>. Provisions
 nothing and reads no pixels — headers, variable lists and class tables only.</p>
 
-<p>If the index under <code>inputs.index_location</code> does not exist and <code>inputs.source</code> is
-<code>kind: local</code>, the index is built first, so a laptop run is one command.</p>
+<p>If the index under <code>inputs.index_location</code> does not exist, it is built first from
+<code>inputs.source</code> — a directory indexed whole, or the archive queried for the manifest's
+area and time range — so a laptop run and an archive run are each one command. Against the
+archive the plan downloads the files it validates (one geometry file, and every contributing
+granule's class-table file, fetched in parallel) into the asset cache; the report's <em>Assets
+staged at plan time</em> section counts them. The budget is checked first: a plan that
+<code>max_tiles</code> or <code>max_granules</code> refuses stops before opening or downloading
+anything. An existing index is used only if the scope it records — source kind, collections,
+area, time range — covers the manifest; a wider manifest is refused until the index is
+rebuilt.</p>
 
 <div class="tw">
 <table>
 <thead><tr><th>Option</th><th>Effect</th><th>Status</th></tr></thead>
 <tbody>
 <tr><td><code>--out PATH</code></td><td>The run directory. Default <code>{outputs.bucket}/runs/{run_id}</code>, with <code>outputs.bucket</code> a path relative to the manifest</td><td><span class="chip chip-locked">built</span></td></tr>
+<tr><td><code>--asset-cache PATH</code></td><td>Node-local directory the plan stages the files it validates into. Sets <code>STRATUM_ASSET_CACHE</code>; name the same directory on <code>run</code> so those files are hits. Default <code>$STRATUM_ASSET_CACHE</code>, else <code>{root}/assets</code></td><td><span class="chip chip-locked">built</span></td></tr>
 <tr><td><code>--json</code></td><td>Print <code>run_id</code>, <code>run_dir</code>, the counts and the budget verdict as JSON</td><td><span class="chip chip-locked">built</span></td></tr>
 <tr><td><code>--explain-filters</code></td><td>List the granules each filter removed, not just counts</td><td><span class="chip chip-open">not yet</span></td></tr>
 <tr><td><code>--no-cache-probe</code></td><td>Skip the cache probe; estimate as if nothing were cached</td><td><span class="chip chip-open">not yet</span></td></tr>
@@ -107,7 +116,7 @@ area, time and filters — is invalid, not an empty plan.</p>
 
 <h2 id="run">stratum run</h2>
 
-<pre><code>stratum run -m manifest.yaml [--workers N] [--out PATH] [--dry-run]</code></pre>
+<pre><code>stratum run -m manifest.yaml [--workers N] [--out PATH] [--asset-cache PATH] [--dry-run]</code></pre>
 
 <p>Plans, then executes regrid → resolve → reduce → publish in a process pool on this machine,
 then writes the STAC collection and <code>provenance.json</code> and appends an execution table
@@ -120,6 +129,7 @@ to <code>report.md</code>. Blocks until finished.</p>
 <tr><td><code>--executor NAME</code></td><td><code>local</code> (default), <code>slurm</code>, <code>aws</code></td><td><span class="chip chip-locked">built</span> <code>local</code> only</td></tr>
 <tr><td><code>--workers N</code></td><td>Pool size. Default one per core. <code>1</code> runs every item in-process, which is the path to use under a debugger.</td><td><span class="chip chip-locked">built</span></td></tr>
 <tr><td><code>--out PATH</code></td><td>Run directory; default <code>{root}/runs/{run_id}</code></td><td><span class="chip chip-locked">built</span></td></tr>
+<tr><td><code>--asset-cache PATH</code></td><td>Node-local directory remote assets are staged into. Sets <code>STRATUM_ASSET_CACHE</code> for this process and every spawned worker. Default <code>$STRATUM_ASSET_CACHE</code>, else <code>{root}/assets</code></td><td><span class="chip chip-locked">built</span></td></tr>
 <tr><td><code>--dry-run</code></td><td>Equivalent to <code>plan</code></td><td><span class="chip chip-locked">built</span></td></tr>
 <tr><td><code>--from-provenance URI</code></td><td>Re-run against a previous run's frozen index rather than re-querying</td><td><span class="chip chip-open">not yet</span></td></tr>
 <tr><td><code>--max-concurrent N</code></td><td><code>slurm</code>/<code>aws</code>: cap on simultaneous work items</td><td><span class="chip chip-open">not yet</span></td></tr>
@@ -142,7 +152,7 @@ interrupted run resumes. Publish is never a hit — products are written fresh u
 
 <h2 id="exec">stratum exec</h2>
 
-<pre><code>stratum exec --plan &lt;run-dir&gt; --stage STAGE --index N</code></pre>
+<pre><code>stratum exec --plan &lt;run-dir&gt; --stage STAGE --index N [--asset-cache PATH]</code></pre>
 
 <p>Executes a single work item from a run directory written by <code>stratum plan</code> and
 prints its outcome as one JSON line. This is the worker entrypoint every executor ultimately calls,
@@ -157,6 +167,7 @@ and it is what a scheduler array task should invoke:</p>
 <tbody>
 <tr><td><code>--stage STAGE</code></td><td><code>regrid</code> | <code>resolve</code> | <code>reduce</code> | <code>publish</code></td><td><span class="chip chip-locked">built</span></td></tr>
 <tr><td><code>--index N</code></td><td>Zero-based item index within that stage's work list</td><td><span class="chip chip-locked">built</span></td></tr>
+<tr><td><code>--asset-cache PATH</code></td><td>As on <code>run</code>: where this worker stages remote assets. Every array task on a node should name the same directory</td><td><span class="chip chip-locked">built</span></td></tr>
 <tr><td><code>--range A:B</code></td><td>A contiguous slice, for when per-item scheduler overhead dominates</td><td><span class="chip chip-open">not yet</span></td></tr>
 <tr><td><code>--force</code></td><td>Recompute even on a cache hit</td><td><span class="chip chip-open">not yet</span></td></tr>
 </tbody>
@@ -248,24 +259,29 @@ stratum index verify -m MANIFEST</code></pre>
 <table>
 <thead><tr><th>Subcommand</th><th>Does</th><th>Status</th></tr></thead>
 <tbody>
-<tr><td><code>build</code></td><td>Populates <code>inputs.index_location</code> (a directory; the file is <code>granules.parquet</code>) from <code>inputs.source</code>. A directory (<code>kind: local</code>) today; a catalogue later. Prints the row and granule counts</td><td><span class="chip chip-locked">built</span> local</td></tr>
+<tr><td><code>build</code></td><td>Populates <code>inputs.index_location</code> (a directory; the file is <code>granules.parquet</code>) from <code>inputs.source</code>: a directory (<code>kind: local</code>) indexed whole, or the archive (<code>kind: cmr</code>) queried for the manifest's area and time range. Metadata only, no login. Prints the source kind and provider, rows and granules, one line per collection (rows, collection version, rows with checksums, first and last acquisition) and the time span</td><td><span class="chip chip-locked">built</span> <code>local</code>, <code>cmr</code></td></tr>
 <tr><td><code>query</code></td><td>Ad-hoc query against a built index: a count and the first rows, with each granule's time, bbox and build</td><td><span class="chip chip-locked">built</span></td></tr>
 <tr><td><code>verify</code></td><td>Checks asset URIs resolve and reports rows not seen since the last build</td><td><span class="chip chip-open">not yet</span></td></tr>
 </tbody>
 </table>
 </div>
 
-<p><code>--since</code> passes through to the source as an updated-since filter — for a directory,
-file modification time — so a refresh is incremental and picks up granules that were re-delivered
-rather than newly acquired. See
+<p><code>--since</code> refreshes an <em>existing</em> index: it passes through to the source as
+an updated-since filter — the catalogue's revision date, or for a directory the file
+modification time — and the rows that come back replace their earlier versions in the file,
+keyed on collection, collection version and granule id; every other row is kept. It refuses
+when no index exists or when the manifest is wider than the index's recorded scope (rebuild
+without <code>--since</code>). See
 <a href="../guide/reading-data.html#index">Building and refreshing the index</a>.</p>
 
 <div class="note">
   <span class="label">This is the only command that talks to a catalogue</span>
   <p><code>stratum plan</code>, <code>run</code> and <code>exec</code> read a frozen index and
-  never reach a live API. The one exception is convenience, not a query: <code>plan</code> builds a
-  missing index from a <em>local</em> directory. That is what makes a run reproducible, and what
-  keeps a large fan-out from rate-limiting an upstream service.</p>
+  never reach a live API. The one exception is convenience, not a query: <code>plan</code> and
+  <code>run</code> build a <em>missing</em> index from <code>inputs.source</code>, exactly as
+  <code>index build</code> would, and then read it; once the file exists it is never refreshed
+  behind your back. That is what makes a run reproducible, and what keeps a large fan-out from
+  rate-limiting an upstream service.</p>
 </div>
 
 <h2 id="plugins">stratum plugins</h2>

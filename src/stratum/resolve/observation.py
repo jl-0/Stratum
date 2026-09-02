@@ -19,7 +19,7 @@ from rasterio.warp import transform as warp_transform
 
 from stratum.cache import CacheKey
 from stratum.classes import UNMAPPED, Remap
-from stratum.index import role_uri
+from stratum.index import role_asset, role_uri
 from stratum.regrid import read_glt
 from stratum.resolve.context import NullAux, PlanContext
 from stratum.resolve.gather import Gathered, gather
@@ -139,7 +139,11 @@ def read_observation(ctx: ObsContext) -> Observation | None:
                 reader = readers[binding.collection] = plan.reader(binding.collection)
             rctx = contexts.get(uri)
             if rctx is None:
-                rctx = contexts[uri] = reader.open(plan.store.open(uri))
+                # the catalogue checksum travels with the open (12 section 4): a remote store
+                # verifies the bytes against it and keys its node-local cache on it
+                key = role_asset(granule, binding)
+                rctx = contexts[uri] = reader.open(plan.store.open(
+                    uri, checksum=granule.checksums.get(key) if key else None))
             spec = reader.variables(rctx).get(binding.var)
             if spec is None:
                 raise KeyError(f"{uri}: no variable {binding.var!r} for role {role!r}")
