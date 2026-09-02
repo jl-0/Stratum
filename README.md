@@ -3,6 +3,7 @@
 A cost-function-driven mosaic engine for imaging spectroscopy, built to run in the cloud.
 
 [![Open in GitHub Codespaces](https://github.com/codespaces/badge.svg)](https://codespaces.new/jl-0/Stratum?quickstart=1)
+
 Opens a codespace with the environment built and a walkthrough that runs a real mosaic from
 NASA's archive — see [`.devcontainer/README.md`](.devcontainer/README.md).
 
