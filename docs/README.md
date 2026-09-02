@@ -79,6 +79,7 @@ Authoritative. Numbered by dependency order, not build order.
 | [10 — Provenance](specs/10-provenance.md) | STAC, run records, reproducibility |
 | [11 — Core types](specs/11-types.md) | Every shared type, fill/nodata rules, class tables |
 | [12 — Data access](specs/12-data-access.md) | `GranuleSource`, `GranuleReader`, `AssetStore`, CMR, the block read path |
+| [13 — Snapshot schema](specs/13-snapshot-schema.md) | Layers, enumerations, aggregation vocabulary, extend-never-redefine |
 
 Specs cite the file a claim came from, and mark inferences as inferences. Where a contract exists
 because of something observed in an existing pipeline, the citation is inline and the fuller

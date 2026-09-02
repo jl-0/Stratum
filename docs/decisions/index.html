@@ -108,10 +108,6 @@ implementation hardens them.</p>
 <table>
 <thead><tr><th>Question</th><th>Current leaning</th></tr></thead>
 <tbody>
-<tr><td>One GLT per granule, or one fused GLT per tile and epoch?</td><td>Per granule — strictly more general. The fused form is an optimization the planner can choose when the scorer declares <code>streaming</code>.</td></tr>
-<tr><td>Should a GLT store <code>granule_id</code> directly rather than an index into a file list?</td><td>Unresolved. Indices are compact but make a GLT meaningless without its list.</td></tr>
-<tr><td>Is <code>regrid_algo_version</code> manual, or derived from a hash of the module?</td><td>Manual is honest but forgettable; derived is automatic but churns on cosmetic edits.</td></tr>
-<tr><td>Global GLT cache, or one per deployment?</td><td>Global maximizes sharing but complicates lifecycle ownership and cost attribution.</td></tr>
 <tr><td>Batch on Fargate or EC2?</td><td>Fargate is simpler and supports Graviton Spot; EC2 gives better instance selection for memory-heavy reduces and local NVMe for staging.</td></tr>
 <tr><td>Is <code>tile</code> capability worth supporting in v1?</td><td>Defer until something needs it.</td></tr>
 </tbody>

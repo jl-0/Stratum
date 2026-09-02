@@ -23,7 +23,7 @@ type below declares which one it is in.
 |---|---|---|---|
 | **sensor** | `(downtrack, crosstrack)` | 1664 × 1242 | Raw L2B/L1B variables; sensor-space `PixelMask` |
 | **granule-ortho** | `(ortho_y, ortho_x)` | 2363 × 2309 | The GLT *shipped inside the granule*; see §7 |
-| **block** | `(y, x)` | run-defined, e.g. 512 × 512 | Everything from stage 3 onward |
+| **block** | `(y, x)` | run-defined, e.g. 512 × 512 | Everything from resolve onward |
 
 Cross-track is 1242 columns, which is what `EdgeTrim` operates on
 ([04 §3](04-cost-functions.md)).
@@ -124,29 +124,31 @@ class GranuleRef:
     end_datetime: datetime
     bbox: tuple[float, float, float, float]
     assets: Mapping[str, str]     # role -> URI
-    build_version: str            # "010635"  granule software build   [observed]
-    product_version: str          # "V001"    granule product stamp    [observed]
+    build_version: str            # "010635"  CMR SOFTWARE_BUILD_VERSION   [observed]
+    product_version: str          # "V001"    file header; not in CMR      [observed]
     collection_version: str       # "001"     the CMR collection's own version
     cloud_fraction: float | None  # None is meaningful - see 02 section 4
     day_night: str | None         # "Day"             [observed]
+    attributes: Mapping[str, str] # the source's remaining fields, verbatim
 ```
 
-**Three version fields, deliberately.** `build_version` and `product_version` are properties of
-*this granule*, read from its own global attributes. `collection_version` is a property of the
-**collection** it belongs to, so it is identical for every granule in that collection and can never
-discriminate between them. Vintage pinning ([02 §3](02-granule-index.md)) is therefore a predicate
-on the first two; `collection_version` exists only so a run can record which collection it read.
-Collapsing them into one field is how a "pinned" run silently spans a reprocessing boundary
-([12 §5](12-data-access.md)).
+**Three version fields, deliberately.** `build_version` is a property of *this granule* and moves
+often — one collection already holds eight of them. `product_version` is the file's own stamp and
+in practice tracks the collection. `collection_version` is a property of the **collection**, so it
+is identical for every granule in it. None of the three is the vintage check: that is the class
+table's fingerprint (§9), because a class shift is what a reprocessing changes and a build number
+merely correlates with it. All three are carried so a run can report exactly what it read, and so
+a filter can pin any of them when there is a reason to ([02 §3](02-granule-index.md),
+[12 §5](12-data-access.md)).
 
 `GranuleFrame` is the plural form: a dataframe with these as columns, which is what
 `GranuleFilter.keep()` receives. Filters are vectorized over it and never see individual granules.
 
-> **[observed] Vintage identifiers.** The open question in [02 §3](02-granule-index.md) is now
-> partly answered: the granule carries `software_build_version` (`010635`),
+> **[observed] Vintage identifiers.** The granule carries `software_build_version` (`010635`),
 > `software_delivery_version`, and `product_version` (`V001`). Its `history` attribute names
-> `tetracorder5.27c.cmds`, confirming this file predates the Tetracorder 6 reprocessing.
-> **Still open:** whether these are exposed by CMR *before* download.
+> `tetracorder5.27c.cmds`, confirming this file predates the Tetracorder 6 reprocessing. CMR
+> exposes the first two as granule-level `AdditionalAttributes` — verified 2026-09-01 — and not
+> the third ([12 §5](12-data-access.md)).
 
 ### Epoch assignment
 
@@ -162,7 +164,7 @@ Not previously specified anywhere:
 
 ### Epoch vs delivery period
 
-An **epoch** is the unit of one vote: stage 3 resolves it to exactly one snapshot per cell, however
+An **epoch** is the unit of one vote: the resolve stage collapses it to exactly one snapshot per cell, however
 many observations fell in it. This is what normalises for revisit density — without it, a densely
 revisited month outvotes a sparse one and the reduction partly describes the acquisition schedule.
 
@@ -181,8 +183,9 @@ Windows truncate at `time.start` / `time.end`, so edge products carry fewer epoc
 `n_epochs` rather than being hidden, and `min_count` on the reducer is the suppression lever.
 
 **Snapshots do not key on the delivery period** ([06 §2](06-caching.md)), so overlapping windows
-re-run stage 4 only — a 13-month window delivered monthly computes each snapshot once and reads it
-thirteen times.
+re-run reduce only — a 13-month window delivered monthly computes each snapshot once and reads it
+thirteen times. The lifecycle in [06 §5](06-caching.md) keeps snapshots for the longest window a
+deployment declares, so that holds in practice and not only in principle.
 
 ---
 
@@ -195,22 +198,49 @@ class ObsWindow:
     space: Literal["sensor", "block"]
     n: int                        # 1 in streaming mode, N in stack mode
     block: BlockRef | None        # None in sensor space
+    sensor_window: SensorWindow | None   # set in sensor space; carries row0/col0 - section 10
     granule: GranuleRef | None    # None in stack mode - see granules
     granules: Sequence[GranuleRef]
+
+    epoch: Epoch                  # the epoch this block is being resolved for
 
     def __getitem__(self, alias: str) -> np.ndarray:
         """Band by alias. Shape (H, W) streaming, (N, H, W) stacked."""
 
     @property
+    def coords(self) -> Coords:
+        """Cell centres: .x/.y in the grid CRS, .lon/.lat. Each (H, W). Halo included."""
+
+    @property
     def valid(self) -> np.ndarray:
         """Bool. True = observed and unmasked. Same shape as a band."""
+
+    @property
+    def interpolated(self) -> np.ndarray:
+        """Bool. True where the GLT reached beyond max_distance - 03 section 2, 12 section 2."""
 ```
+
+```python
+@dataclass(frozen=True)
+class Coords:
+    """Cell centres for one block, halo included. Each array is (H, W)."""
+    x: np.ndarray                 # grid CRS
+    y: np.ndarray
+    lon: np.ndarray               # EPSG:4326, always
+    lat: np.ndarray
+```
+
+`coords` is what lets a scorer do its own geometry against a declared vector source
+([05 §3](05-ancillary-data.md)) without the framework growing a spatial-join vocabulary.
 
 ### Aliases, not indices
 
 `obs["view_zenith"]`, never `obs[:, :, 5]`. The manifest maps aliases to `(role, band)` per
 collection ([09 §2](09-run-manifest.md)), so the same scorer works across instruments — which
-matters now that multi-instrument is a live requirement, not a someday one.
+matters now that multi-instrument is a live requirement, not a someday one. An alias names a band
+by index, or by matching an attribute the reader reports for its bands —
+`{role: reflectance, match: {wavelength: 2200}, tolerance: 10}` — and the core never interprets
+the attribute; it only matches it ([12 §3](12-data-access.md)).
 
 Requesting an alias the manifest does not define is an error at **plan time**, via
 `Scorer.required_roles`, not at runtime in 4,000 workers.
@@ -234,11 +264,18 @@ scorers can reason about sequence.
 
 ```python
 class AuxAccessor:
-    def raster(self, alias: str, *, date: datetime | None = None) -> np.ndarray:
-        """(H, W) on THIS block's grid. Warped, windowed, cached."""
+    def raster(self, alias: str, *, date: datetime | None = None,
+               epoch: Epoch | None = None) -> np.ndarray:
+        """(H, W) on THIS block's grid. Warped, windowed, cached. `epoch` for temporal: epoch sources."""
 
     def vector(self, alias: str) -> np.ndarray:
         """Rasterized to this block's grid."""
+
+    def features(self, alias: str, *, margin: float = 0.0) -> Sequence[BaseGeometry]:
+        """The source's geometries, clipped to this block plus margin, in the block CRS."""
+
+    def distance(self, alias: str, *, cutoff: float | None = None) -> np.ndarray:
+        """(H, W) distance from each cell centre to the nearest feature. Cached like a warp."""
 
     def table(self, alias: str) -> AuxTable:
         """.at(date) -> scalar. No gridding."""
@@ -261,11 +298,13 @@ class GLT:
     data: np.ndarray              # (H, W, 3) int32
     grid: GridDef
     tile: TileRef
-    granules: Sequence[GranuleRef]    # File Index is 1-based into this
+    granule: GranuleRef           # one GLT per granule; band 3 is always 1
     score: np.ndarray | None      # (H, W) float32 - the winning score
 ```
 
-Bands are `(GLT X, GLT Y, File Index)`, 1-based, `0` = nodata, negatives = interpolated.
+Bands are `(GLT X, GLT Y, File Index)`, 1-based, `0` = nodata, negatives = interpolated. Band 3 is
+always `1` and is kept for interoperability; `granule_id` and `grid.id` are in the file's metadata
+([03 §2](03-regrid-glt.md)).
 
 `score` is not optional in practice — persisting it is a requirement from
 [03 §2](03-regrid-glt.md), since "why did this pixel win?" must be answerable from the artifact.
@@ -275,17 +314,44 @@ It is typed optional only because a GLT read back from a V002-era file will not 
 > (`int32`, `_FillValue = 0`; observed ranges 1–1242 crosstrack, 1–1664 downtrack) map the
 > granule's own ortho grid
 > (2363 × 2309) back to sensor space. This is *not* our tile grid — the origin is per-granule — so
-> it cannot substitute for the KD-tree regrid. It is worth knowing about for two reasons: it is
-> what `SpectralUtil`'s `load_data(..., load_glt=True)` returns, and it is a ready-made fixture
-> for testing GLT application without building one.
+> it cannot substitute for the KD-tree regrid as-is. It is what `GranuleReader.glt()` returns and
+> what the `warp_embedded` regrid method warps onto the tile grid ([03 §3](03-regrid-glt.md)); it is
+> also what `SpectralUtil`'s `load_data(..., load_glt=True)` returns, and a ready-made fixture for
+> testing GLT application without building one.
 
 ---
 
-## 8. Snapshots, bands and outputs
+## 8. Snapshots, layers and outputs
 
 ```python
 @dataclass(frozen=True)
+class LayerSpec:
+    name: str
+    kind: Literal["categorical", "continuous"]
+    source: str                           # role or band alias - one namespace
+    dtype: str                            # defaulted from the source band
+    bands: tuple[int, ...] | None         # subset of a multi-band source; None = all
+    classes: ClassTable | None            # the enumeration; categorical only
+    aggregate: Aggregation                # method + params - 13 section 4
+
+@dataclass(frozen=True)
+class Aggregation:
+    method: str                           # vote | best | median | ... | none
+    params: Mapping[str, object]          # min_count, ignore, conditional_on, unc, spread, ...
+
+@dataclass(frozen=True)
+class SnapshotSchema:
+    name: str
+    layers: Sequence[LayerSpec]
+    extends: Sequence[str] = ()           # ancestor schema names; their layers_hash is recorded - 13 section 5
+    @property
+    def layers_hash(self) -> str: ...     # enters the snapshot key
+    @property
+    def aggregate_hash(self) -> str: ...  # enters the product key
+
+@dataclass(frozen=True)
 class BandSpec:
+    """A delivered output band. Derived from the schema, or declared by a Reducer plugin."""
     name: str
     dtype: str
     description: str
@@ -294,8 +360,9 @@ class BandSpec:
 
 class SnapshotStack:
     """Reducer input. Epoch-major."""
+    schema: SnapshotSchema
     epochs: Sequence[Epoch]           # ordered, ascending
-    def __getitem__(self, band: str) -> np.ndarray:   # (n_epochs, H, W)
+    def __getitem__(self, layer: str) -> np.ndarray:  # (n_epochs, H, W) or (n_epochs, H, W, B)
     @property
     def valid(self) -> np.ndarray:                    # (n_epochs, H, W) bool
     @property
@@ -307,21 +374,26 @@ class BandStack:
     specs: Sequence[BandSpec]
 ```
 
-### Snapshot schema
+### What a snapshot holds
 
-`SnapshotStack.__getitem__` resolves any band the `Scorer` named in `carry`
-([04 §4](04-cost-functions.md)), plus `score` and `valid`, which the framework always adds.
-Scorer-*computed* bands are a planned enhancement, not in v1 — see the same section.
+Exactly the layers `SnapshotSchema` declares, plus `score` and `valid`, which the framework always
+adds. A categorical layer holds product ids from its enumeration, never a raw class
+([13 §3](13-snapshot-schema.md)). Scorer-*computed* layers are a planned enhancement, not in v1
+([04 §4](04-cost-functions.md)).
 
 A snapshot is an **internal artifact** — nothing renders it and nothing outside the pipeline reads
 it — so its width is a design choice rather than a product constraint. Carrying geometry,
-acquisition time, runner-up margin or per-candidate evidence costs `O(block × n_bands)` in a
-streaming worker, independent of observation count. Storage is the real limit, not memory.
+acquisition time or per-candidate evidence costs `O(block × n_layers)` in a streaming worker,
+independent of observation count. Storage is the real limit, not memory.
 
 `SnapshotStack.valid` is what keeps `min_count` honest: an epoch with no observation over a pixel
-must not count toward agreement. `score` is always populated, so a reducer may weight by confidence
-rather than treating every epoch equally — `tie_break: highest_score` depends on it, and a
-winner-take-all reducer is expressible as an argmax over it ([04 §5](04-cost-functions.md)).
+must not count toward agreement. `score` is always populated, so an aggregation may weight by
+confidence — `tie_break: highest_score`, `score_weighted` and `best` all depend on it
+([13 §4](13-snapshot-schema.md)).
+
+**Every snapshot in a run shares one `SnapshotSchema`**, and its `layers_hash` is in every
+snapshot's cache key ([06 §2](06-caching.md)). A `Reducer` plugin receives the schema through
+`snaps.schema` and is never handed epochs written under two of them.
 
 ---
 
@@ -388,8 +460,9 @@ mechanically solvable**, where an external table would have made it silent:
 
 1. **Fingerprint every granule's table** at plan time.
 2. **All identical** → the common case. Proceed; record the fingerprint in provenance.
-3. **They differ** → the run spans vintages. Either fail loudly, or remap through the attribute
-   columns, which carry enough identity to compute the correspondence. Measured on the delivered
+3. **They differ** → the run spans vintages. Fail loudly by default; under
+   `allow_mixed_vintage` accept them only if each resolves fully into the product enumeration,
+   which *is* the remap through the attribute columns ([13 §3](13-snapshot-schema.md)). Measured on the delivered
    file, `(library, record, group)` resolves 292 of 294 entries — so a remap is computable, with a
    short list of genuine ambiguities surfaced for a human rather than guessed.
 
@@ -398,8 +471,8 @@ belongs in the core.
 
 ### Output products carry their own table
 
-A mosaic's classes are its own — post-lumping, they are not the input classes. Stage 5 therefore
-publishes a `ClassTable` for the product alongside it, which is the same requirement as the legend
+A mosaic's classes are its own — post-lumping, they are not the input classes. The publish stage therefore
+writes a `ClassTable` for the product alongside it, which is the same requirement as the legend
 in [07 §2](07-output-mapping.md), reached from the other direction.
 
 ---
@@ -431,6 +504,8 @@ class VarSpec:
     shape: tuple[int, ...]
     fill: float | int | None
     units: str = "unitless"
+    band_attrs: Mapping[str, Sequence[object]] = {}   # per-band attributes the file carries,
+                                                     # e.g. wavelength; never interpreted by the core
 
 class GranuleReader(Protocol):
     collections: tuple[str, ...]          # index `collection` values this reader claims
@@ -440,6 +515,7 @@ class GranuleReader(Protocol):
     def variables(self, ctx: ReaderContext) -> Mapping[str, VarSpec]: ...
     def read(self, ctx, var: str, window: SensorWindow | None = None) -> MaskedArray: ...
     def geolocation(self, ctx) -> LocArray | None: ...
+    def glt(self, ctx) -> GLT | None: ...      # the product's own lookup table, on its grid
     def class_table(self, ctx, path: str, key: str, attributes) -> ClassTable | None: ...
 
 class GranuleSource(Protocol):
@@ -514,6 +590,10 @@ source; neither changes what a mosaic means.
 
 Recorded so nobody re-derives them.
 
+- **Science variables are one gzip chunk each.** `group_N_mineral_id` and `group_N_band_depth` are
+  stored as a single `(1664, 1242)` chunk with gzip and shuffle; `location/lat` and `lon` are
+  contiguous and uncompressed; the embedded GLT is four `(1182, 1155)` gzip chunks. A windowed read
+  of a science band therefore decodes the whole variable ([12 §2](12-data-access.md)).
 - **`bands = 4` is declared but unused** by any root variable in the L2B MIN file. Presumably for
   the MINUNCERT companion. Do not assume it means four spectral bands.
 - **Only two mineral groups** exist (`group_1_*`, `group_2_*`), matching AMD's config.
@@ -528,12 +608,15 @@ Recorded so nobody re-derives them.
 
 ## 12. Open questions
 
-1. Are `software_build_version` / `product_version` exposed by CMR before download? Decides
-   whether vintage filtering is an index predicate or requires touching files.
-2. Should `ObsWindow` expose per-granule uncertainty as a first-class alias, or is it just another
-   role? Leaning role.
-3. Is fingerprint-and-assert enough for class-table agreement in practice, or is cross-vintage
-   remapping needed in v1? Assert first; verify on a real multi-granule set spanning the
-   reprocessing boundary before deciding.
-4. Should `ClassTable` be `pyarrow.Table`, or a plain dataclass of columns? Arrow makes
-   fingerprinting and attribute matching easy and is already implied by GeoParquet.
+1. ~~Are `software_build_version` / `product_version` exposed by CMR before download?~~
+   **Resolved:** the build version is; `product_version` is not, and tracks the collection version
+   ([12 §5](12-data-access.md)).
+2. ~~Should `ObsWindow` expose per-granule uncertainty as a first-class alias, or is it just another
+   role?~~ **Resolved:** a role. Nothing about uncertainty is special to the framework.
+3. ~~Is fingerprint-and-assert enough for class-table agreement in practice, or is cross-vintage
+   remapping needed in v1?~~ **Resolved:** resolution into the schema's enumeration is the remap
+   ([13 §3](13-snapshot-schema.md)). Fingerprint-and-fail remains the default, and
+   `allow_mixed_vintage` admits differing tables only when each resolves fully.
+4. ~~Should `ClassTable` be `pyarrow.Table`, or a plain dataclass of columns?~~ **Resolved:**
+   `pyarrow.Table`. Fingerprinting and attribute matching are easy, and GeoParquet already implies
+   it.

@@ -32,12 +32,13 @@ function is cheap.</p>
 <table>
 <thead><tr><th>Artifact</th><th>Key includes</th><th>New scorer<br>rebuilds?</th></tr></thead>
 <tbody>
+<tr><td><strong>Prepared asset</strong><br><span class="chip chip-obs">asset</span></td><td><code>asset_checksum</code>, <code>prepare_version</code></td><td>No</td></tr>
 <tr><td><strong>GLT</strong><br><span class="chip chip-obs">granule &times; tile</span></td><td><code>granule_id</code>, <code>grid_def</code>, <code>max_distance</code>, <code>regrid_algo_version</code></td><td><strong>No</strong></td></tr>
 <tr><td><strong>Masked observation</strong><br><span class="chip chip-obs">granule &times; tile &times; block</span></td><td><code>glt_key</code>, <code>asset_roles</code>, <code>pixel_mask_spec</code>, <code>mask_plugin_version</code></td><td>No</td></tr>
 <tr><td><strong>Aux warp</strong><br><span class="chip chip-obs">source &times; tile</span></td><td><code>source_uri</code>, <code>source_etag</code>, <code>grid_def</code>, <code>resampling</code></td><td>No</td></tr>
-<tr><td><strong>Epoch snapshot</strong><br><span class="chip chip-obs">tile &times; epoch &times; block</span></td><td><code>obs_keys[]</code>, <code>scorer_ref</code>, <code>scorer_version</code>, <code>scorer_params</code>, <code>scorer_carry</code>, <code>epoch_bounds</code></td><td><strong>Yes</strong></td></tr>
-<tr><td><strong>Product block</strong><br><span class="chip chip-obs">tile &times; block</span></td><td><code>snapshot_keys[]</code>, <code>reducer_ref</code>, <code>reducer_version</code>, <code>reducer_params</code></td><td>Yes</td></tr>
-<tr><td><strong>Rendered image</strong><br><span class="chip chip-obs">tile</span></td><td><code>product_keys[]</code>, <code>mapper_ref</code>, <code>mapper_version</code>, <code>mapper_params</code></td><td>No</td></tr>
+<tr><td><strong>Epoch snapshot</strong><br><span class="chip chip-obs">tile &times; epoch &times; block</span></td><td><code>obs_keys[]</code>, <code>aux_keys[]</code>, <code>scorer_ref</code>, <code>scorer_version</code>, <code>scorer_params</code>, <code>schema.layers_hash</code>, <code>epoch_bounds</code></td><td><strong>Yes</strong></td></tr>
+<tr><td><strong>Product block</strong><br><span class="chip chip-obs">tile &times; block</span></td><td><code>snapshot_keys[]</code>, <code>aux_keys[]</code>, <code>schema.aggregate_hash</code>; plus reducer ref, version and params when a plugin is named</td><td>Yes</td></tr>
+<tr><td><strong>Rendered image</strong><br><span class="chip chip-obs">tile</span></td><td><code>product_keys[]</code>, <code>aux_keys[]</code>, <code>mapper_ref</code>, <code>mapper_version</code>, <code>mapper_params</code></td><td>No</td></tr>
 </tbody>
 </table>
 </div>
@@ -48,10 +49,12 @@ function is cheap.</p>
 <table>
 <thead><tr><th>You change</th><th>Rebuilds</th><th>Reuses</th></tr></thead>
 <tbody>
-<tr><td>Scorer code or params</td><td>Stages 3&ndash;5</td><td>All cached GLTs and masked observations</td></tr>
-<tr><td>Reducer only</td><td>Stages 4&ndash;5</td><td>All epoch snapshots</td></tr>
+<tr><td>Scorer code or params</td><td>Resolve, reduce, publish</td><td>All cached GLTs and masked observations</td></tr>
+<tr><td>A layer's aggregation method, or a reducer plugin</td><td>Reduce, publish</td><td>All epoch snapshots</td></tr>
+<tr><td>What a snapshot layer holds, or what an existing class means</td><td>Resolve, reduce, publish</td><td>All cached GLTs</td></tr>
+<tr><td>Appending classes to an enumeration</td><td>Nothing, with <code>extends</code></td><td>All epoch snapshots</td></tr>
 <tr><td>Colours only</td><td>Nothing — use <code>stratum render</code></td><td>The published data product</td></tr>
-<tr><td>Pixel masks</td><td>Stages 2b&ndash;5</td><td>The GLTs — geometry does not depend on cloudiness</td></tr>
+<tr><td>Pixel masks</td><td>Resolve, reduce, publish</td><td>The GLTs — geometry does not depend on cloudiness</td></tr>
 <tr><td>Grid or resolution</td><td>Everything</td><td>Nothing. This is a different product.</td></tr>
 <tr><td>Time range or filters</td><td>Whatever the changed granule set touches</td><td>Cached geometry for granules still selected</td></tr>
 </tbody>
@@ -150,14 +153,16 @@ cause is always one field:</p>
 <tbody>
 <tr><td>GLT</td><td>Indefinite</td><td>Expensive, immutable, shared, small relative to imagery</td></tr>
 <tr><td>Masked observations</td><td>~30 days</td><td>Large, and cheap to rebuild from a cached GLT</td></tr>
-<tr><td>Epoch snapshots</td><td>~30 days</td><td>Reproducible, and invalidated by scorer changes anyway</td></tr>
+<tr><td>Epoch snapshots</td><td>The longest delivery window any manifest declares; at least 30 days</td><td>A rolling window re-reads snapshots rather than recomputing them; invalidated by scorer changes anyway</td></tr>
 <tr><td>Product blocks</td><td>Until the tile publishes</td><td>Superseded by the stitched product</td></tr>
+<tr><td>Prepared assets</td><td>While a frozen index references them</td><td>One transcode per asset; what makes block reads genuinely windowed on the delivered L2B</td></tr>
 <tr><td>Frozen index, reports, provenance</td><td>Indefinite</td><td>Tiny, and the basis of reproducibility</td></tr>
 </tbody>
 </table>
 </div>
 
-<p>An expired masked observation costs one cheap rebuild from cached geometry, not a regrid. The
+<p>An expired masked observation costs one cheap rebuild from cached geometry, not a regrid. It is an optional layer — resolve builds it as it reads, and caches it only so the
+next scorer over the same ground can skip the granule read. The
 retention policy is set per deployment; these are the defaults.</p>
 
 <h2 id="forcing">Forcing a rebuild</h2>

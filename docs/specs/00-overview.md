@@ -25,6 +25,8 @@ Fixing these now, because three existing pipelines use the same words differentl
 | **Source** | Where the index comes from — a catalogue (CMR, STAC) or a directory. Never queried by a run. |
 | **Observation** | One granule's contribution to one block, after regrid and masking. |
 | **Snapshot** | The winning value per cell for one epoch — output of `Scorer`. |
+| **Schema** | The declared set of snapshot layers — type, enumeration, aggregation — constant for a run. One per manifest ([13](13-snapshot-schema.md)). |
+| **Layer** | One band of a snapshot, as the schema declares it. |
 | **Product** | The reduced result per tile — output of `Reducer`, plus its rendering. |
 
 Two distinctions that matter and are easy to lose:
@@ -52,13 +54,13 @@ Two distinctions that matter and are easy to lose:
         ┌─────────────────▼─────────────────┐
    2    │  REGRID                           │   unit: granule × tile
         │  KD-tree loc → grid  ⇒  GLT       │   CACHED — geometry only
-        │  + PixelMask applied              │   Lambda or Batch
+        │  reads loc only, no pixel bands   │   Lambda or Batch
         └─────────────────┬─────────────────┘
                           │  GLT COGs (content-addressed)
         ┌─────────────────▼─────────────────┐
    3    │  RESOLVE            ◀── Scorer    │   unit: tile × epoch × block
-        │  apply GLTs for this block,       │   Lambda or Batch
-        │  score, keep the winner           │
+        │  apply GLTs, mask, score,         │   Lambda or Batch
+        │  keep the winner                  │
         └─────────────────┬─────────────────┘
                           │  epoch snapshots + score + count
         ┌─────────────────▼─────────────────┐
@@ -73,6 +75,9 @@ Two distinctions that matter and are easy to lose:
         │        → STAC item + provenance   │
         └───────────────────────────────────┘
 ```
+
+The rest of the specs refer to stages **by name** — plan, regrid, resolve, reduce, publish. The
+numbers exist only in this diagram, to show order.
 
 ### Stage 1 — Plan
 
@@ -89,20 +94,25 @@ Outputs: frozen index (GeoParquet), work list (JSONL in S3), run manifest hash, 
 ### Stage 2 — Regrid
 
 For each (granule, tile): build the GLT by nearest-neighbour from the granule's `loc` array to
-the tile grid, apply `PixelMask` so masked pixels never enter the stack, write a GLT COG.
+the tile grid and write a GLT COG. Nothing else is read — regrid touches `loc`, and no pixel band
+and no mask.
 
-**This stage is pure geometry.** Its output depends on the granule, the grid definition, and the
-mask spec — and on nothing about the science. It is content-addressed and cached indefinitely.
+**This stage is pure geometry.** Its output depends on the granule, the grid definition and
+`max_distance` — and on nothing about the science or the masks. It is content-addressed and cached indefinitely.
 Changing a cost function does not invalidate it. See [03](03-regrid-glt.md), [06](06-caching.md).
 
 ### Stage 3 — Resolve
 
 For each (tile, epoch, block): gather the granules intersecting this block in this epoch, apply
-their GLTs, and run the `Scorer` to pick a winner per cell.
+their GLTs, apply `PixelMask` so ineligible pixels never enter the stack, and run the `Scorer` to
+pick a winner per cell. Masking happens here, in the read path, not in regrid
+([12 §2](12-data-access.md)). The winner's values are written into the layers the snapshot schema
+declares, with raw classes resolved into the product's own enumeration ([13](13-snapshot-schema.md)).
 
 Applying a GLT is also what makes the read cheap. The GLT names exactly which sensor pixels this
-block touches — under 4% of a granule's 1664 × 1242 — so only that rectangle is read, not the scene
-([12 §2](12-data-access.md)).
+block touches — under 4% of a granule's 1664 × 1242 — so only that rectangle need be read, not the
+scene ([12 §2](12-data-access.md)) — once the asset is in a windowable layout, which the delivered
+L2B is not until it is prepared ([12 §4](12-data-access.md)).
 
 Two execution modes, chosen by the scorer's declared capability:
 
@@ -116,12 +126,14 @@ score band is not optional — without it nobody can answer "why did this pixel 
 
 ### Stage 4 — Reduce
 
-For each (tile, block): collapse the epoch snapshots through time via `Reducer`. For Critical
-Minerals this is mode-through-time, emitting the modal class, an agreement measure, an epoch
-count, and a runner-up.
+For each (tile, block): collapse the epoch snapshots through time, layer by layer, by the
+aggregation each layer declares in the schema — a vote for a class layer, a median for a depth
+([13 §4](13-snapshot-schema.md)). For Critical Minerals that is mode-through-time: the modal class,
+an agreement measure, an epoch count, and a runner-up. A `Reducer` plugin exists for what the
+vocabulary cannot express.
 
-The stack here is *epochs*, not granules — small and bounded by the delivery window. A no-op reducer
-reproduces V002 semantics exactly.
+The stack here is *epochs*, not granules — small and bounded by the delivery window. Over a single epoch every
+aggregation is the identity, which reproduces V002 semantics exactly.
 
 ### Stage 5 — Publish
 
@@ -141,11 +153,11 @@ keys and hashes, never geometry or band lists.
 
 | Boundary | Payload | Form |
 |----------|---------|------|
-| 1 → 2 | Work list of (granule, tile) | JSONL in S3, read by an item reader |
-| 2 → 3 | GLT + masked observation refs | COG, content-addressed key |
-| 3 → 4 | Epoch snapshots | COG per (tile, epoch, block) |
-| 4 → 5 | Product blocks | COG per (tile, block) |
-| 5 → out | Data + image + legend + STAC + provenance | Per tile, run-prefixed |
+| plan → regrid | Work list of (granule, tile) | JSONL in S3, read by an item reader |
+| regrid → resolve | GLT refs | COG, content-addressed key |
+| resolve → reduce | Epoch snapshots | COG per (tile, epoch, block) |
+| reduce → publish | Product blocks | COG per (tile, block) |
+| publish → out | Data + image + legend + STAC + provenance | Per tile, run-prefixed |
 
 ---
 
@@ -175,7 +187,8 @@ These hold across every stage, and violating any of them breaks something the de
 1. **Block size never changes output.** Block-wise and tile-wise results must be bit-identical.
    Enforced by a seam-equivalence test in CI. Plugins needing spatial context declare a `halo`;
    plugins needing a global view declare `capability = "tile"`.
-2. **Geometry is independent of science.** Nothing in stage 2 may read a scorer parameter.
+2. **Geometry is independent of science.** Nothing in regrid may read a scorer parameter
+   or a mask; it reads `loc` and nothing else.
 3. **Every artifact is content-addressed** by a hash of the inputs that determine it, and only
    those. See [06](06-caching.md).
 4. **A run is reproducible from its manifest hash alone** — same frozen index, same plugin
@@ -185,6 +198,9 @@ These hold across every stage, and violating any of them breaks something the de
 7. **Categorical classes resolve through attributes**, never positional indices. Products carry
    their own class tables, and a vintage bump must not silently reassign classes. See
    [11 §9](11-types.md).
+8. **One schema per run.** Every snapshot in a run is written under the same layer set and
+   enumerations. Extend a schema between runs; never redefine one under cached snapshots
+   ([13 §5](13-snapshot-schema.md)).
 
 ---
 
@@ -194,7 +210,7 @@ These hold across every stage, and violating any of them breaks something the de
 |------|--------|
 | [01 — Grid, tiling, blocks](01-grid-tiling.md) | Grid definition, tile/block decomposition, halos |
 | [02 — Granule index](02-granule-index.md) | Index schema, freezing, queries, role resolution |
-| [03 — Regrid and GLT](03-regrid-glt.md) | GLT format, KD-tree, masking, SpectralUtil boundary |
+| [03 — Regrid and GLT](03-regrid-glt.md) | GLT format, KD-tree, SpectralUtil boundary |
 | [04 — Cost functions](04-cost-functions.md) | All five hook contracts, execution modes |
 | [05 — Ancillary data](05-ancillary-data.md) | Aux readers, regridding, `AuxAccessor`, caching |
 | [06 — Caching](06-caching.md) | Content addressing, cache keys, invalidation |
@@ -204,3 +220,4 @@ These hold across every stage, and violating any of them breaks something the de
 | [10 — Provenance](10-provenance.md) | STAC, run records, reproducibility |
 | [11 — Core types](11-types.md) | Every shared type, fill/nodata rules, class tables |
 | [12 — Data access](12-data-access.md) | `GranuleSource`, `GranuleReader`, `AssetStore`, CMR, the block read path |
+| [13 — Snapshot schema](13-snapshot-schema.md) | Layers, enumerations, aggregation vocabulary, extend-never-redefine |

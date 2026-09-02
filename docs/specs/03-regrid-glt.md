@@ -3,7 +3,7 @@
 **Status:** draft · **Depends on:** [01](01-grid-tiling.md), [02](02-granule-index.md) ·
 **Depended on by:** [04](04-cost-functions.md), [06](06-caching.md)
 
-Stage 2: putting a granule on the grid. Pure geometry, and the most valuable thing we cache.
+The regrid stage: putting a granule on the grid. Pure geometry, and the most valuable thing we cache.
 
 ---
 
@@ -25,7 +25,7 @@ can be fused into the regrid loop for free; AMD's is not, so it must materialize
 
 > **The GLT is a *regrid operator*, not the mosaic.** Selection is a separate reduction that may
 > or may not be fused into it. That reframing is what makes temporal aggregation expressible at
-> all — and it is why stage 2 carries no science.
+> all — and it is why regrid carries no science.
 
 ---
 
@@ -39,9 +39,14 @@ can be fused into the regrid loop for free; AMD's is not, so it must materialize
 | 2 | `GLT Y` — source row, 1-based |
 | 3 | `File Index` — which granule, 1-based |
 
+With one GLT per granule, band 3 is always `1`. It is kept so SpectralUtil and AMD tooling open
+Stratum GLTs unchanged; the granule's identity is in the file's metadata as `granule_id`, beside
+`grid.id`, so a GLT is meaningful without any file list.
+
 `0` is nodata. **Negative values mark interpolated cells** — those whose nearest neighbour
 exceeded `max_distance`. Preserving the sign convention matters: it is how downstream code
-distinguishes "no data" from "data, but reached for".
+distinguishes "no data" from "data, but reached for". Interpolated cells are valid observations;
+the flag reaches a scorer as `obs.interpolated` ([12 §2](12-data-access.md)).
 
 ### Two additions
 
@@ -68,6 +73,17 @@ Unchanged from `SpectralUtil` — this is good code and we wrap rather than reim
 
 Cost is dominated by step 3: ~1.6 M granule points against ~11 M grid cells for a 1° tile at
 0.0003°. This is the expensive step, and the reason it is cached.
+
+### Two methods
+
+`kdtree` above is the default and works for any product that ships a `loc` array. Some products
+also ship a lookup table on their own ortho grid — EMIT's L2B does ([11 §7](11-types.md)) — and
+`warp_embedded` uses it: the reader hands back the product's own GLT through
+`GranuleReader.glt()` ([12 §3](12-data-access.md)) and regrid nearest-warps its integer bands onto
+the tile grid, a raster operation over two small bands instead of a KD-tree over 1.6 M points.
+The two do not give identical results — the warp is nearest-of-nearest — so `regrid_method` is in
+the GLT cache key ([06 §2](06-caching.md)) and is a manifest field, `grid.regrid_method`, never a
+heuristic. Which is faster, and how far they differ, is a pilot measurement.
 
 ### Use the cores
 
@@ -130,22 +146,29 @@ the registry keyed on collection, and the reason it is shaped that way are
 
 ---
 
-## 5. Masking during regrid
+## 5. Masking is not done here
 
-`PixelMask` is applied here so masked pixels never enter the observation stack — cheaper than
-filtering later, and it keeps stage 3 concerned only with ranking.
+`PixelMask` runs in **resolve's read path**, not in regrid. Regrid reads `loc` and nothing else:
+no pixel band, no mask asset. A sensor-space mask is applied to the sensor window before the gather
+through the GLT; a map-space mask to the block after it ([12 §2](12-data-access.md)). Either way a
+masked pixel never enters the observation stack, which is what keeps the scorer concerned only
+with ranking.
 
-The mask spec is part of the observation cache key but **not** the GLT key: geometry does not
-depend on cloudiness, so changing a mask must not rebuild GLTs ([06 §2](06-caching.md)).
+The consequence for caching is the one that matters: the mask spec is **not** in the GLT key.
+Geometry does not depend on cloudiness, so changing a mask must not rebuild GLTs. The masked result
+may be cached per (granule, tile, block) as an optimization for the next scorer over the same
+ground, and a miss costs a windowed read, not a regrid ([06 §2](06-caching.md)).
 
 ---
 
 ## 6. Open questions
 
-1. Should the GLT store the source `granule_id` directly rather than an index into a file list?
-   Indices are compact but make a GLT meaningless without its list — an unnecessary coupling.
-2. Is per-granule GLT (AMD) or per-tile-epoch fused GLT (V002) the default? Proposal: per-granule,
-   since it is strictly more general and the fused form is an optimization the planner can choose
-   when the scorer declares `streaming`.
-3. Do we need sub-pixel/area-weighted resampling, or is nearest-neighbour sufficient? Both
-   existing pipelines use nearest; V002's L3 ASA does area-weighted aggregation at a later stage.
+1. ~~Should the GLT store the source `granule_id` directly rather than an index into a file list?~~
+   **Resolved:** keep the band — always `1` for a per-granule GLT — so existing tooling opens the
+   file, and write `granule_id` into the GLT's metadata so it is meaningful without a list (§2).
+2. ~~Is per-granule GLT (AMD) or per-tile-epoch fused GLT (V002) the default?~~ **Resolved:** per-
+   granule, always. A fused GLT would put the scorer inside regrid, which invariant 2 in [00
+   §5](00-overview.md) forbids and the cache asymmetry in [06 §1](06-caching.md) depends on.
+3. ~~Do we need sub-pixel/area-weighted resampling, or is nearest-neighbour sufficient?~~
+   **Resolved:** nearest-neighbour. Area-weighted aggregation is a downstream product, as V002's ASA
+   is.

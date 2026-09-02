@@ -28,10 +28,11 @@ one.
 
 | If you change… | Update |
 |---|---|
-| Any shared type (`ObsWindow`, `AuxAccessor`, `GLT`, `SnapshotStack`, `BandStack`, `GranuleRef`, `ClassTable`, `SensorWindow`) | [`docs/specs/11-types.md`](docs/specs/11-types.md) — **always**, no exceptions |
+| Any shared type (`ObsWindow`, `AuxAccessor`, `GLT`, `SnapshotStack`, `SnapshotSchema`, `LayerSpec`, `BandStack`, `GranuleRef`, `ClassTable`, `SensorWindow`) | [`docs/specs/11-types.md`](docs/specs/11-types.md) — **always**, no exceptions |
 | A plugin contract | [`04-cost-functions.md`](docs/specs/04-cost-functions.md), and [`07`](docs/specs/07-output-mapping.md) for `OutputMapper` |
 | How granules are found, fetched or read (`GranuleSource`, `GranuleReader`, `AssetStore`) | [`12-data-access.md`](docs/specs/12-data-access.md) |
 | What goes into a cache key | [`06-caching.md`](docs/specs/06-caching.md) |
+| The snapshot schema — layers, enumerations, aggregation vocabulary, extension rules | [`13-snapshot-schema.md`](docs/specs/13-snapshot-schema.md) |
 | The manifest schema | [`09-run-manifest.md`](docs/specs/09-run-manifest.md) |
 | Fill/nodata handling anywhere | [`11-types.md` §2](docs/specs/11-types.md) — the single source of truth |
 | A dependency, or how it's packaged | [`ADR-0001`](docs/decisions/ADR-0001-tech-stack.md) |
@@ -55,6 +56,7 @@ statement on the page becomes false.
 | `12-data-access`, `02-granule-index` §5–6, `03-regrid-glt` §4 | [`docs/guide/reading-data.html`](docs/guide/reading-data.html) |
 | `04-cost-functions`, `05-ancillary-data`, `07-output-mapping` | [`docs/guide/plugins.html`](docs/guide/plugins.html) |
 | `06-caching` | [`docs/guide/caching.html`](docs/guide/caching.html) |
+| `13-snapshot-schema` | [`docs/guide/plugins.html`](docs/guide/plugins.html) (what the snapshot carries, reducer) and [`docs/reference/manifest.html`](docs/reference/manifest.html) (`snapshot`) |
 | `08-execution`, `ADR-0002` | [`docs/guide/scaling.html`](docs/guide/scaling.html) |
 | `09-run-manifest` (fields) | [`docs/reference/manifest.html`](docs/reference/manifest.html) |
 | `11-types` | [`docs/reference/types.html`](docs/reference/types.html) |
@@ -100,10 +102,21 @@ Established by reading code and data. Do not re-derive; do not assume the opposi
   everything. Both are reductions over an observation stack; that unification is the core idea.
 - **`-9999` ≠ `0`.** In a mineral ID, `-9999` is "not observed" and `0` is "observed, nothing
   identified". Conflating them fabricates agreement.
-- **A collection version is not a vintage.** `CollectionReference.Version` is constant for every
-  granule in a CMR collection, so it can never distinguish a reprocessed granule from an original.
-  Vintage predicates use the granule-level `build_version` / `product_version`. The index carries
-  all three separately — see [`02-granule-index.md` §2](docs/specs/02-granule-index.md).
+- **Neither a collection version nor a build number is a vintage.** `CollectionReference.Version`
+  is constant across a CMR collection. `AdditionalAttributes.SOFTWARE_BUILD_VERSION` is granule-level
+  and exposed before download (verified 2026-09-01), but `EMITL2BMIN.001` already spans eight
+  builds with no Tetracorder change. The vintage check is the embedded class-table fingerprint;
+  build version is filterable and reported — see [`02-granule-index.md` §3](docs/specs/02-granule-index.md).
+- **Masks run in resolve, not regrid.** Regrid reads `loc` only and the GLT key has no mask term.
+  Sensor-space masks apply to the sensor window before the gather, map-space masks to the block
+  after it — [`03` §5](docs/specs/03-regrid-glt.md), [`12` §2](docs/specs/12-data-access.md).
+- **Lumping runs at the gather in resolve**, into the snapshot schema's enumeration, so snapshots
+  hold product ids and never raw Tetracorder classes. `ignore` names classes; `none` is the reserved
+  id 0 — [`13` §3](docs/specs/13-snapshot-schema.md).
+- **`PGEVersionClass.PGEVersion` is not the build.** It is `v1.3.1` on every L2B granule 2022–2026.
+- **`CloudCover` is top-level in EMIT UMM-G**, not an `AdditionalAttribute`, and present on every
+  L2B MIN granule. One L2B record carries two files, `MIN` and `MINUNCERT`, so a role may name an
+  `asset:` within a collection.
 - **Products carry their own class tables; use them.** The L2B granule embeds `/mineral_metadata`
   (294 entries). Read the table from the granule being processed rather than a checked-in CSV — it
   cannot drift from the pixels it describes. Raw values are positional and differ between vintages
@@ -133,9 +146,10 @@ docs/reference/    manifest, types, cli                             <- field/API
 docs/decisions/    ADR digest (HTML) + the ADRs themselves (Markdown)
 docs/status.html   what is implemented, what is open
 docs/assets/       stratum.css, stratum.js - the only shared chrome
-docs/specs/        00-12, numbered by dependency order   <- authoritative
+docs/specs/        00-13, numbered by dependency order   <- authoritative
 docs/notes/        heritage.md, meeting notes, archived proposal    <- internal
 refs/              verbatim external artifacts - do not edit
+trial-data/        local granules for trial runs - git-ignored, never committed
 ```
 
 ---
@@ -345,7 +359,9 @@ EMIT_L2B_MIN_001_20260825T151308_2623710_050.nc   # EMITL2BMIN.001, product_vers
 ```
 
 Everything `11-types.md` derives from it is marked **[observed]**, so the spec stands without the
-file. Do not add further large binaries without asking.
+file. Do not add further large binaries without asking. Test fixtures resolve from URLs supplied through
+configuration, not from files in the repo; `trial-data/` holds local granules for trial runs and is
+ignored; the reference granule in `refs/` goes once trial data exists.
 
 ---
 
@@ -388,6 +404,8 @@ Two tests are non-negotiable from the first commit that makes them meaningful
 
 ## Style
 
+- **Refer to pipeline stages by name** — plan, regrid, resolve, reduce, publish — never by
+  number. The numbers exist only in the flow diagram in `00-overview.md` §2, to show order.
 - Specs state **contracts and invariants**, not implementations.
 - Every spec ends with **open questions**. An empty list means resolved, not unconsidered.
 - Prefer a table to a list when there are more than three parallel items.

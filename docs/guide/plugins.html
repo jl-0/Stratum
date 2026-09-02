@@ -53,7 +53,7 @@ inside <code>score</code>.</p>
 <thead><tr><th>You want to</th><th>Use</th><th>Because</th></tr></thead>
 <tbody>
 <tr><td>Exclude whole granules — dates, seasons, cloud cover, version</td><td><code>GranuleFilter</code></td><td>Runs against the index before a byte is read</td></tr>
-<tr><td>Exclude individual pixels — cloud, water, bad detectors</td><td><code>PixelMask</code></td><td>Applied at regrid, so they never enter the stack</td></tr>
+<tr><td>Exclude individual pixels — cloud, water, bad detectors</td><td><code>PixelMask</code></td><td>Applied in resolve's read path, so they never enter the stack</td></tr>
 <tr><td>Choose between overlapping observations</td><td><code>Scorer</code></td><td>The cost function proper</td></tr>
 <tr><td>Combine epochs through time</td><td><code>Reducer</code></td><td>Sees all epochs for a block at once</td></tr>
 <tr><td>Control how the output looks</td><td><code>OutputMapper</code></td><td>Runs at publish, over finished bands</td></tr>
@@ -112,12 +112,20 @@ collection, so an alias-based scorer moves to another instrument without edits.<
 
 <pre><code>obs[<span class="k">"view_zenith"</span>]        <span class="c"># (H, W) — this block only</span>
 obs.valid                 <span class="c"># bool, same shape — observed and unmasked</span>
+obs.interpolated          <span class="c"># bool — the GLT reached beyond max_distance here; valid, but penalise if you like</span>
 obs.granule.datetime      <span class="c"># acquisition metadata</span>
 obs.grid                  <span class="c"># this block's transform and CRS</span>
+obs.coords.lon            <span class="c"># every cell's centre; also .lat, and .x/.y in the grid CRS</span>
+obs.epoch                 <span class="c"># the epoch being resolved</span>
 obs.n                     <span class="c"># 1 when streaming, N when stacked</span></code></pre>
 
 <p>Declare every alias you use through <code>required_roles</code>. A missing role is a plan-time
 error, so you find out before the run rather than in several thousand workers.</p>
+
+<p>An alias can also pick a band by an attribute the reader reports — <code>{role: reflectance,
+match: {wavelength: 2200}, tolerance: 10}</code> — so a scorer written against a wavelength
+moves between instruments through configuration. Stratum matches the attribute; it never knows
+what it means.</p>
 
 <h3 id="aux">Reaching other datasets</h3>
 
@@ -162,7 +170,10 @@ continuous resampling method is a plan-time error.</li>
 
 <pre><code>aux.raster(<span class="k">"dem"</span>)                          <span class="c"># (H, W) on this block's grid</span>
 aux.raster(<span class="k">"snow"</span>, date=obs.granule.datetime)
+aux.raster(<span class="k">"ndvi"</span>, epoch=obs.epoch)          <span class="c"># resolved once per epoch — temporal: epoch</span>
 aux.vector(<span class="k">"claims"</span>)                       <span class="c"># rasterized to this block</span>
+aux.features(<span class="k">"claims"</span>)                     <span class="c"># the geometries, clipped to this block</span>
+aux.distance(<span class="k">"mines"</span>)                      <span class="c"># (H, W) distance to the nearest feature, cached</span>
 aux.table(<span class="k">"climate_index"</span>).at(date)         <span class="c"># scalar, no gridding</span>
 aux.granule_index                          <span class="c"># the frozen index</span></code></pre>
 
@@ -208,25 +219,36 @@ them into a single cutoff throws that range away.</p>
 <div class="key">
   <span class="label">A snapshot is not a picture</span>
   <p>Nothing renders it and nothing outside the pipeline reads it — it exists only to feed the
-  reducer. So it is <strong>as many bands as the reduction needs</strong>, and your scorer names
-  them.</p>
+  reduction. What it holds is declared once, in the manifest's <code>snapshot</code> block, and is
+  the same for every epoch in the run. Your scorer does not decide this; it only decides which
+  observation wins.</p>
 </div>
 
-<pre><code><span class="k">class</span> MinViewZenith:
-    capability = <span class="k">"streaming"</span>
-    required_roles = (<span class="k">"geometry"</span>, <span class="k">"mineral"</span>)
-    carry = (<span class="k">"mineral_id"</span>, <span class="k">"band_depth"</span>, <span class="k">"view_zenith"</span>)
+<pre><code>snapshot:
+  name: cm-v1
+  layers:
+    mineral_1:
+      kind: categorical
+      source: mineral                       <span class="c"># a role or a band alias</span>
+      classes: "@ref:classes/cm-v1.yaml"    <span class="c"># the product's own enumeration</span>
+      aggregate: {method: vote, min_count: 3, ignore: [none], tie_break: highest_score}
+    depth_1:
+      kind: continuous
+      source: mineral_depth
+      aggregate: {method: median, conditional_on: mineral_1, spread: iqr}
+    view_zenith:
+      kind: continuous
+      source: view_zenith
+      aggregate: {method: none}             <span class="c"># carried, not delivered</span></code></pre>
 
-    <span class="k">def</span> score(self, obs, aux):
-        <span class="k">return</span> -obs[<span class="k">"view_zenith"</span>]</code></pre>
-
-<p>Each name in <code>carry</code> is an alias resolved against the <em>winning</em> observation and
-copied into the snapshot. Dtype and description come from the source band, so you do not declare
-them twice. Two more bands arrive without being asked for:</p>
+<p>Each layer is gathered from the <em>winning</em> observation. A categorical layer is resolved
+into its enumeration on the way in, so a snapshot never holds a raw class index — every epoch is
+directly comparable with every other, across granules and across vintages. Two layers arrive
+without being asked for:</p>
 
 <div class="tw">
 <table>
-<thead><tr><th>Band</th><th>Content</th></tr></thead>
+<thead><tr><th>Layer</th><th>Content</th></tr></thead>
 <tbody>
 <tr><td><code>score</code></td><td>The score that won. Always written, so "why did this pixel win?" stays answerable.</td></tr>
 <tr><td><code>valid</code></td><td>Whether any observation occupied the cell at all</td></tr>
@@ -234,36 +256,51 @@ them twice. Two more bands arrive without being asked for:</p>
 </table>
 </div>
 
+<p>A <code>source</code> naming a multi-band variable — a reflectance cube, abundance fractions —
+gives one layer with a band axis, aggregated band by band. A reflectance mosaic is one layer, not
+several hundred. <code>classes: source</code> adopts the input's own class table as the
+enumeration, which is what a single-vintage or parity run wants.</p>
+
 <h4 id="snapshot-cost">What it costs</h4>
 
 <p>Less than you would expect. In streaming mode the framework holds the running best score plus the
-carried bands of the current best, so memory is <strong>proportional to band count, not observation
+layers of the current best, so memory is <strong>proportional to layer count, not observation
 count</strong> — a wide snapshot does not reintroduce the memory profile blocks exist to avoid.</p>
 
-<p>Storage is not free though. These are cached artifacts with a retention policy, so carry what the
-reducer will actually use. <code>carry</code> is part of the snapshot cache key: changing the set
-invalidates the snapshots, as it should.</p>
+<p>Storage is not free though. These are cached artifacts with a retention policy, so declare what
+the reduction will actually use. The layer definitions are part of the snapshot cache key; the
+aggregation methods are not, so changing how a layer collapses re-runs only reduce and publish.
+See <a href="caching.html#what-invalidates">Caching</a> and
+<a href="../specs/13-snapshot-schema.md">spec 13</a>.</p>
 
-<h4 id="snapshot-useful">Bands worth carrying</h4>
+<h4 id="snapshot-extend">Extend it, never redefine it</h4>
+
+<p>A product that lives for years will grow. Adding classes to an enumeration — new ids, nothing
+renumbered — keeps every cached snapshot valid: name the previous schema in <code>extends</code>
+and the planner accepts them. Adding a layer re-runs resolve for the epochs that lack it, from
+cached geometry. Changing what an existing layer or class <em>means</em> is a new schema and
+rebuilds every epoch. Stratum refuses to reduce epochs written under two schemas.</p>
+
+<h4 id="snapshot-useful">Layers worth declaring</h4>
 
 <div class="tw">
 <table>
-<thead><tr><th>Band</th><th>Lets the reducer</th></tr></thead>
+<thead><tr><th>Layer</th><th>Lets the reduction</th></tr></thead>
 <tbody>
 <tr><td>Class and continuous bands from the product</td><td>Reduce them, including <a href="#conditional">class-conditionally</a></td></tr>
 <tr><td>Geometry — view zenith, solar zenith</td><td>Weight or filter by the conditions the winner was acquired under</td></tr>
-<tr><td>Uncertainty, where the product ships one</td><td>Inverse-variance weight the continuous bands</td></tr>
+<tr><td>Uncertainty, where the product ships one</td><td>Inverse-variance weight the continuous layers</td></tr>
 </tbody>
 </table>
 </div>
 
 <div class="note">
-  <span class="label"><span class="chip chip-open">planned</span> Derived bands — not in v1</span>
-  <p><code>carry</code> copies bands that already exist. A band the scorer <em>computes</em> — a
-  runner-up margin, per-candidate evidence, a broadcast acquisition time — is a planned enhancement
-  (an <code>outputs</code> declaration plus an <code>emit()</code> method) and is
+  <span class="label"><span class="chip chip-open">planned</span> Derived layers — not in v1</span>
+  <p>Layers copy bands that already exist in the winning observation. A layer the scorer
+  <em>computes</em> — a runner-up margin, per-candidate evidence, a broadcast acquisition time — is a
+  planned enhancement (<code>source: scorer</code>, fed by an <code>emit()</code> method) and is
   <strong>not implemented</strong>.</p>
-  <p>It was deferred on purpose: several of the motivating bands (<code>source_granule</code>,
+  <p>It was deferred on purpose: several of the motivating layers (<code>source_granule</code>,
   <code>acquired</code>, <code>runner_up_score</code>) are things the selection loop already knows
   and may belong as framework built-ins rather than plugin output, which would leave the derived
   form a much smaller job. See <a href="../specs/04-cost-functions.md">spec 04</a> and
@@ -285,14 +322,16 @@ invalidates the snapshots, as it should.</p>
 <table>
 <thead><tr><th><code>space</code></th><th><code>obs</code> is</th><th>Use for</th></tr></thead>
 <tbody>
-<tr><td><code>"map"</code></td><td>On the block grid, post-regrid</td><td>Conditions about a <em>location</em> — cloud, water, land cover</td></tr>
-<tr><td><code>"sensor"</code></td><td>Raw <code>(downtrack, crosstrack)</code>, pre-regrid</td><td>Conditions about the <em>instrument</em> — bad columns, detector artifacts</td></tr>
+<tr><td><code>"map"</code></td><td>On the block grid, after the gather through the GLT</td><td>Conditions about a <em>location</em> — cloud, water, land cover</td></tr>
+<tr><td><code>"sensor"</code></td><td>Raw <code>(downtrack, crosstrack)</code>, the sensor window before the gather</td><td>Conditions about the <em>instrument</em> — bad columns, detector artifacts</td></tr>
 </tbody>
 </table>
 </div>
 
-<p>Sensor-space masks must be applied before the GLT is built, because regridding discards the
-source column. Declaring the space is how Stratum knows to run yours at the right point.</p>
+<p>Sensor-space masks run on the sensor window before the gather through the GLT, because the
+gather discards the source column. Map-space masks run on the block after it. Both happen in
+resolve; regrid never sees a mask, which is why changing one never rebuilds geometry. Declaring
+the space is how Stratum knows to run yours at the right point.</p>
 
 <h3 id="builtin-masks">Built-in masks</h3>
 
@@ -312,45 +351,48 @@ source column. Declaring the space is how Stratum knows to run yours at the righ
 
 <h2 id="reducer">Reducer</h2>
 
-<p>A reducer receives every epoch snapshot for one block and returns the delivered bands.</p>
+<p>Most reductions are configuration, not code. Each layer in the
+<a href="#snapshot-schema">snapshot</a> declares how it collapses through time, and Stratum's
+built-in reducer runs it when the manifest has no <code>reducer</code> block:</p>
+
+<div class="tw">
+<table>
+<thead><tr><th>Layer kind</th><th><code>method</code></th><th>Delivers</th></tr></thead>
+<tbody>
+<tr><td>categorical</td><td><code>vote</code> — with <code>min_count</code>, <code>ignore</code> (class names), <code>tie_break</code></td><td><code>&lt;layer&gt;</code>, <code>&lt;layer&gt;_agreement</code>, <code>&lt;layer&gt;_runner_up</code></td></tr>
+<tr><td>categorical</td><td><code>best</code></td><td>The class from the highest-scoring epoch</td></tr>
+<tr><td>continuous</td><td><code>median</code> &middot; <code>mean</code> &middot; <code>min</code> &middot; <code>max</code> &middot; <code>percentile</code> &middot; <code>score_weighted</code> &middot; <code>inverse_variance</code> &middot; <code>best</code></td><td><code>&lt;layer&gt;</code>, <code>&lt;layer&gt;_n</code>; <code>&lt;layer&gt;_spread</code> if asked</td></tr>
+<tr><td>either</td><td><code>none</code></td><td>Nothing — carried for another layer, or for a plugin</td></tr>
+</tbody>
+</table>
+</div>
+
+<p><code>conditional_on: &lt;categorical layer&gt;</code> restricts a continuous aggregation to the
+epochs that agreed with that layer's winner — a band depth is the depth <em>of a mineral's
+feature</em>, and averaging it across epochs that found different minerals means nothing.
+<code>n_epochs</code> is delivered once per block regardless. The full vocabulary is in
+<a href="../specs/13-snapshot-schema.md">spec 13</a>.</p>
+
+<p>Write a <code>Reducer</code> plugin only for what that vocabulary cannot say — a vote that pools
+candidate layers, classify-last over per-candidate evidence:</p>
 
 <pre><code><span class="k">class</span> Reducer(Protocol):
     outputs: tuple[BandSpec, ...]
     halo: int = 0
 
     <span class="k">def</span> reduce(self, snaps: SnapshotStack, aux: AuxAccessor) -&gt; dict[str, Array]:
-        <span class="c">"""snaps[name] is (n_epochs, H, W). One array per declared output."""</span></code></pre>
+        <span class="c">"""snaps[layer] is (n_epochs, H, W); snaps.schema says what each layer is.
+        One array per declared output."""</span></code></pre>
 
 <p>Declare your outputs up front. Stratum derives the raster schema, the STAC item and the
 <code>OutputMapper</code> contract from them without running anything, which is how a bad output
-declaration fails at plan time.</p>
-
-<pre><code><span class="k">class</span> ModeThroughTime:
-    outputs = (
-        BandSpec(<span class="k">"mineral_id"</span>,   <span class="k">"uint16"</span>,  <span class="k">"most frequent class across epochs"</span>),
-        BandSpec(<span class="k">"agreement"</span>,    <span class="k">"float32"</span>, <span class="k">"modal count / valid epochs"</span>),
-        BandSpec(<span class="k">"n_epochs"</span>,     <span class="k">"uint8"</span>,   <span class="k">"epochs contributing"</span>),
-        BandSpec(<span class="k">"runner_up_id"</span>, <span class="k">"uint16"</span>,  <span class="k">"second most frequent class"</span>),
-    )</code></pre>
-
-<pre><code>reducer:
-  ref: mode_through_time
-  params: {min_count: 3, ignore: [0, -4], tie_break: highest_score}</code></pre>
-
-<div class="tw">
-<table>
-<thead><tr><th>Parameter</th><th>Effect</th></tr></thead>
-<tbody>
-<tr><td><code>min_count</code></td><td>Suppress pixels whose modal class has fewer than this many votes</td></tr>
-<tr><td><code>ignore</code></td><td>Class values excluded from the tally — typically the "nothing identified" class</td></tr>
-<tr><td><code>tie_break</code></td><td><code>earliest</code> | <code>latest</code> | <code>highest_score</code> | <code>nodata</code></td></tr>
-</tbody>
-</table>
-</div>
+declaration fails at plan time. The built-in reducer derives its outputs from the schema the same
+way.</p>
 
 <h3 id="reducer-inputs">What you get</h3>
 
-<pre><code>snaps[<span class="k">"mineral_id"</span>]     <span class="c"># (n_epochs, H, W) — the winning value per epoch</span>
+<pre><code>snaps[<span class="k">"mineral_1"</span>]      <span class="c"># (n_epochs, H, W) — the winning value per epoch, as product classes</span>
+snaps.schema             <span class="c"># what every layer is — kind, enumeration, declared aggregation</span>
 snaps.valid              <span class="c"># (n_epochs, H, W) bool — was there an observation at all</span>
 snaps.score              <span class="c"># (n_epochs, H, W) — the score that won each cell</span>
 snaps.epochs             <span class="c"># ordered ascending</span></code></pre>
@@ -367,7 +409,7 @@ treating them equally.</p>
   <span class="label">Nothing "wins" here by default</span>
   <p>A <code>Scorer</code> ranks and takes an argmax — one observation beats the others. A
   <code>Reducer</code> is handed a vector of values, one per epoch, and <strong>aggregates</strong>
-  it. For <code>ModeThroughTime</code> that is a vote, not a contest.</p>
+  it. For a <code>vote</code> layer that is a tally, not a contest.</p>
 </div>
 
 <p>Every snapshot is already on the identical block grid, so there is no spatial overlap left to
@@ -378,7 +420,7 @@ each. Worked through, for a cell over twelve monthly epochs:</p>
 value    -   goe  goe   0   hem  goe   -    -   goe  hem  goe   0
 valid    F    T    T    T    T    T    F    F    T    T    T    T</code></pre>
 
-<p>With <code>{min_count: 3, ignore: [0]}</code>:</p>
+<p>With <code>{method: vote, min_count: 3, ignore: [none]}</code>:</p>
 
 <div class="tw">
 <table>
@@ -392,10 +434,10 @@ valid    F    T    T    T    T    T    F    F    T    T    T    T</code></pre>
 </table>
 </div>
 
-<pre><code>mineral_id    goethite
-agreement     0.56        <span class="c"># 5 of the 9 epochs that saw this cell</span>
-n_epochs      9
-runner_up_id  hematite</code></pre>
+<pre><code>mineral_1            goethite
+mineral_1_agreement  0.56        <span class="c"># 5 of the 9 epochs that saw this cell</span>
+mineral_1_runner_up  hematite
+n_epochs             9</code></pre>
 
 <p>Had the modal count fallen below <code>min_count</code>, the cell would be written as nodata —
 the class is real but too thinly supported to assert.</p>
@@ -418,13 +460,13 @@ the class is real but too thinly supported to assert.</p>
 
 <h4 id="winner-take-all">If you do want a winner</h4>
 
-<p>Nothing stops a reducer being winner-take-all. Take the epoch with the best score and pass its
-value straight through:</p>
+<p>Nothing stops a reduction being winner-take-all — that is <code>method: best</code>, and as a
+plugin it is a few lines. Take the epoch with the best score and pass its value straight through:</p>
 
 <pre><code><span class="k">class</span> BestSingleLook:
     <span class="c"># Across the window, the observation the scorer liked most wins.</span>
     outputs = (
-        BandSpec(<span class="k">"mineral_id"</span>, <span class="k">"uint16"</span>,  <span class="k">"class from the best-scoring epoch"</span>),
+        BandSpec(<span class="k">"mineral_1"</span>, <span class="k">"uint16"</span>,  <span class="k">"class from the best-scoring epoch"</span>),
         BandSpec(<span class="k">"score"</span>,      <span class="k">"float32"</span>, <span class="k">"the score that won"</span>),
         BandSpec(<span class="k">"n_epochs"</span>,   <span class="k">"uint8"</span>,   <span class="k">"epochs contributing"</span>),
     )
@@ -434,7 +476,7 @@ value straight through:</p>
         best  = np.argmax(score, axis=0)
         take  = <span class="k">lambda</span> a: np.take_along_axis(a, best[<span class="k">None</span>], 0)[0]
         <span class="k">return</span> {
-            <span class="k">"mineral_id"</span>: take(snaps[<span class="k">"mineral_id"</span>]),
+            <span class="k">"mineral_1"</span>: take(snaps[<span class="k">"mineral_1"</span>]),
             <span class="k">"score"</span>:      take(snaps.score),
             <span class="k">"n_epochs"</span>:   snaps.valid.sum(axis=0),
         }</code></pre>
@@ -446,7 +488,8 @@ the more defensive choice, which is why it is the baseline.</p>
 <h3 id="continuous">Reducing continuous bands</h3>
 
 <p>Mode is for classes. For a continuous band — band depth, fit, uncertainty, reflectance — you are
-choosing a summary statistic, and averaging is rarely the best one.</p>
+choosing a summary statistic, and averaging is rarely the best one. Each row is a
+<code>method</code> you declare on the layer; the last needs a plugin.</p>
 
 <div class="tw">
 <table>
@@ -454,11 +497,11 @@ choosing a summary statistic, and averaging is rarely the best one.</p>
 <tbody>
 <tr><td><code>median</code></td><td><strong>The safe default.</strong> One bad epoch cannot move it far.</td></tr>
 <tr><td><code>mean</code></td><td>You have already excluded outliers. A single bad epoch shifts the result in proportion to how bad it is.</td></tr>
-<tr><td>Mean weighted by <code>snaps.score</code></td><td>You trust the scorer's own ordering — better-scoring epochs should count for more</td></tr>
-<tr><td>Inverse-variance weighted mean</td><td>The product ships an uncertainty band. Statistically the principled choice, and EMIT L2B does carry <code>group_N_band_depth_unc</code>.</td></tr>
-<tr><td><code>max</code> or a high percentile</td><td>You want the strongest expression seen, not the typical one</td></tr>
-<tr><td>Standard deviation or IQR</td><td>Emit it <em>alongside</em> the estimate as a quality band, not instead of it</td></tr>
-<tr><td>Slope over time</td><td>You are measuring change rather than compositing</td></tr>
+<tr><td><code>score_weighted</code></td><td>You trust the scorer's own ordering — better-scoring epochs should count for more</td></tr>
+<tr><td><code>inverse_variance</code></td><td>The product ships an uncertainty band. Statistically the principled choice, and EMIT L2B does carry <code>group_N_band_depth_unc</code>.</td></tr>
+<tr><td><code>max</code> or <code>percentile</code></td><td>You want the strongest expression seen, not the typical one</td></tr>
+<tr><td><code>spread: std | iqr</code></td><td>Emit it <em>alongside</em> the estimate as a quality band, not instead of it</td></tr>
+<tr><td>Slope over time (plugin)</td><td>You are measuring change rather than compositing</td></tr>
 </tbody>
 </table>
 </div>
@@ -469,8 +512,8 @@ choosing a summary statistic, and averaging is rarely the best one.</p>
   and <code>np.mean</code> will happily fold them in.</p>
 </div>
 
-<pre><code>d = np.where(snaps.valid, snaps[<span class="k">"band_depth"</span>], np.nan)
-out = np.nanmedian(d, axis=0)                  <span class="c"># not np.median(snaps["band_depth"])</span>
+<pre><code>d = np.where(snaps.valid, snaps[<span class="k">"depth_1"</span>], np.nan)
+out = np.nanmedian(d, axis=0)                  <span class="c"># not np.median(snaps["depth_1"])</span>
 n   = snaps.valid.sum(axis=0)                  <span class="c"># always emit the support count</span></code></pre>
 
 <h4 id="conditional">Continuous bands are usually conditional on a class</h4>
@@ -482,35 +525,23 @@ n   = snaps.valid.sum(axis=0)                  <span class="c"># always emit the
   with hematite's, which is a number that means nothing.</p>
 </div>
 
-<p>So when a continuous band is conditional on a categorical one, decide the class first and
-aggregate only over the epochs that <strong>agreed</strong> with it:</p>
+<p>So when a continuous layer is conditional on a categorical one, decide the class first and
+aggregate only over the epochs that <strong>agreed</strong> with it. In the schema that is one
+option:</p>
 
-<pre><code><span class="k">class</span> ModeAndDepth:
-    outputs = (
-        BandSpec(<span class="k">"mineral_id"</span>, <span class="k">"uint16"</span>,  <span class="k">"modal class across epochs"</span>),
-        BandSpec(<span class="k">"band_depth"</span>, <span class="k">"float32"</span>, <span class="k">"median depth over concordant epochs"</span>),
-        BandSpec(<span class="k">"agreement"</span>,  <span class="k">"float32"</span>, <span class="k">"modal count / valid epochs"</span>),
-        BandSpec(<span class="k">"n_concordant"</span>, <span class="k">"uint8"</span>, <span class="k">"epochs behind the depth estimate"</span>),
-    )
+<pre><code>snapshot:
+  layers:
+    mineral_1: {kind: categorical, source: mineral, classes: "@ref:classes/cm-v1.yaml",
+                aggregate: {method: vote, min_count: 3, ignore: [none]}}
+    depth_1:   {kind: continuous, source: mineral_depth,
+                aggregate: {method: median, conditional_on: mineral_1}}</code></pre>
 
-    <span class="k">def</span> reduce(self, snaps, aux):
-        cls, agree = modal_class(snaps[<span class="k">"mineral_id"</span>], snaps.valid,
-                                 ignore=self.ignore, min_count=self.min_count)
-
-        <span class="c"># only epochs that identified the winning class may inform its depth</span>
-        concordant = snaps.valid &amp; (snaps[<span class="k">"mineral_id"</span>] == cls[np.newaxis])
-        depth = np.where(concordant, snaps[<span class="k">"band_depth"</span>], np.nan)
-
-        <span class="k">return</span> {
-            <span class="k">"mineral_id"</span>:   cls,
-            <span class="k">"band_depth"</span>:   np.nanmedian(depth, axis=0),
-            <span class="k">"agreement"</span>:    agree,
-            <span class="k">"n_concordant"</span>: concordant.sum(axis=0),
-        }</code></pre>
-
-<p>Note that <code>n_concordant</code> and <code>n_epochs</code> are different numbers and both are
-worth publishing. A cell can be observed twelve times, be assigned goethite on a bare majority of
-five, and have its depth estimated from only those five.</p>
+<p>That delivers <code>mineral_1</code>, <code>mineral_1_agreement</code>, <code>depth_1</code> and
+<code>depth_1_n</code> — the concordant count. Note that <code>depth_1_n</code> and
+<code>n_epochs</code> are different numbers and both are published. A cell can be observed twelve
+times, be assigned goethite on a bare majority of five, and have its depth estimated from only those
+five. A plugin doing the same thing masks the depth stack on
+<code>snaps["mineral_1"] == winner</code> before taking its median.</p>
 
 <h4 id="classify-last">Or: aggregate the evidence, classify at the end</h4>
 
@@ -522,9 +553,9 @@ candidate class and classify the aggregate:</p>
 <pre><code>per-epoch depth for each candidate  ──▶  median depth per candidate  ──▶  argmax  ──▶  class</code></pre>
 
 <p>This needs the snapshot to hold per-candidate evidence rather than only the winning label,
-which is a decision about what the <code>Scorer</code> emits — not something a reducer can add
-later. <strong>It is not expressible in v1:</strong> <code>carry</code> copies existing bands, and
-per-candidate evidence has to be computed. See
+which is a decision about what the snapshot holds — not something a reducer can add later.
+<strong>It is not expressible in v1:</strong> layers copy existing bands, and per-candidate
+evidence has to be computed by the scorer. See
 <a href="#snapshot-schema">what the snapshot carries</a>.</p>
 
 <p>Worth knowing now rather than later, because reaching it means adding derived outputs and
@@ -541,15 +572,14 @@ express what you want.</p>
 
 <pre><code>outputs:
   render:
-    mineral_id:
-      mapper: categorical
-      classes: "@ref:lumping/cm-v1.yaml"
+    mineral_1:
+      mapper: categorical              <span class="c"># classes come from the layer's enumeration</span>
       colors:
         pyrite:   [220,   5,  12]
         goethite: [174, 118, 163]
       nodata: transparent
       on_unmapped: fail            <span class="c"># fail | grey | transparent</span>
-      alpha_from: {band: agreement, domain: [0.3, 0.8], range: [60, 255]}</code></pre>
+      alpha_from: {band: mineral_1_agreement, domain: [0.3, 0.8], range: [60, 255]}</code></pre>
 
 <p>Built-in mappers: <code>categorical</code>, <code>continuous</code>, <code>threshold</code>
 (classed breaks) and <code>composite</code> (three bands to RGB).</p>
@@ -565,18 +595,18 @@ makes low-support pixels fade rather than assert a confident colour they have no
 
 <pre><code><span class="k">class</span> ConfidenceShaded:
     <span class="c">"""Class colour, hillshaded by terrain, faded by agreement."""</span>
-    outputs = (ImageSpec(<span class="k">"mineral_id_shaded"</span>, <span class="k">"RGBA"</span>),)
+    outputs = (ImageSpec(<span class="k">"mineral_1_shaded"</span>, <span class="k">"RGBA"</span>),)
 
     <span class="k">def</span> render(self, bands, aux):
-        rgb = self.table[bands[<span class="k">"mineral_id"</span>]]
+        rgb = self.table[bands[<span class="k">"mineral_1"</span>]]
         rgb = rgb * hillshade(aux.raster(<span class="k">"dem"</span>))[..., <span class="k">None</span>]
-        alpha = np.interp(bands[<span class="k">"agreement"</span>], [0.3, 0.8], [60, 255])
+        alpha = np.interp(bands[<span class="k">"mineral_1_agreement"</span>], [0.3, 0.8], [60, 255])
         <span class="k">return</span> np.dstack([rgb, alpha]).astype(<span class="k">"uint8"</span>)
 
     <span class="k">def</span> legend(self):
         <span class="k">return</span> Legend.categorical(self.table, note=<span class="k">"shaded by terrain"</span>)</code></pre>
 
-<p><code>bands</code> holds every band your reducer declared, so a mapper can reason across them.
+<p><code>bands</code> holds every band the reduction delivered, so a mapper can reason across them.
 <code>legend()</code> is not optional — it is written as a sidecar and into the STAC item, so the
 meaning of a colour travels with the product.</p>
 
@@ -613,7 +643,7 @@ min_view_zenith = <span class="k">"stratum_emit.scorers:MinViewZenith"</span>
 prefer_bare_earth = <span class="k">"stratum_emit.scorers:PreferBareEarth"</span>
 
 [project.entry-points.<span class="k">"stratum.reducers"</span>]
-mode_through_time = <span class="k">"stratum_emit.reducers:ModeThroughTime"</span></code></pre>
+classify_last = <span class="k">"stratum_emit.reducers:ClassifyLast"</span>   <span class="c"># only for what the schema cannot say</span></code></pre>
 
 <pre><code>stratum plugins list        <span class="c"># what this image or environment provides</span></code></pre>
 
@@ -647,7 +677,9 @@ and are readable;</li>
 <li><code>capability</code> and <code>halo</code> are consistent with the configured block size;</li>
 <li>declared <code>outputs</code> are non-empty and uniquely named, and have a mapper if rendering
 is requested;</li>
-<li>every class you name in lumping or a colour table resolves to exactly one class-table row.</li>
+<li>the snapshot schema resolves: every layer's <code>source</code> is a role or alias, every
+enumeration member matches exactly one class-table row per granule, and every class a colour table
+names exists in the enumeration.</li>
 </ul>
 
 <h2 id="testing">Testing a plugin</h2>

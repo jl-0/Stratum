@@ -65,19 +65,20 @@ are where the answer is decided.</p>
   <div class="stage-row science">
     <div class="n">2</div>
     <div class="b">
-      <h3>Regrid <span class="chip chip-obs">PixelMask</span></h3>
+      <h3>Regrid</h3>
       <p class="meta">unit: granule &times; tile</p>
-      <p>Puts each granule on the output grid by nearest-neighbour lookup, producing a GLT. Your
-      pixel masks are applied here, so masked pixels never enter the stack. <strong>Cached
+      <p>Puts each granule on the output grid by nearest-neighbour lookup, producing a GLT. Reads
+      only the granule's geolocation — no pixel data, no masks. <strong>Cached
       indefinitely</strong>.</p>
     </div>
   </div>
   <div class="stage-row science">
     <div class="n">3</div>
     <div class="b">
-      <h3>Resolve <span class="chip chip-obs">Scorer</span></h3>
+      <h3>Resolve <span class="chip chip-obs">PixelMask</span> <span class="chip chip-obs">Scorer</span></h3>
       <p class="meta">unit: tile &times; epoch &times; block</p>
-      <p>Runs your cost function over the observations covering each cell and keeps the winner.
+      <p>Reads each observation through its GLT, applies your pixel masks, runs your cost function
+      over what survives and keeps the winner.
       Writes the winning value, the score that won it, and how many observations competed.</p>
     </div>
   </div>
@@ -108,9 +109,9 @@ are where the answer is decided.</p>
 <thead><tr><th>Hook</th><th>You use it to say</th><th>Runs</th></tr></thead>
 <tbody>
 <tr><td><code>GranuleFilter</code></td><td>Which granules are candidates at all — dates, seasons, cloud cover, product version</td><td>Once per run, against the index</td></tr>
-<tr><td><code>PixelMask</code></td><td>Which pixels are unusable — cloud, water, detector edges</td><td>Per granule, during regrid</td></tr>
+<tr><td><code>PixelMask</code></td><td>Which pixels are unusable — cloud, water, detector edges</td><td>Per granule, in resolve's read path</td></tr>
 <tr><td><code>Scorer</code></td><td><strong>Which observation wins a cell</strong></td><td>Per block, per epoch</td></tr>
-<tr><td><code>Reducer</code></td><td>How epochs combine into the delivered product</td><td>Per block</td></tr>
+<tr><td><code>Reducer</code></td><td>How epochs combine, when the schema's own vocabulary cannot say it</td><td>Per block</td></tr>
 <tr><td><code>OutputMapper</code></td><td>What the rendered image looks like</td><td>Per tile, at publish</td></tr>
 </tbody>
 </table>
@@ -147,10 +148,10 @@ what you change determines what re-runs:</p>
 <table>
 <thead><tr><th>You change</th><th>Re-runs</th><th>Re-uses</th></tr></thead>
 <tbody>
-<tr><td>Your scorer</td><td>Stages 3&ndash;5</td><td>Every cached GLT — no regridding</td></tr>
-<tr><td>Your reducer</td><td>Stages 4&ndash;5</td><td>Every epoch snapshot</td></tr>
+<tr><td>Your scorer</td><td>Resolve, reduce, publish</td><td>Every cached GLT — no regridding</td></tr>
+<tr><td>How a layer aggregates, or your reducer</td><td>Reduce, publish</td><td>Every epoch snapshot</td></tr>
 <tr><td>Your colours</td><td>Rendering only</td><td>The published data — no pipeline run</td></tr>
-<tr><td>Your pixel masks</td><td>Stages 2b&ndash;5</td><td>The GLTs — geometry does not depend on cloudiness</td></tr>
+<tr><td>Your pixel masks</td><td>Resolve, reduce, publish</td><td>The GLTs — geometry does not depend on cloudiness</td></tr>
 </tbody>
 </table>
 </div>

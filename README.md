@@ -65,7 +65,7 @@ locally or browse it on GitHub Pages.
 | | |
 |---|---|
 | [`docs/index.html`](docs/index.html) | The documentation site — concepts, running a mosaic, reading data, writing plugins, scaling, reference |
-| [`docs/specs/`](docs/specs/) | Component specifications, `00`–`12`. **Authoritative** — contracts, invariants, citations |
+| [`docs/specs/`](docs/specs/) | Component specifications, `00`–`13`. **Authoritative** — contracts, invariants, citations |
 | [`docs/decisions/`](docs/decisions/) | Architecture decision records |
 | [`docs/notes/heritage.md`](docs/notes/heritage.md) | Internal: prior art, where the historical code lives, why choices were made |
 | [`refs/`](refs/) | Reference material from the existing pipelines, kept verbatim |
@@ -103,8 +103,11 @@ band aliases are resolved per collection rather than hard-coded.
 2. **Mode over mineral ID directly, or over something continuous first?** For Phil — who has since
    leaned toward *not* reducing over binarized labels. See
    [04 §5](docs/specs/04-cost-functions.md).
-3. **What does the vintage identifier look like in delivered metadata**, and is a reprocessed
-   granule distinguishable before download? Time-critical — see below.
+3. ~~**What does the vintage identifier look like in delivered metadata**, and is a reprocessed
+   granule distinguishable before download?~~ **Resolved** against CMR on 2026-09-01:
+   `SOFTWARE_BUILD_VERSION` is a granule-level attribute — and one collection already spans eight
+   of them, so the vintage check is the class-table fingerprint, not a build pin
+   ([02 §3](docs/specs/02-granule-index.md)).
 4. **AWS account, quota and Earthdata credential path.** The long pole.
 
 ## Time-critical context
@@ -113,7 +116,7 @@ Reprocessing of the entire EMIT catalog begins around **September 2026** and tak
 **75 days**, regenerating every mineral map against Tetracorder 6 with updated reflectance. The
 mineral classes shift.
 
-For those ~10 weeks the archive is **mixed-vintage**, and any run that does not pin a vintage will
-silently blend two incompatible products into a plausible-looking result. Vintage pinning is
-therefore mandatory in the manifest, not advisory —
+For those ~10 weeks the archive is **mixed-vintage**, and any run that does not check class-table agreement will
+silently blend two incompatible products into a plausible-looking result. The class-table
+fingerprint check is therefore mandatory at plan time, not advisory —
 [02 §3](docs/specs/02-granule-index.md), [09 §5](docs/specs/09-run-manifest.md).

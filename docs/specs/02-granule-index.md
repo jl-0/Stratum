@@ -48,12 +48,16 @@ GeoParquet, one row per granule per collection.
 | `collection_version` | string | The **collection's** version, e.g. `001`. Same for every row in a collection |
 | `day_night` | string | Nullable; `Day` / `Night` |
 | `last_seen` | timestamp UTC | When the index build last observed this row — see §3 |
-| `assets` | map<string,string> | role → URI |
-| `quality_flags` | map<string,int> | Collection-specific |
+| `assets` | map<string,string> | asset name → URI, e.g. `MIN`, `MINUNCERT`. A role names one; see §5 |
+| `checksums` | map<string,string> | asset name → catalogue checksum. Asset identity in cache keys ([12 §4](12-data-access.md)) |
+| `attributes` | map<string,string> | Everything else the source returned, verbatim — `SOLAR_ZENITH`, `ORBIT`, `SCENE`, … Filterable by name; promoted to a column only with a reason |
 
-`build_version` and `product_version` are granule-level and are what a vintage predicate filters
-on. `collection_version` is collection-level and cannot discriminate between granules within a
-collection — it is recorded, never filtered for vintage ([11 §4](11-types.md),
+`build_version` is granule-level — CMR exposes it as `SOFTWARE_BUILD_VERSION` — and is filterable.
+`product_version` is the file's own stamp and, from CMR, tracks the collection version.
+`collection_version` is collection-level and cannot discriminate between granules within a
+collection. None of the three is the vintage check on its own; see §3. A row's identity is
+(`collection`, `collection_version`, `granule_id`), so a reprocessed collection published as
+`EMITL2BMIN.002` sits beside `.001` rather than overwriting it ([11 §4](11-types.md),
 [12 §5](12-data-access.md)).
 
 Partitioned by `collection` and acquisition month — the two predicates every query uses.
@@ -77,7 +81,7 @@ WHERE collection = 'EMITL2BMIN'
 Predicate pushdown plus partition pruning replaces the linear scan. Building the index from
 CMR/STAC is a separate, periodic job — see §6.
 
-### Vintage is a required predicate, not an optional one
+### Vintage is checked by class table, not by build number
 
 Reprocessing of the **entire catalog** begins ~Sept 2026, takes ~**75 days**, and regenerates every
 mineral map against Tetracorder 6 with updated reflectance. The mineral classes shift. For roughly
@@ -87,24 +91,28 @@ An unpinned query over that window returns some granules at the old vintage and 
 blends two incompatible products, and produces a result that looks entirely plausible. Nothing in
 the data announces the problem.
 
-Requirements:
+The obvious guard — pin one `build_version` — does not survive contact with the archive.
+`EMITL2BMIN.001` already carries at least eight software builds across 2022–2026, none of them a
+Tetracorder change ([12 §5](12-data-access.md)). A single-build pin would discard most of a
+multi-year run, and "one build per run" would flag every long run as mixed. Requirements, then:
 
-- `build_version` (and collection version) are **indexed, first-class columns**, never hard-coded
-  as `convert_fids.py` does with `b0106_v01`;
+- `build_version` is an **indexed, filterable column**, never hard-coded as `convert_fids.py` does
+  with `b0106_v01`, and the run report states every build the run consumed, prominently;
 - the index records **when each row was last observed** in `last_seen`, so a re-index after
   reprocessing is detectable rather than silent;
-- **plan-time validation fails** if a run's frozen index spans more than one vintage, unless the
-  manifest explicitly opts in with a documented reason;
-- the run report states the vintage(s) selected, prominently.
+- **plan-time validation fails** if the contributing granules' embedded class tables disagree by
+  fingerprint ([11 §9](11-types.md)) — that is the vintage check, because a class shift is exactly
+  what a fingerprint catches and a build number does not — unless the manifest opts in with
+  `allow_mixed_vintage: true` and a documented reason, and then only if every table still
+  resolves fully into the product enumeration ([13 §3](13-snapshot-schema.md));
+- if the reprocessing is published as a new collection version, as `EMITL3ASA.002` was, a role
+  pins one with `version:` (§5) and the check is trivially satisfied.
 
-**Partly answered by the reference granule.** It carries `software_build_version` (`010635`),
-`software_delivery_version`, and `product_version` (`V001`) as global attributes, and its `history`
-names `tetracorder5.27c.cmds`. So the identifier exists and is unambiguous *in the file*.
-
-Still open: whether CMR exposes these **before download**. If not, vintage filtering cannot be an
-index predicate and the index build must record it at ingest — which is the design assumed here.
-Both outcomes are handled without changing the run-time contract; see
-[12 §5](12-data-access.md).
+**Verified against CMR (2026-09-01).** `SOFTWARE_BUILD_VERSION` and `SOFTWARE_DELIVERY_VERSION`
+are granule-level `AdditionalAttributes`, exposed before download, so the index build is a metadata
+query and not a header scan. The file additionally carries `product_version` (`V001`) and a
+`history` naming `tetracorder5.27c.cmds`; neither is in CMR, and `LocalSource` records them from the
+header. Field-by-field mapping in [12 §5](12-data-access.md).
 
 > Phil has since confirmed that V002 only **adds** metadata. A reader written against V001 fields
 > therefore stays forward-compatible. Note this does *not* extend to class tables keyed on
@@ -140,13 +148,17 @@ Instead the manifest declares roles, and the index resolves them:
 ```yaml
 inputs:
   roles:
-    geometry: {collection: EMITL1BOBS,  var: obs}
-    mineral:  {collection: EMITL2BMIN,  var: group_1_mineral_id}
-    mask:     {collection: EMITL2AMASK, var: mask}
+    geometry:       {collection: EMITL1BOBS,  var: obs}
+    mineral:        {collection: EMITL2BMIN,  var: group_1_mineral_id}
+    mineral_uncert: {collection: EMITL2BMIN,  asset: MINUNCERT, var: group_1_band_depth_unc}
+    mask:           {collection: EMITL2AMASK, var: mask}
 ```
 
-A role resolves to `(asset_uri, variable)`, and the collection selects the reader that opens it
-([12 §3](12-data-access.md)). Build version becomes an indexed, filterable column —
+A role resolves to `(asset_uri, variable)`. `collection` picks the index rows and the reader that
+opens them; `asset` picks the file within a granule record — one CMR record for L2B MIN carries
+both `MIN` and `MINUNCERT` — and defaults to the collection's primary file. An optional `version:`
+pins a `collection_version` when the index holds more than one, which is a plan-time error to
+leave ambiguous ([12 §3](12-data-access.md)). Build version becomes an indexed, filterable column —
 which is also how a reprocessing campaign gets pinned to a specific build instead of a string
 constant.
 
@@ -158,7 +170,7 @@ constant.
 
 ## 6. Freezing
 
-Stage 1 materializes the surviving candidate set into a **run-scoped frozen index** —
+The plan stage materializes the surviving candidate set into a **run-scoped frozen index** —
 `s3://.../runs/{run_id}/index.parquet` — and hashes it into provenance.
 
 This is not optional. A CMR query today and tomorrow return different answers; without freezing, a
@@ -177,7 +189,8 @@ How that job talks to CMR — and how UMM-G maps onto the schema in §2 — is
    `earthaccess` behind a `CMRSource` bridge — it is already a `SpectralUtil` dependency and
    handles EDL, but it returns UMM-G rather than our schema and carries module-level global state.
    See [12 §5](12-data-access.md).
-2. Do we index the SDS-internal collections as well as the DAAC ones? Phil noted L3 must touch
-   every delivered file, which suggests DAAC — but reprocessing may need internal builds.
-3. Should the frozen index carry the full asset URIs, or resolve them at read time from a
-   pinned collection version? Full URIs are more reproducible; resolution is more compact.
+2. ~~Do we index the SDS-internal collections as well as the DAAC ones?~~ **Resolved:** delivered
+   collections only. Reprocessing that needs internal builds is a `LocalSource` over them.
+3. ~~Should the frozen index carry the full asset URIs, or resolve them at read time from a pinned
+   collection version?~~ **Resolved:** full URIs, with the catalogue checksum beside each —
+   reproducibility over size.

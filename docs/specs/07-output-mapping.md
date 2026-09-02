@@ -47,15 +47,16 @@ It is that rendering must not be the *only* thing emitted.
 
 > **The mapper is a presentation layer over a data product that still ships.**
 
-Stage 5 writes both, from the same block, in the same run:
+Publish writes both, from the same block, in the same run:
 
 | Artifact | Content | Consumer |
 |---|---|---|
-| **Data** | class indices, counts, agreement, score — as declared by the `Reducer` | analysis, reprocessing, statistics, restyling |
+| **Data** | class indices, counts, agreement, score — as the schema's aggregations deliver them, or a `Reducer` plugin declares. A categorical band embeds a colour table derived from its enumeration | analysis, reprocessing, statistics, restyling |
 | **Image** | RGBA rendering via `OutputMapper` | MMGIS, QGIS, anyone looking at a map |
 | **Legend** | class table or ramp stops | both — makes the image interpretable and the data joinable |
 
-The legend is a sidecar *and* an entry in the STAC item. That single requirement is what stops us
+The legend is authoritative in the STAC item's `classification` extension; the COG's colour table
+and the JSON sidecar are derived from it. That single requirement is what stops us
 recreating a situation where the only record of what a colour means lives in a config file on
 someone's cluster account.
 
@@ -73,7 +74,7 @@ provisioned.
 outputs:
   mineral_id:
     mapper: categorical
-    classes: "@ref:lumping/cm-v1.yaml"     # attribute-matched, see §6
+    layer: mineral_1                       # the categorical layer; its enumeration is the legend
     colors:
       pyrite:   [220,   5,  12]
       goethite: [174, 118, 163]
@@ -89,7 +90,7 @@ without anyone noticing.
 ### Continuous
 
 ```yaml
-  band_depth:
+  depth_1:
     mapper: continuous
     ramp: viridis
     domain: [0.0, 0.15]
@@ -99,9 +100,9 @@ without anyone noticing.
 ### Confidence-driven alpha
 
 ```yaml
-  mineral_id:
+  mineral_1:
     alpha_from:
-      band: agreement
+      band: mineral_1_agreement
       domain: [0.3, 0.8]
       range: [60, 255]
 ```
@@ -132,17 +133,18 @@ class OutputMapper(Protocol):
         """Class table or ramp stops. Sidecar + STAC. Not optional."""
 ```
 
-`bands` is every band the `Reducer` declared, so a mapper can reason across them:
+`bands` is every band the reduction delivered — derived from the schema, or declared by a
+`Reducer` plugin — so a mapper can reason across them:
 
 ```python
 class ConfidenceShaded:
     """Class colour, hillshaded by terrain, faded by agreement."""
-    outputs = (ImageSpec("mineral_id_shaded", "RGBA"),)
+    outputs = (ImageSpec("mineral_1_shaded", "RGBA"),)
 
     def render(self, bands, aux):
-        rgb = self.table[bands["mineral_id"]]
+        rgb = self.table[bands["mineral_1"]]
         rgb = rgb * hillshade(aux.raster("dem"))[..., None]
-        alpha = np.interp(bands["agreement"], [0.3, 0.8], [60, 255])
+        alpha = np.interp(bands["mineral_1_agreement"], [0.3, 0.8], [60, 255])
         return np.dstack([rgb, alpha]).astype("uint8")
 
     def legend(self):
@@ -178,18 +180,17 @@ The fix is not a better external table. It is to stop maintaining an external ta
 **every delivered granule embeds its own class table** ([11 §9](11-types.md)), so the authority
 travels with the data and cannot drift from the pixels it describes.
 
-Lumping is therefore expressed against **semantic attributes**, and resolved to integer values
-per-granule at plan time:
+Lumping is therefore expressed against **semantic attributes**, resolved per granule at plan time,
+and applied at the gather in resolve so snapshots hold product classes
+([13 §3](13-snapshot-schema.md)). The file is the categorical layer's `classes`:
 
 ```yaml
-lumping:
-  match_on: [library, record, group]     # attributes from the embedded table
-  classes:
-    goethite:
-      - {library: sprlb06, record: 882,  group: 1}
-      - {library: splib06, record: 5736, group: 1}
-    pyrite:
-      - {library: splib06, record: 2568, group: 1}
+# classes/cm-v1.yaml
+match_on: [library, record, group]     # attributes from the embedded table
+classes:
+  - {id: 1, name: goethite, members: [{library: sprlb06, record: 882,  group: 1},
+                                      {library: splib06, record: 5736, group: 1}]}
+  - {id: 3, name: pyrite,   members: [{library: splib06, record: 2568, group: 1}]}
 ```
 
 Nothing here names a positional index, so the same lumping file survives a vintage change. What
@@ -203,8 +204,9 @@ recomputed per run from the granules actually being read.
    or multiple rows is a **plan-time error**, not a runtime surprise. Measured on the delivered
    file, `(library, record, group)` uniquely resolves 292 of 294 entries, so the ambiguous handful
    surface as errors to be reconciled explicitly rather than guessed.
-3. The mosaic publishes **its own** class table — post-lumping classes are not input classes —
-   which is the legend requirement in §2 arrived at from the other direction.
+3. The mosaic publishes **its own** class table — the enumeration, with its explicit ids — which is
+   the legend requirement in §2 arrived at from the other direction. Ids are never renumbered
+   ([13 §5](13-snapshot-schema.md)).
 
 None of this is Tetracorder-specific: the framework matches attributes it was told to match, and
 `stratum_emit` supplies only the knowledge that `/mineral_metadata` is where EMIT keeps its table.
@@ -213,10 +215,13 @@ None of this is Tetracorder-specific: the framework matches attributes it was to
 
 ## 7. Open questions
 
-1. Should the legend format be a STAC `classification:classes` extension entry, a GDAL colour
-   table embedded in the COG, or a standalone JSON? Probably all three — they serve different
-   consumers — but the authoritative one should be named.
-2. Does MMGIS want RGBA COGs, or single-band-plus-colour-table COGs it styles itself? This
-   materially changes what stage 5 emits and is worth asking before we build it.
-3. Overviews/pyramids: build them in stage 5, or leave to the MMGIS tiling step? Since tiling
-   merges tiles anyway, probably the latter.
+1. ~~Should the legend format be a STAC `classification:classes` extension entry, a GDAL colour
+   table embedded in the COG, or a standalone JSON?~~ **Resolved:** STAC `classification:classes` is
+   authoritative. The GDAL colour table in the COG and the JSON sidecar are derived from it at
+   publish.
+2. ~~Does MMGIS want RGBA COGs, or single-band-plus-colour-table COGs it styles itself?~~
+   **Resolved:** both. The data COG for a categorical layer embeds a colour table derived from the
+   enumeration, so a viewer that styles single-band rasters can use it directly, and the RGBA
+   rendering ships beside it.
+3. ~~Overviews/pyramids: build them in publish, or leave to the MMGIS tiling step?~~ **Resolved:**
+   leave them to the tiling step, which merges tiles anyway.

@@ -167,7 +167,7 @@ machine, for one item.</p>
 <pre><code>stratum report --run RUN_ID [--diff PREVIOUS_RUN_ID] [--format md|json]</code></pre>
 
 <p>Prints the run summary: granules considered and what each filter removed, cache hit rate by
-artifact type, failed blocks, cost against budget, and the vintage selected.</p>
+artifact type, failed blocks, cost against budget, the builds consumed and the class-table fingerprint validated.</p>
 
 <p><code>--diff</code> compares against an earlier run of the same manifest lineage. A large change
 in selected granules usually means an upstream reprocessing or an index rebuild, and is worth

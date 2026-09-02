@@ -55,7 +55,7 @@ The concrete path, for a work item `(tile=N40W113, epoch=2026-08, block=(3,7))`:
  2  cand = frozen_index.intersecting(block, epoch) # granules whose footprint meets this block
  3
  4  for granule in cand:
- 5      glt = assets.open(glt_key_for(granule, tile))   # cached COG from stage 2
+ 5      glt = assets.open(glt_key_for(granule, tile))   # cached COG from regrid
  6      g   = glt.read(win)                             # (H, W, 3) int32 — RANGE REQUEST
  7      if not (g[..., 2]).any():
  8          continue                                    # granule does not reach this block
@@ -63,11 +63,12 @@ The concrete path, for a work item `(tile=N40W113, epoch=2026-08, block=(3,7))`:
 10      sw  = SensorWindow.covering(g[..., 0], g[..., 1])   # bbox of touched sensor pixels
 11      src = assets.open(granule.assets["mineral"])        # stage-in, or /vsis3/ stream
 12      arr = reader.read(src, var="group_1_mineral_id", window=sw)   # (h, w) SENSOR space
-13
-14      band, valid = gather(arr, g, sw)                # (H, W) BLOCK space
+13      ok  = sensor_masks(arr, sw)                     # EdgeTrim etc. — knows row0/col0
+14      band, valid = gather(arr, g, sw, ok)            # (H, W) BLOCK space
+15      valid &= map_masks(band, block, aux)            # L2AStandard etc. — on the block
 ```
 
-Five things here are load-bearing.
+Six things here are load-bearing.
 
 **Step 6 is a windowed read, not a file read.** GLTs are written as COGs whose internal tile size
 divides the block size, so a block fetches only the bytes covering its own window.
@@ -79,6 +80,14 @@ it. Reading the whole scene once per block would be a **~25× read amplification
 more at mid-latitudes, paid on every block, of every granule, in every epoch.
 `SensorWindow.covering` takes the min and max of the GLT's X and Y bands across the block and reads
 that rectangle alone.
+
+**[observed] The delivered L2B cannot honour that yet.** Each science variable in the DAAC file —
+`group_N_mineral_id`, `group_N_band_depth` — is stored as a *single* gzip chunk covering the whole
+1664 × 1242 array ([11 §11](11-types.md)). HDF5 decompresses a chunk whole, so a windowed read of
+one of those variables decodes the entire scene however small the window: the window bounds
+memory, not bytes. `location/lat` and `lon` are contiguous and uncompressed, so their windows are
+real, and so are windows into Stratum's own COGs. The 25× is therefore what the read path *can*
+save, and the way to collect it is a one-time transcode per asset — prepared assets, §4.
 
 **The window carries its origin, not just its shape.** `SensorWindow` is
 `(row0, col0, height, width)` against the *full* sensor array. A sensor-space `PixelMask` such as
@@ -96,18 +105,29 @@ staged into a cache-keyed path — a real consequence of stage-in, not a hypothe
 ```python
 gy, gx, fi = g[..., 1], g[..., 0], g[..., 2]
 hit   = fi != 0                                  # 0 is GLT nodata
-interp = (gy < 0) | (gx < 0)                     # negative marks an interpolated cell
+interp = (gy < 0) | (gx < 0)                     # negative marks an interpolated cell -> obs.interpolated
 r = np.abs(gy) - 1 - sw.row0                     # GLT indices are 1-BASED
 c = np.abs(gx) - 1 - sw.col0
 band  = np.where(hit, arr[r, c], fill)
-valid = hit & ~arr_mask[r, c]
+valid = hit & ~arr_mask[r, c] & ok[r, c]
 ```
 
 One-based indices and the negative-means-interpolated convention are inherited deliberately, so
 Stratum GLTs interoperate with existing artifacts ([03 §2](03-regrid-glt.md)). Both are easy to get
 wrong once and never notice, which is why the gather lives in the framework and not in plugin code.
 
-> Everything above happens **below** `ObsWindow`. A `Scorer` sees the result of step 14 and nothing
+**Steps 13 and 15 are where masks run — here, not in regrid.** A sensor-space mask sees the sensor
+window with its origin, so `EdgeTrim` knows the absolute column; a map-space mask sees the gathered
+block and `aux`. Regrid never reads a pixel band or a mask asset ([03 §5](03-regrid-glt.md)). The
+`(band, valid)` pair leaving step 15 is the *masked observation* of [06 §2](06-caching.md): cached
+when a run asks for it, recomputed from the GLT otherwise.
+
+**Interpolated cells are valid.** A cell whose nearest sensor pixel lay beyond `max_distance` still
+carries a real value, reached for rather than measured in place. The gather keeps it and exposes
+the flag as `obs.interpolated`, so a scorer can penalise it and a `PixelMask` can exclude it.
+Nothing does either by default.
+
+> Everything above happens **below** `ObsWindow`. A `Scorer` sees the result of step 15 and nothing
 > else — no URIs, no sensor windows, no readers, no credentials. That is the same guarantee
 > `AuxAccessor` makes for ancillary data ([05 §1](05-ancillary-data.md)), reached from the other
 > direction.
@@ -140,11 +160,15 @@ class GranuleReader(Protocol):
     def geolocation(self, ctx) -> LocArray | None:
         """lat/lon/elev in sensor space. The regrid input; None when space == 'ortho'."""
 
+    def glt(self, ctx) -> GLT | None:
+        """The product's own lookup table on its own grid, if it ships one.
+        Feeds the warp_embedded regrid method - see 03 section 3."""
+
     def class_table(self, ctx, path: str, key: str, attributes) -> ClassTable | None:
         """Pull an embedded table out of the granule being read — see 11 section 9."""
 ```
 
-Four rules:
+Five rules:
 
 1. **The registry is keyed on `collection`**, populated by entry points and overridable in the
    manifest. A reader is selected from what the role *declares*, never from what the file is
@@ -152,10 +176,14 @@ Four rules:
 2. **The reader is where `-9999` dies.** `read` returns values with fills already converted to a
    mask, per [11 §2](11-types.md). Nothing above a reader ever sees a sentinel — which is the only
    way the `-9999`-versus-`0` distinction survives contact with a scorer.
-3. **`open` is cheap and `read` is windowed.** Stage 3 opens the same asset once per block; a
+3. **`open` is cheap and `read` is windowed.** Resolve opens the same asset once per block; a
    reader that parses the whole file on `open` turns that into the dominant cost.
 4. **Readers live in the plugin package.** `stratum_emit` provides the L2B MIN, L1B OBS, L2A MASK
    and L2B FRCOV readers plus an ENVI reader; `stratum` core ships none.
+5. **A reader owns band meaning.** It may report per-band attributes — wavelength, FWHM, whatever
+   the file carries — in `VarSpec.band_attrs`, and it may subset or resample as it reads. The
+   framework asks for a variable and a window and interprets nothing else. Every deployment writes
+   at least a score function and a reader; the core never learns what either means.
 
 ### The L2B gap is a reader, not a patch
 
@@ -187,11 +215,26 @@ Schemes: `file://`, `s3://`, and `https://` behind Earthdata Login.
 | Mode | How | When |
 |---|---|---|
 | **Stage-in** | The worker copies that one asset to its own scratch and gets a path back | Default. Works with any code that takes a filename, including unmodified `SpectralUtil` |
-| **Stream** | `/vsis3/` or fsspec; reads become HTTP range requests | Once the reader supports windowed reads. A block touching ~285 × 285 of 1664 × 1242 fetches under 4% of the file |
+| **Stream** | `/vsis3/` or fsspec; reads become HTTP range requests | Once the asset is in a windowable layout. Stratum's COGs and uncompressed variables already are; the delivered L2B science bands are one gzip chunk each and are not (§2), which is what prepared assets are for |
 
 The sequencing is deliberate and already the plan in [03 §4](03-regrid-glt.md): **stage-in first**,
 because it works immediately against code that exists; **streaming second**, because that is where
 the cost is. Both satisfy the same `AssetHandle`, so a reader does not change when the mode does.
+
+### Prepared assets
+
+A delivered L2B science band is one gzip chunk, so nothing below the file level can make its reads
+windowed. The fix is above it. On first touch, the `AssetStore` transcodes the asset once into a
+tiled, per-variable COG in the deployment cache, keyed on the asset checksum alone. Every later
+open of that asset — any block, any run, any mask, any schema, any grid — is a genuine range
+request over it. The cost is one decode-and-encode per asset per deployment and roughly the
+asset's size in cache; the science-free key is what makes it shareable by everything. A reader
+never learns whether it was handed the original or the prepared form.
+
+Prepared assets are cache artifacts ([06 §2](06-caching.md)), not staged copies: keyed on
+`asset_checksum` and `prepare_version`, shared by every run in the deployment, and kept while any
+frozen index references them. Stage-in of the original file remains the first step, because it is
+what the transcode reads.
 
 ### When the fetch happens
 
@@ -234,12 +277,14 @@ Easy to conflate, and the two obey different rules:
 | | Artifact cache ([06](06-caching.md)) | Asset cache |
 |---|---|---|
 | Holds | GLTs, observations, snapshots, products | Local copies of upstream granules |
-| Keyed by | A hash of the inputs that determine it | URI + ETag |
-| Scope | Shared across runs, projects and accounts | One worker or one node |
+| Keyed by | A hash of the inputs that determine it | URI + checksum, or ETag |
+| Scope | Every run in the deployment | One node. A node-local directory filled by download-to-temp and atomic rename, so a reader only ever sees a complete file and no lock is needed. Never a shared filesystem |
 | Deleting it | Costs recomputation | Costs a download |
 
 Asset *identity* enters artifact cache keys — `asset_roles` in the masked-observation key
-([06 §2](06-caching.md)) — but the local copy never does. A staged file is a performance detail with
+([06 §2](06-caching.md)) — but the local copy never does. Identity is the catalogue's per-file
+checksum where one exists — CMR publishes a SHA-512 for every EMIT file — and the object's ETag
+otherwise. A staged file is a performance detail with
 no bearing on correctness, and it must stay that way: the moment a cache key depends on whether a
 file happened to be local, reruns stop being reproducible.
 
@@ -307,16 +352,19 @@ things have to happen between that and a row in our index:
 | `datetime`, `end_datetime` | `TemporalExtent.RangeDateTime.{Beginning,Ending}DateTime` | |
 | `geometry` | `SpatialExtent.HorizontalSpatialDomain.Geometry.GPolygons` | EMIT footprints are simple polygons |
 | `bbox` | derived from `geometry` | Denormalized for cheap prefilter |
-| `cloud_fraction` | `AdditionalAttributes` — **attribute name to confirm** | **`None` when absent** |
-| `assets` | `RelatedUrls[]`, `Type` in `GET DATA` / `GET DATA VIA DIRECT ACCESS` | The direct-access entry is the `s3://` URI |
-| `build_version` | `PGEVersionClass.PGEVersion` — **candidate, unverified** | Granule-level. See below |
-| `product_version` | granule-level; UMM-G location **unverified** | The granule's own `V001` stamp. May require a header scan — see below |
+| `cloud_fraction` | `CloudCover`, a top-level UMM-G field | Integer percent. **Verified:** present on every `EMITL2BMIN.001` granule (249,091 of 249,091 on 2026-09-01); **`None` when absent** on a collection that lacks it |
+| `assets` | `RelatedUrls[]`, `Type` in `GET DATA` / `GET DATA VIA DIRECT ACCESS` | The direct-access entry is the `s3://` URI. One record carries **several files** — `EMIT_L2B_MIN_*.nc` and `EMIT_L2B_MINUNCERT_*.nc` — keyed by asset name (`MIN`, `MINUNCERT`) |
+| `checksums` | `DataGranule.ArchiveAndDistributionInformation[].Checksum` | SHA-512 per file. The asset identity that enters cache keys — see §4 |
+| `build_version` | `AdditionalAttributes.SOFTWARE_BUILD_VERSION` | **Verified.** Granule-level, e.g. `010635`. Not `PGEVersionClass.PGEVersion`, which is the L2B PGE code version (`v1.3.1` across the whole mission) and never moves |
+| `product_version` | *none* | Not in UMM-G. `LocalSource` reads it from the file header; `CMRSource` derives it from the collection version (`001` ↔ `V001`), which is all it has ever tracked |
+| `attributes` | `AdditionalAttributes`, verbatim | `SOLAR_ZENITH`, `SOLAR_AZIMUTH`, `ORBIT`, `ORBIT_SEGMENT`, `SCENE`, `SOFTWARE_DELIVERY_VERSION`, … — what `max_solar_zenith` filters on |
 | `collection_version` | `CollectionReference.Version` | The collection's version (`001`). Identical for every granule in the collection, so **never** a vintage predicate |
 | `day_night` | `DataGranule.DayNightFlag` | |
 | `last_seen` | set by the index build, not from UMM-G | The refresh timestamp — see paging below |
 
-Three rows are marked unverified on purpose. They are the concrete thing to check first against a
-real query, and guessing them in a spec would be worse than naming them as open.
+Every row was checked against a live query on 2026-09-01 (`EMITL2BMIN.001`, LPCLOUD, granules
+from 2022 through August 2026). The earlier guess that `PGEVersionClass.PGEVersion` carried the
+build was wrong, which is why those rows were marked unverified rather than asserted.
 
 > **`collection_version` is not a vintage.** Every granule in `EMITL2BMIN.001` reports
 > `CollectionReference.Version = 001`, so the field is constant across the collection and cannot
@@ -326,23 +374,37 @@ real query, and guessing them in a spec would be worse than naming them as open.
 > fields move. That is why the index carries all three ([02 §2](02-granule-index.md)) and why the
 > vintage predicate is `build_version` / `product_version`, never `collection_version`.
 
-### The vintage question is answered here or nowhere
+### The vintage fields are exposed — and they churn
 
-The open question threaded through [02 §3](02-granule-index.md) and [11 §12](11-types.md) is whether
-`software_build_version` and `product_version` are visible **before download**. The granule carries
-them as global attributes; whether CMR exposes them is a property of EMIT's UMM-G, and `CMRSource`
-is the component that finds out.
+`SOFTWARE_BUILD_VERSION` is a first-class granule attribute in CMR, so `build_version` is populated
+at search time and is a real index predicate. No header scan is needed. That closes the question
+threaded through [02 §3](02-granule-index.md) and [11 §12](11-types.md).
 
-Both outcomes are already handled by this design:
+The same query showed something the design had not assumed. **One collection already spans many
+builds.** Sampling `EMITL2BMIN.001` by acquisition year:
 
-- **Exposed** → `build_version` is populated at search time and is a real index predicate. Cheap.
-- **Not exposed** → the index build opens each granule's header to record it. Expensive per granule,
-  but paid **once, in a periodic job**, not once per run — and the frozen index still hands a run a
-  filterable column. The cost lands somewhere it can be afforded.
+| Acquired | `SOFTWARE_BUILD_VERSION` |
+|---|---|
+| 2022 | `010617`, `010618` |
+| 2023 | `010618` |
+| 2024 | `010618`, `010620`, `010621`, `010625` |
+| 2025 | `010630`, `010632` |
+| 2026 | `010635` |
 
-Either way the run-time contract is identical, which is why it was safe to leave open this long. It
-is not safe to leave open past the reprocessing window ([notes](../notes/2026-08-28-mines-tagup.md)),
-because that is when a mixed-vintage index becomes silently wrong.
+Eight builds in one collection, and none of them a Tetracorder change. A run over 2022–2026 that
+pinned a single `build_version` would keep a fraction of the archive and reject the rest, and
+"one build = one vintage" would flag every multi-year run as mixed. So `build_version` is
+**filterable and reported, never required**. What plan-time validation actually checks is whether
+the contributing granules' embedded class tables agree by fingerprint ([11 §9](11-types.md)) — the
+test that catches the Tetracorder 6 reprocessing, because a class shift is exactly what it changes.
+
+How that reprocessing will be published also has a precedent now: `EMITL3ASA` exists in CMR as
+both a `001` and a `002` collection. If L2B follows, the new vintage arrives as `EMITL2BMIN.002`
+beside the old one, `collection_version` distinguishes the rows, and a role pins one with
+`version:` ([02 §5](02-granule-index.md)). If granules are instead re-delivered in place, the
+fingerprint check catches it and `updated_since` reports it. Both paths are handled; neither is
+guessed. The window in which this matters is the reprocessing itself
+([notes](../notes/2026-08-28-mines-tagup.md)).
 
 ### Paging, and how reprocessing gets noticed
 
@@ -399,7 +461,7 @@ kept in step with the first — is a worse one. See open question 1.
 
 ## 7. Plan-time validation
 
-All of this fails in stage 1, before compute is provisioned:
+All of this fails in the plan stage, before compute is provisioned:
 
 - every role's `collection` resolves to exactly one registered reader;
 - every role's `var` exists in that reader's `variables()`, checked against one real granule;
@@ -415,15 +477,25 @@ thousand workers ([05 §5](05-ancillary-data.md)).
 
 ## 8. Open questions
 
-1. Does `source` belong in the run manifest, or in a separate index-build config? Manifest keeps it
-   to one document and one hash; separate keeps `stratum run` from carrying a field it ignores.
-2. **Does EMIT's UMM-G expose the build version?** The blocking one — it decides whether the index
-   build is a metadata query or a header scan over the whole archive.
-3. Should staged assets share a node-level cache across concurrent workers? Obvious win on a SLURM
-   node running many blocks of the same tile; needs a lock, and locks on shared filesystems are
-   where reliability goes to die.
-4. Should `SensorWindow` reads round out to the file's chunk boundaries? A tight bbox can be slower
-   than a chunk-aligned over-read on a chunked NetCDF. Measure before deciding.
-5. Does multi-instrument support need wavelength awareness in `GranuleReader`, or does band-alias
-   mapping cover it? Alias mapping covers EMIT and AVIRIS-3; it probably does not cover resampling
-   between differing band centres, which is a real ask if Mines brings AVIRIS-5.
+1. ~~Does `source` belong in the run manifest, or in a separate index-build config?~~ **Resolved:**
+   the manifest. One document, one hash; `stratum run` ignoring a field is the cheaper wart.
+2. ~~Does EMIT's UMM-G expose the build version?~~ **Resolved: yes**, as
+   `AdditionalAttributes.SOFTWARE_BUILD_VERSION` — verified against CMR on 2026-09-01. See §5.
+3. ~~Should staged assets share a node-level cache across concurrent workers?~~ **Resolved:** yes,
+   node-local. Workers on a node share a directory filled by download-to-temp and atomic rename; a
+   reader only ever sees a complete file, a duplicated download costs bandwidth and never
+   correctness, and no lock exists to go wrong. A shared filesystem is never used for this (§4).
+4. ~~Should `SensorWindow` reads round out to the file's chunk boundaries?~~ **Resolved:** by
+   observation, there is no boundary to round to. The delivered L2B stores each science variable as
+   one gzip chunk, so a windowed read decodes the whole variable whatever the window (§2). What
+   remains is whether to transcode — question 6.
+5. ~~Does multi-instrument support need wavelength awareness in `GranuleReader`, or does band-alias
+   mapping cover it?~~ **Resolved:** no. The core has no concept of a wavelength or of any band's
+   meaning. A reader reports whatever per-band attributes its file carries in `VarSpec.band_attrs`,
+   and a band alias may select a band by matching one of them instead of by index (§3, [11
+   §5](11-types.md)) — the same attribute matching the class tables use — so a scorer that reads
+   `obs["swir_2200"]` moves between instruments through configuration. Resampling between differing
+   band centres, if anyone wants it, is a reader's business, done as it reads.
+6. ~~**Transcode assets on first touch** into tiled per-variable COGs in the deployment cache
+   (§4)?~~ **Resolved:** yes. Every asset is prepared once on first touch and cached by its checksum
+   (§4).

@@ -32,6 +32,8 @@ rule that keeps cost functions readable — and readable cost functions are the 
 |---|---|---|
 | Raster, different CRS/resolution | Warp to block grid | **Resampling method** |
 | Vector polygons/lines | Rasterize, burning an attribute | Field; all-touched vs centroid |
+| Vector, as geometry | Clip to the block plus a margin; hand the plugin the features | Margin |
+| Vector, distance to nearest | Distance transform onto the block grid | Cutoff distance |
 | Swath / irregular points | KD-tree — the same path as [03](03-regrid-glt.md) | Max distance |
 | Date-keyed table, no geometry | Scalar lookup; no gridding | Nearest vs interpolated |
 
@@ -54,8 +56,13 @@ aux:
     uri: s3://.../snow/{date}.tif
     kind: categorical
     resampling: nearest
-    temporal: nearest
+    temporal: nearest            # nearest | previous | epoch - see below
     max_age: P3D
+  ndvi:
+    uri: s3://.../ndvi/{date}.tif
+    kind: continuous
+    resampling: bilinear
+    temporal: epoch              # one resolution per epoch, not per granule
   claims:
     uri: s3://.../mining-claims.parquet
     kind: vector
@@ -66,6 +73,11 @@ aux:
 `kind` and `resampling` are both required. The reader refuses to guess: a categorical source with
 a continuous resampling method is a plan-time error, not a runtime surprise.
 
+`temporal` says how a date-keyed source is resolved. `nearest` and `previous` are relative to the
+date the plugin passes — usually the granule's acquisition time — within `max_age`. `epoch`
+resolves at the epoch's start and is read with `epoch=obs.epoch`, so a monthly climatology against
+monthly epochs is one warp per epoch rather than one per granule.
+
 ---
 
 ## 3. The accessor
@@ -73,13 +85,21 @@ a continuous resampling method is a plan-time error, not a runtime surprise.
 ```python
 aux.raster("dem")                          # (H, W), block grid, cached
 aux.raster("snow", date=obs.granule.datetime)
+aux.raster("ndvi", epoch=obs.epoch)          # resolved once per epoch - temporal: epoch
 aux.vector("claims")                       # rasterized to block grid
+aux.features("claims")                     # the geometries, clipped to this block, block CRS
+aux.distance("mines")                      # (H, W) distance to the nearest feature, cached
 aux.table("climate_index").at(date)        # scalar, no gridding
 aux.granule_index                          # the frozen index, for stack-level reasoning
 ```
 
 Sources are addressed by their **manifest alias**, not by URI. That keeps plugins portable across
 deployments and is what makes the declaration in §5 enforceable.
+
+A plugin that wants its own geometry has it: `obs.coords` is every cell's centre, in the grid CRS
+and in lon/lat ([11 §5](11-types.md)), and `features` hands over raw geometries. `distance` exists
+because distance-to-nearest is the common case and is worth caching like a warp; anything more
+exotic is a few lines of Shapely in the scorer, against declared sources.
 
 ---
 
@@ -105,8 +125,8 @@ Sources are declared up front, and the accessor **refuses undeclared URIs**.
 Three things this buys:
 
 1. The planner validates existence and readability **before provisioning compute** — a typo in a
-   DEM path fails in stage 1, not in 4,000 concurrent workers.
-2. Aux can be prefetched and warped during planning, so stage 3 never blocks on a cold fetch.
+   DEM path fails in the plan stage, not in 4,000 concurrent workers.
+2. Aux can be prefetched and warped during planning, so resolve never blocks on a cold fetch.
 3. Source identity enters the cache key.
 
 That third point is the load-bearing one:
@@ -122,10 +142,18 @@ file in place under a stable URI still invalidates correctly.
 
 ## 6. Open questions
 
-1. Should `aux` support remote HTTP sources, or require staging into our bucket first? Staging is
-   more reproducible and avoids depending on third-party uptime mid-run; it costs a copy.
-2. Do we need vector→vector spatial joins (e.g. "distance to nearest mine"), or is rasterize-and-
-   burn sufficient? Distance transforms are a plausible near-term ask and are not expressible as
-   a burn.
-3. How do we express aux that varies per *epoch* rather than per granule — monthly snow climatology
-   against monthly epochs? Probably a `temporal: epoch` mode, but it interacts with block caching.
+1. ~~Should `aux` support remote HTTP sources, or require staging into our bucket first?~~
+   **Resolved:** staged. Aux is copied into the deployment's root first; a run never depends on
+   third-party uptime.
+2. ~~Do we need vector→vector spatial joins (e.g. "distance to nearest mine"), or is rasterize-and-
+   burn sufficient?~~ **Resolved:** the scorer can do it itself, and helpers cover the common cases.
+   `obs.coords` gives every cell's centre in the grid CRS and in lon/lat; `aux.features(alias)`
+   returns a declared vector source's geometries clipped to the block plus a margin, in the block
+   CRS; `aux.distance(alias)` is a cached derived raster — distance from each cell to the nearest
+   feature — keyed like a warp (§3). All three go through a declared alias, so cache keys stay
+   honest.
+3. ~~How do we express aux that varies per *epoch* rather than per granule — monthly snow
+   climatology against monthly epochs?~~ **Resolved:** `temporal: epoch`. The source is resolved at
+   the epoch's start and read with `aux.raster(alias, epoch=obs.epoch)`; the warp is keyed on the
+   resolved date, so it is computed once per epoch and shared by every granule and block in it, and
+   its key enters the snapshot key like any other aux read ([06 §2](06-caching.md)).

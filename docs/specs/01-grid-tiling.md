@@ -60,7 +60,7 @@ V002 already loops only −55…55.
 
 ## 3. Block — the compute unit
 
-A block is a subdivision of a tile, and **the unit of work throughout stages 2–4**.
+A block is a subdivision of a tile, and **the unit of work from regrid through reduce**.
 
 ### Why blocks exist
 
@@ -142,7 +142,10 @@ chunks. Expect to revisit once a pilot zone has been measured.
 
 ## 6. Open questions
 
-1. Should tiles be allowed to be non-square, or aligned to something other than whole degrees?
-2. Do we need a second, coarser grid for the ASA-style 0.5° aggregate, or is that a separate
-   product built from these outputs?
-3. Should block size be per-stage — larger for regrid, smaller for a materialized reduce?
+1. ~~Should tiles be allowed to be non-square, or aligned to something other than whole degrees?~~
+   **Resolved:** whole-degree squares until something needs otherwise.
+2. ~~Do we need a second, coarser grid for the ASA-style 0.5° aggregate, or is that a separate
+   product built from these outputs?~~ **Resolved:** a second run at 0.5°, built from these outputs.
+   Two grids in one run would change the selection.
+3. ~~Should block size be per-stage — larger for regrid, smaller for a materialized reduce?~~
+   **Resolved:** one block size for every stage until a pilot has been measured.

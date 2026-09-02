@@ -27,7 +27,7 @@ fan-out, which a manifest naming its own executor could not promise. Same bounda
 
 ### The portability seam
 
-Stage 1 emits a **work list**: a flat file of independent items, each naming a (granule, tile) or a
+The plan stage emits a **work list**: a flat file of independent items, each naming a (granule, tile) or a
 (tile, epoch, block). Every executor does the same thing with it — run each item somewhere. Items
 never communicate, and each writes to a content-addressed key.
 
@@ -37,7 +37,8 @@ plan  ──▶  work list  ──▶  [ executor ]  ──▶  content-addresse
 
 Consequences worth stating:
 
-- A run interrupted locally can be finished on a cluster; completed items are cache hits.
+- A run interrupted locally can be finished on a cluster when both point at one cache root;
+  completed items are cache hits.
 - `stratum exec --plan … --stage … --index N` is the single worker entrypoint. A SLURM array task
   and a Lambda invocation both reduce to it, which is what keeps the three paths from diverging.
 - Storage is a URI or a path. `{root}/cache/...` is a directory or an `s3://` prefix; layout and
@@ -78,9 +79,9 @@ honest answer is a split, not a choice.
 
 | Plane | Service | Stages | Why |
 |---|---|---|---|
-| **Control** | Step Functions + Lambda | 1, 5 + all cache probes | Seconds, hundreds of MB, thousands of invocations. Serverless genuinely pays here. |
-| **Data** | AWS Batch on EC2 Spot | 2, 3, 4 when large | Minutes–hours, GBs of RAM, GDAL in the image. Spot with block-level retries. |
-| **Either** | routed per work item | 2, 3, 4 when small | Blocks make Lambda viable where tiles never were |
+| **Control** | Step Functions + Lambda | plan, publish + all cache probes | Seconds, hundreds of MB, thousands of invocations. Serverless genuinely pays here. |
+| **Data** | AWS Batch on EC2 Spot | regrid, resolve, reduce when large | Minutes–hours, GBs of RAM, GDAL in the image. Spot with block-level retries. |
+| **Either** | routed per work item | regrid, resolve, reduce when small | Blocks make Lambda viable where tiles never were |
 
 Lambda's ceilings are hard: **15 minutes, 10 GB memory, 10 GB `/tmp`**. AMD asks Slurm for 32 GB
 and up to 24 h per 1° bin. Block decomposition ([01](01-grid-tiling.md)) shrinks the unit until
@@ -106,6 +107,10 @@ def route(item, plan) -> Literal["lambda", "batch"]:
 
 Estimates come from the planner: block cell count × bands × dtype × observation count, plus
 measured per-stage constants refined from prior runs.
+
+The plan itself is routed the same way, by the tile and epoch counts the manifest implies before a
+single block is enumerated. It writes per-tile work lists as it goes, so a run near the threshold
+checkpoints rather than fails, and a local run is unaffected either way.
 
 ---
 
@@ -183,7 +188,7 @@ Terraform stands up one run-agnostic deployment; a run is a manifest plus a `run
 an S3 prefix and a Step Functions execution.
 
 Because GLTs carry no dependence on the scorer, **every experiment over the same zone shares one
-GLT cache** — the first pays for geometry, the rest skip stages 1–2. Comparing cost functions is
+GLT cache** — the first pays for geometry, the rest skip plan and regrid. Comparing cost functions is
 the cheapest thing the system does.
 
 Guardrails: tag every job with `run_id` for cost allocation; set `MaxConcurrency` per execution so
@@ -197,8 +202,10 @@ versus experimentation, or a different region — never for an experiment.
 
 1. Batch on Fargate or EC2? Fargate is simpler and now supports Graviton Spot; EC2 gives better
    instance selection for memory-heavy reduces and local NVMe for staging.
-2. Do we need a priority queue so a delivered-product run preempts experiments?
-3. Should `Plan` itself be a Batch job for global runs? Enumerating 44k blocks may exceed a
-   Lambda's 15 minutes.
-4. Is `ToleratedFailurePercentage` acceptable for a delivered product, or must delivery runs be
-   all-or-nothing? Probably: tolerate in experiments, zero-tolerance for delivery.
+2. ~~Do we need a priority queue so a delivered-product run preempts experiments?~~ **Resolved:**
+   no, not until two campaigns actually contend for one deployment.
+3. ~~Should `Plan` itself be a Batch job for global runs?~~ **Resolved:** routed like any other work
+   item, by the tile and epoch counts the manifest implies, with per-tile work lists written as it
+   goes (§2).
+4. ~~Is `ToleratedFailurePercentage` acceptable for a delivered product, or must delivery runs be
+   all-or-nothing?~~ **Resolved:** tolerate in experiments; delivery runs are all-or-nothing.

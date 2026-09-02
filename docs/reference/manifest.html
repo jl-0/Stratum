@@ -46,8 +46,8 @@
 <tr><td><a href="#granule-filter"><code>granule_filter</code></a></td><td>yes</td><td>Which granules are candidates</td></tr>
 <tr><td><a href="#pixel-mask"><code>pixel_mask</code></a></td><td>no</td><td>Which pixels are eligible</td></tr>
 <tr><td><a href="#scorer"><code>scorer</code></a></td><td>yes</td><td>The cost function</td></tr>
-<tr><td><a href="#reducer"><code>reducer</code></a></td><td>no</td><td>Temporal reduction; omit for single-epoch pass-through</td></tr>
-<tr><td><a href="#lumping"><code>lumping</code></a></td><td>no</td><td>Grouping input classes into product classes</td></tr>
+<tr><td><a href="#snapshot"><code>snapshot</code></a></td><td>yes</td><td>What resolve records per epoch, and how each layer collapses through time</td></tr>
+<tr><td><a href="#reducer"><code>reducer</code></a></td><td>no</td><td>A reducer plugin, only for what the schema vocabulary cannot express</td></tr>
 <tr><td><a href="#outputs"><code>outputs</code></a></td><td>yes</td><td>Destination, formats, rendering</td></tr>
 <tr><td><a href="#plugins"><code>plugins</code></a></td><td>no</td><td>Plugin wheel to fetch at cold start</td></tr>
 <tr><td><a href="#budget"><code>budget</code></a></td><td>yes</td><td>Fan-out ceilings and what to do when exceeded</td></tr>
@@ -76,6 +76,7 @@
 <tr><td><code>tile_size</code></td><td>float</td><td>—</td><td>In CRS units. The product unit.</td></tr>
 <tr><td><code>block</code></td><td>int</td><td><code>512</code></td><td>Cells per side. Cannot change output.</td></tr>
 <tr><td><code>max_distance</code></td><td>float</td><td>1.5 &times; grid diagonal</td><td>Beyond it a regridded cell is marked interpolated. Enters the GLT cache key.</td></tr>
+<tr><td><code>regrid_method</code></td><td>enum</td><td><code>kdtree</code></td><td><code>kdtree</code> | <code>warp_embedded</code> — the latter warps the product's own lookup table, handed over by the reader. Enters the GLT cache key.</td></tr>
 <tr><td><code>force_positive_y</code></td><td>bool</td><td><code>false</code></td><td>Defeats the positive-<code>y</code> guard rail. Almost always the wrong thing to set.</td></tr>
 </tbody>
 </table>
@@ -141,7 +142,7 @@ in the plan report.</p>
 <div class="note">
   <span class="label">Cost of overlapping windows</span>
   <p>An epoch snapshot is cached per <code>(tile, epoch, block, scorer)</code>; the delivery period
-  is not in its key. Overlapping windows therefore re-run stage 4 only, and re-read stage 3.</p>
+  is not in its key. Overlapping windows therefore re-run reduce only, and re-read resolve's snapshots.</p>
 </div>
 
 <h2 id="inputs">inputs</h2>
@@ -164,6 +165,7 @@ in the plan report.</p>
         path: /mineral_metadata
         key: index
         attributes: [name, record, library, group, url]
+    mineral_uncert: {collection: EMITL2BMIN, asset: MINUNCERT, var: group_1_band_depth_unc}
     mask:  {collection: EMITL2AMASK,  var: mask}
     frcov: {collection: EMITL2BFRCOV, var: soil}
   band_aliases:
@@ -204,6 +206,8 @@ replacement.</p>
 <tbody>
 <tr><td><code>collection</code></td><td>yes</td><td>Index collection this role resolves to</td></tr>
 <tr><td><code>var</code></td><td>yes</td><td>Variable within the product</td></tr>
+<tr><td><code>asset</code></td><td>no</td><td>File within the granule record, e.g. <code>MINUNCERT</code>. Defaults to the collection's primary file</td></tr>
+<tr><td><code>version</code></td><td>no</td><td>Pins a <code>collection_version</code> when the index holds more than one</td></tr>
 <tr><td><code>class_table</code></td><td>no</td><td>Present when the band is categorical</td></tr>
 </tbody>
 </table>
@@ -218,7 +222,7 @@ replacement.</p>
 <tr><td><code>source</code></td><td><code>embedded</code> | <code>file</code></td><td>Prefer <code>embedded</code>: the table travels with the data</td></tr>
 <tr><td><code>path</code></td><td>string</td><td>Group within the product, or a URI when <code>source: file</code></td></tr>
 <tr><td><code>key</code></td><td>string</td><td>Column whose values appear in the pixels</td></tr>
-<tr><td><code>attributes</code></td><td>list</td><td>Columns available for attribute matching in <code>lumping</code> and colour tables</td></tr>
+<tr><td><code>attributes</code></td><td>list</td><td>Columns available for attribute matching in a snapshot layer's <code>classes</code> file and in colour tables</td></tr>
 </tbody>
 </table>
 </div>
@@ -253,7 +257,7 @@ replacement.</p>
 <tr><td><code>uri</code></td><td>yes</td><td>May contain <code>{date}</code> for time-varying sources</td></tr>
 <tr><td><code>kind</code></td><td>yes</td><td><code>continuous</code> | <code>categorical</code> | <code>vector</code> | <code>table</code></td></tr>
 <tr><td><code>resampling</code></td><td>yes for rasters</td><td><code>nearest</code> | <code>bilinear</code> | <code>cubic</code> | <code>mode</code> | <code>average</code></td></tr>
-<tr><td><code>temporal</code></td><td>no</td><td><code>nearest</code> | <code>previous</code> | <code>epoch</code></td></tr>
+<tr><td><code>temporal</code></td><td>no</td><td><code>nearest</code> | <code>previous</code> — relative to the date a plugin passes, within <code>max_age</code>; <code>epoch</code> — resolved once at each epoch's start</td></tr>
 <tr><td><code>max_age</code></td><td>no</td><td>ISO 8601 period; beyond it the source is treated as missing</td></tr>
 <tr><td><code>burn</code></td><td>vector only</td><td>Attribute to rasterize</td></tr>
 <tr><td><code>all_touched</code></td><td>vector only</td><td><code>true</code> burns any touched cell; <code>false</code> uses centroids</td></tr>
@@ -270,7 +274,7 @@ before compute is provisioned, and plugins may only read aliases declared here.<
 <p>An ordered list. Each entry is either a built-in predicate or a plugin reference.</p>
 
 <pre><code>granule_filter:
-  - {build_version: b0107_v02}
+  - {build_version: "010635"}
   - {max_cloud_fraction: 0.5, on_missing: fail}
   - {max_solar_zenith: 70}
   - {month_in: [8, 9, 10, 11]}
@@ -280,8 +284,8 @@ before compute is provisioned, and plugins may only read aliases declared here.<
 <table>
 <thead><tr><th>Predicate</th><th>Effect</th></tr></thead>
 <tbody>
-<tr><td><code>build_version</code></td><td>Pins a product vintage. <strong>Required</strong> — see below.</td></tr>
-<tr><td><code>product_version</code></td><td>Pins the granule's own product stamp, e.g. <code>V001</code></td></tr>
+<tr><td><code>build_version</code></td><td>Filters on the granule's software build, e.g. <code>010635</code>. Optional — one collection spans many builds; the vintage guard is the class-table check below</td></tr>
+<tr><td><code>product_version</code></td><td>The granule's own product stamp from the file header, e.g. <code>V001</code>. Not a catalogue field; from CMR it equals the collection version</td></tr>
 <tr><td><code>collection_version</code></td><td>Pins the collection's version, e.g. <code>001</code>. Constant within a collection, so it is <strong>not</strong> a vintage predicate</td></tr>
 <tr><td><code>max_cloud_fraction</code></td><td>Upper bound on reported cloud fraction</td></tr>
 <tr><td><code>max_solar_zenith</code></td><td>Upper bound on solar zenith angle</td></tr>
@@ -293,19 +297,20 @@ before compute is provisioned, and plugins may only read aliases declared here.<
 </div>
 
 <div class="warn">
-  <span class="label">Vintage pinning</span>
-  <p>A run must pin a vintage. If the frozen granule set spans more than one,
+  <span class="label">Mixed vintages are refused</span>
+  <p>Stratum fingerprints every contributing granule's embedded class table. If they disagree,
   <code>stratum plan</code> fails unless <code>allow_mixed_vintage: true</code> is set at the top
   level with a documented reason. A run spanning a reprocessing boundary blends incompatible
-  products into a plausible-looking result.</p>
+  products into a plausible-looking result, and a build number does not catch it — the class
+  table does.</p>
 </div>
 
 <h2 id="pixel-mask">pixel_mask</h2>
 
 <pre><code>pixel_mask:
-  - {ref: emit.masks:EdgeTrim, columns: 7}
-  - {ref: emit.masks:L2AStandard, flags: [cloud, cirrus, water, spacecraft]}
-  - {ref: emit.masks:SoilFraction, min_soil: 0.65}</code></pre>
+  - {ref: edge_trim, columns: 7}
+  - {ref: l2a_standard, flags: [cloud, cirrus, water, spacecraft]}
+  - {ref: soil_fraction, min_soil: 0.65}</code></pre>
 
 <p>Masks compose by conjunction — a pixel is eligible only if every entry admits it. Order does not
 affect the result. Any additional keys are passed to the plugin constructor.</p>
@@ -326,39 +331,90 @@ affect the result. Any additional keys are passed to the plugin constructor.</p>
 </table>
 </div>
 
-<h2 id="reducer">reducer</h2>
+<h2 id="snapshot">snapshot</h2>
 
-<pre><code>reducer:
-  ref: mode_through_time
-  params: {min_count: 3, ignore: [0, -4], tie_break: highest_score}</code></pre>
+<pre><code>snapshot:
+  name: cm-v1
+  extends: []                              <span class="c"># names of schemas this one only appends to</span>
+  layers:
+    mineral_1:
+      kind: categorical
+      source: mineral
+      classes: "@ref:classes/cm-v1.yaml"
+      aggregate: {method: vote, min_count: 3, ignore: [none], tie_break: highest_score}
+    depth_1:
+      kind: continuous
+      source: mineral_depth
+      aggregate: {method: inverse_variance, unc: depth_1_unc, conditional_on: mineral_1, spread: iqr}
+    depth_1_unc:
+      kind: continuous
+      source: mineral_uncert
+      aggregate: {method: none}</code></pre>
 
-<p>Omit the block entirely for a single-epoch pass-through.</p>
+<p>One per run, and constant across every epoch in it. It is what resolve writes and what reduce
+reads. See <a href="../guide/plugins.html#snapshot-schema">what the snapshot carries</a> and
+<a href="../specs/13-snapshot-schema.md"><code>specs/13-snapshot-schema.md</code></a>.</p>
+
+<h3 id="layer">snapshot.layers.&lt;name&gt;</h3>
 
 <div class="tw">
 <table>
-<thead><tr><th>Parameter (<code>mode_through_time</code>)</th><th>Type</th><th>Effect</th></tr></thead>
+<thead><tr><th>Field</th><th>Required</th><th>Notes</th></tr></thead>
 <tbody>
-<tr><td><code>min_count</code></td><td>int</td><td>Suppress pixels whose modal class has fewer votes</td></tr>
-<tr><td><code>ignore</code></td><td>list[int]</td><td>Class values excluded from the tally</td></tr>
-<tr><td><code>tie_break</code></td><td>enum</td><td><code>earliest</code> | <code>latest</code> | <code>highest_score</code> | <code>nodata</code></td></tr>
+<tr><td><code>kind</code></td><td>yes</td><td><code>categorical</code> | <code>continuous</code></td></tr>
+<tr><td><code>source</code></td><td>yes</td><td>A role name or a band alias. The two share one namespace and may not collide. A multi-band source gives the layer a band axis</td></tr>
+<tr><td><code>dtype</code></td><td>no</td><td>Defaults to the source band's dtype; <code>uint16</code> for categorical</td></tr>
+<tr><td><code>bands</code></td><td>no</td><td>Band indices to keep from a multi-band source; default all</td></tr>
+<tr><td><code>classes</code></td><td>categorical</td><td>The enumeration file, or <code>source</code> to adopt the input's own class table</td></tr>
+<tr><td><code>aggregate</code></td><td>yes</td><td>How the layer collapses through time — below</td></tr>
 </tbody>
 </table>
 </div>
 
-<h2 id="lumping">lumping</h2>
+<h3 id="aggregate">aggregate</h3>
 
-<pre><code>lumping:
-  match_on: [library, record, group]
-  classes:
-    goethite:
-      - {library: sprlb06, record: 882,  group: 1}
-      - {library: splib06, record: 5736, group: 1}
-    pyrite:
-      - {library: splib06, record: 2568, group: 1}</code></pre>
+<div class="tw">
+<table>
+<thead><tr><th>Kind</th><th><code>method</code></th><th>Parameters</th></tr></thead>
+<tbody>
+<tr><td>categorical</td><td><code>vote</code></td><td><code>min_count</code> (int), <code>ignore</code> (class names), <code>tie_break</code>: <code>earliest</code> | <code>latest</code> | <code>highest_score</code> | <code>nodata</code></td></tr>
+<tr><td>categorical</td><td><code>best</code></td><td>—</td></tr>
+<tr><td>continuous</td><td><code>median</code> | <code>mean</code> | <code>min</code> | <code>max</code> | <code>percentile</code> | <code>score_weighted</code> | <code>inverse_variance</code> | <code>best</code></td><td><code>p</code> for percentile; <code>unc: &lt;layer&gt;</code> for inverse_variance; any may add <code>conditional_on: &lt;categorical layer&gt;</code> and <code>spread: std | iqr</code></td></tr>
+<tr><td>either</td><td><code>none</code></td><td>Carried, not delivered</td></tr>
+</tbody>
+</table>
+</div>
 
-<p><code>match_on</code> names attribute columns from the role's class table. Entries are resolved
-to integer class values per granule at plan time; an entry matching zero or multiple rows is an
-error. Nothing here names a positional index, so the same lumping file survives a vintage change.</p>
+<p>Changing an <code>aggregate</code> re-runs reduce and publish only. Changing any other layer
+field re-runs resolve from cached geometry.</p>
+
+<h3 id="classes">The classes file</h3>
+
+<pre><code>name: cm-v1
+match_on: [library, record, group]
+unmapped: fail                    <span class="c"># fail | &lt;class name&gt;</span>
+classes:
+  - {id: 1, name: goethite,
+     members: [{library: sprlb06, record: 882,  group: 1},
+               {library: splib06, record: 5736, group: 1}]}
+  - {id: 3, name: pyrite,
+     members: [{library: splib06, record: 2568, group: 1}]}</code></pre>
+
+<p><code>match_on</code> names attribute columns from the role's <code>class_table</code>. Members
+are resolved per granule at plan time and an entry matching zero or multiple rows is an error.
+<code>id</code> is explicit and never reused; <code>0</code> is reserved for <code>none</code>,
+the "observed, nothing identified" class. Append new ids freely and list the previous schema in
+<code>extends</code>; renaming or renumbering is a new schema and rebuilds every epoch.</p>
+
+<h2 id="reducer">reducer</h2>
+
+<pre><code>reducer:
+  ref: my_package:ClassifyLast
+  params: {...}</code></pre>
+
+<p>Optional. Omit it and the built-in reducer runs each layer's declared <code>aggregate</code>.
+Name a plugin only for logic the schema vocabulary cannot express; it receives the same snapshots
+and their schema.</p>
 
 <h2 id="outputs">outputs</h2>
 
@@ -367,15 +423,14 @@ error. Nothing here names a positional index, so the same lumping file survives 
   formats: [cog, netcdf]
   stac: true
   render:
-    mineral_id:
+    mineral_1:
       mapper: categorical
-      classes: "@ref:lumping/cm-v1.yaml"
       colors:
         pyrite:   [220,   5,  12]
         goethite: [174, 118, 163]
       nodata: transparent
       on_unmapped: fail
-      alpha_from: {band: agreement, domain: [0.3, 0.8], range: [60, 255]}</code></pre>
+      alpha_from: {band: mineral_1_agreement, domain: [0.3, 0.8], range: [60, 255]}</code></pre>
 
 <div class="tw">
 <table>
@@ -393,8 +448,8 @@ error. Nothing here names a positional index, so the same lumping file survives 
 </div>
 
 <p>Continuous mappers take <code>ramp</code>, <code>domain</code> and <code>clip</code> instead of
-<code>classes</code> and <code>colors</code>. The data product ships whether or not
-<code>render</code> is present.</p>
+<code>colors</code>. A categorical mapper's classes are the layer's enumeration. The data product
+ships whether or not <code>render</code> is present.</p>
 
 <h2 id="plugins">plugins</h2>
 
@@ -447,14 +502,13 @@ exist and are readable;</li>
 <li><code>kind</code> and <code>resampling</code> agree for every aux source;</li>
 <li><code>capability</code> and <code>halo</code> are consistent with <code>grid.block</code>;</li>
 <li><code>epoch</code> divides <code>deliver</code> evenly;</li>
-<li>every <code>lumping</code> entry resolves to exactly one class-table row, and every class named
-in a colour table exists after lumping;</li>
-<li>contributing granules' class tables agree by fingerprint, or a remap is explicitly permitted;</li>
+<li>the snapshot schema resolves: every layer <code>source</code> is a role or alias, every enumeration member matches exactly one class-table row per granule, and every class a colour table names exists in the enumeration;</li>
+<li>contributing granules' class tables agree by fingerprint &mdash; the vintage check &mdash; or a remap is explicitly permitted;</li>
 <li>every filter's <code>on_missing</code> policy is explicit;</li>
 <li>every role's <code>collection</code> resolves to exactly one registered <code>GranuleReader</code>, and its <code>var</code> exists in that reader's variables;</li>
 <li>every asset URI scheme is supported and credentials for it are obtainable now;</li>
 <li>readers agree on space &mdash; an ortho-native role is not being asked for a regrid;</li>
-<li>a vintage is pinned on a granule-level field and the frozen index does not span several;</li>
+<li>a collection the index holds under more than one <code>collection_version</code> is pinned with <code>version:</code>;</li>
 <li><code>budget</code> is present and finite.</li>
 </ul>
 

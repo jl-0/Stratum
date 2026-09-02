@@ -57,7 +57,7 @@ HTTP &mdash; so the same reader works on your laptop and in Lambda.</p>
 
 <h2 id="block">How a block gets its data</h2>
 
-<p>Stage 3 works on one <a href="concepts.html#tile-block">block</a> of one tile for one epoch. Here
+<p>Resolve works on one <a href="concepts.html#tile-block">block</a> of one tile for one epoch. Here
 is what happens when it needs a band, for one contributing granule:</p>
 
 <pre><code><span class="c"># The work item names a block and an epoch. Which granules touch it</span>
@@ -67,7 +67,7 @@ cand = frozen_index.intersecting(block, epoch)
 
 <span class="k">for</span> granule <span class="k">in</span> cand:
 
-    <span class="c"># 1. The GLT was built in stage 2 and cached. It is a COG, so this</span>
+    <span class="c"># 1. The GLT was built by regrid and cached. It is a COG, so this</span>
     <span class="c">#    reads only the bytes covering this block — not the whole tile.</span>
     glt = assets.open(glt_key_for(granule, tile))
     g   = glt.read(win)                            <span class="c"># (H, W, 3) int32</span>
@@ -83,8 +83,15 @@ cand = frozen_index.intersecting(block, epoch)
     src = assets.open(granule.assets[<span class="k">"mineral"</span>])
     arr = reader.read(src, var=<span class="k">"group_1_mineral_id"</span>, window=sw)   <span class="c"># (h, w)</span>
 
-    <span class="c"># 4. Map sensor pixels onto grid cells. The only place the two meet.</span>
-    band, valid = gather(arr, g, sw)               <span class="c"># (H, W) on the block grid</span></code></pre>
+    <span class="c"># 4. Sensor-space masks see the window WITH its origin, so EdgeTrim</span>
+    <span class="c">#    knows the absolute column.</span>
+    ok  = sensor_masks(arr, sw)
+
+    <span class="c"># 5. Map sensor pixels onto grid cells. The only place the two meet.</span>
+    band, valid = gather(arr, g, sw, ok)           <span class="c"># (H, W) on the block grid</span>
+
+    <span class="c"># 6. Map-space masks see the block — cloud flags, water, soil fraction.</span>
+    valid &amp;= map_masks(band, block, aux)</code></pre>
 
 <h3 id="window">Why step 2 is the whole trick</h3>
 
@@ -107,6 +114,17 @@ in every epoch.</p>
 <p>Because the GLT already knows which source pixels landed in this block, the window is exact
 rather than estimated. Nothing is guessed from footprints.</p>
 
+<div class="warn">
+  <span class="label">The delivered L2B file cannot honour this yet</span>
+  <p>Each science variable in the DAAC's L2B file &mdash; mineral id, band depth &mdash; is stored
+  as <strong>one gzip chunk covering the whole scene</strong>, and HDF5 decompresses a chunk whole.
+  So a windowed read of those variables decodes the entire scene however small the window: it
+  bounds memory, not bytes. Latitude and longitude are uncompressed and window properly, and so do
+  Stratum's own COGs. Collecting the saving above means preparing each asset once &mdash; a
+  transcode into tiled per-variable COGs, cached by checksum and shared by every run. That is
+  the design; see <a href="../specs/12-data-access.md"><code>specs/12-data-access.md</code></a>.</p>
+</div>
+
 <div class="note">
   <span class="label">A window remembers where it came from</span>
   <p><code>SensorWindow</code> is <code>(row0, col0, height, width)</code> against the
@@ -116,7 +134,7 @@ rather than estimated. Nothing is guessed from footprints.</p>
   edge of the <em>detector</em> &mdash; and the output will look entirely reasonable.</p>
 </div>
 
-<h3 id="gather">Step 4, in full</h3>
+<h3 id="gather">Step 5, in full</h3>
 
 <p>The gather is the one place sensor space and block space meet, so it lives in the framework
 rather than in anybody's plugin:</p>
@@ -124,13 +142,13 @@ rather than in anybody's plugin:</p>
 <pre><code>gy, gx, fi = g[..., 1], g[..., 0], g[..., 2]
 
 hit    = fi != 0                     <span class="c"># 0 is GLT nodata</span>
-interp = (gy &lt; 0) | (gx &lt; 0)         <span class="c"># negative marks an interpolated cell</span>
+interp = (gy &lt; 0) | (gx &lt; 0)         <span class="c"># negative marks an interpolated cell — kept, exposed as obs.interpolated</span>
 
 r = np.abs(gy) - 1 - sw.row0         <span class="c"># GLT indices are 1-based</span>
 c = np.abs(gx) - 1 - sw.col0
 
 band  = np.where(hit, arr[r, c], fill)
-valid = hit &amp; ~arr.mask[r, c]</code></pre>
+valid = hit &amp; ~arr.mask[r, c] &amp; ok[r, c]</code></pre>
 
 <p>One-based indices and the negative-means-interpolated convention are inherited on purpose, so
 Stratum's GLTs interoperate with artifacts the existing tooling produces. Both are easy to get
@@ -241,14 +259,13 @@ index:</p>
 <tbody>
 <tr><td>Maps UMM-G fields onto the index schema</td><td>Not one-to-one, and lossy in places</td></tr>
 <tr><td>Resolves assets to <a href="concepts.html#roles">roles</a></td><td>UMM-G types URLs by <em>access method</em>, not by role. Choosing the <code>s3://</code> entry over the HTTPS one, and deciding which file is <code>mineral</code> and which is <code>mask</code>, is our policy</td></tr>
-<tr><td>Applies the missing-metadata policy</td><td>Cloud fraction is present on some collections and simply absent on others. Absent must arrive as <em>null</em>, never <code>0.0</code> &mdash; see <a href="running.html#missing">Missing metadata</a></td></tr>
+<tr><td>Applies the missing-metadata policy</td><td>Cloud fraction is a top-level field on every L2B MIN granule and simply absent on some other collections. Absent must arrive as <em>null</em>, never <code>0.0</code> &mdash; see <a href="running.html#missing">Missing metadata</a></td></tr>
 <tr><td>Holds an explicit session</td><td><code>earthaccess.login()</code> sets module-level global state, which is wrong in a process pool and worse in a Lambda</td></tr>
 </tbody>
 </table>
 </div>
 
-<p>The field-by-field mapping, including the two fields that still need confirming against a real
-query, is in <a href="../specs/12-data-access.md"><code>specs/12-data-access.md</code></a>.</p>
+<p>The field-by-field mapping, verified against a live query, is in <a href="../specs/12-data-access.md"><code>specs/12-data-access.md</code></a>.</p>
 
 <h2 id="index">Building and refreshing the index</h2>
 
@@ -264,8 +281,8 @@ becomes visible: the granule comes back as updated, the index records a new last
 <div class="warn">
   <span class="label">Without that, the archive changes underneath you silently</span>
   <p>A stable query returning different science is the failure this whole path is arranged to
-  prevent. Pair it with vintage pinning &mdash; see
-  <a href="running.html#vintage">Vintage pinning is required</a>.</p>
+  prevent. Pair it with the class-table check &mdash; see
+  <a href="running.html#vintage">Mixed vintages are refused</a>.</p>
 </div>
 
 <h2 id="access">Fetching the bytes</h2>
@@ -278,7 +295,7 @@ modes behind one interface:</p>
 <thead><tr><th>Mode</th><th>What happens</th><th>When</th></tr></thead>
 <tbody>
 <tr><td><strong>Stage in</strong></td><td>The worker copies that one asset to its own scratch and gets a path back</td><td>The default. Works with any code that expects a filename</td></tr>
-<tr><td><strong>Stream</strong></td><td>Reads become HTTP range requests; only the touched bytes move</td><td>Once a reader supports windowed reads &mdash; under 4% of a file for one block</td></tr>
+<tr><td><strong>Stream</strong></td><td>Reads become HTTP range requests; only the touched bytes move</td><td>Once the asset is in a windowable layout. Stratum's own COGs are; the delivered L2B science bands are one gzip chunk each and are not, until prepared &mdash; see the note above</td></tr>
 </tbody>
 </table>
 </div>

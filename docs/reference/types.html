@@ -45,6 +45,7 @@ against. <span class="chip chip-draft">open</span> means a field may still be ad
 <tr><td><code>ObsWindow</code></td><td>In <code>Scorer.score()</code>, <code>PixelMask.valid()</code></td><td><span class="chip chip-locked">locked</span></td></tr>
 <tr><td><code>AuxAccessor</code></td><td>In every hook</td><td><span class="chip chip-locked">locked</span></td></tr>
 <tr><td><code>SnapshotStack</code></td><td>In <code>Reducer.reduce()</code></td><td><span class="chip chip-locked">locked</span></td></tr>
+<tr><td><code>SnapshotSchema</code>, <code>LayerSpec</code></td><td>Via <code>snaps.schema</code>; you declare them in the manifest</td><td><span class="chip chip-draft">open</span> — new in spec 13</td></tr>
 <tr><td><code>BandStack</code></td><td>In <code>OutputMapper.render()</code></td><td><span class="chip chip-locked">locked</span></td></tr>
 <tr><td><code>BandSpec</code></td><td>You declare these</td><td><span class="chip chip-locked">locked</span></td></tr>
 <tr><td><code>GLT</code></td><td>Only if you work with geometry directly</td><td><span class="chip chip-locked">locked</span></td></tr>
@@ -69,15 +70,29 @@ one axis.</p>
     space: Literal[<span class="k">"sensor"</span>, <span class="k">"block"</span>]
     n: int                        <span class="c"># 1 streaming, N stacked</span>
     block: BlockRef | <span class="k">None</span>        <span class="c"># None in sensor space</span>
+    sensor_window: SensorWindow | <span class="k">None</span>   <span class="c"># set in sensor space; carries row0/col0</span>
     granule: GranuleRef | <span class="k">None</span>    <span class="c"># None in stack mode</span>
     granules: Sequence[GranuleRef]
+    epoch: Epoch                  <span class="c"># the epoch being resolved</span>
 
     <span class="k">def</span> __getitem__(self, alias: str) -&gt; np.ndarray:
         <span class="c">"""Band by alias. (H, W) streaming, (N, H, W) stacked."""</span>
 
     @property
+    <span class="k">def</span> coords(self) -&gt; Coords:
+        <span class="c">"""Cell centres: .x/.y in the grid CRS, .lon/.lat. Each (H, W)."""</span>
+
+    @property
     <span class="k">def</span> valid(self) -&gt; np.ndarray:
-        <span class="c">"""Bool. True = observed and unmasked. Same shape as a band."""</span></code></pre>
+        <span class="c">"""Bool. True = observed and unmasked. Same shape as a band."""</span>
+
+    @property
+    <span class="k">def</span> interpolated(self) -&gt; np.ndarray:
+        <span class="c">"""Bool. True where the GLT reached beyond max_distance. Valid; penalise if you like."""</span></code></pre>
+
+<p><code>coords</code> holds cell centres as four <code>(H, W)</code> arrays — <code>x</code> and
+<code>y</code> in the grid CRS, <code>lon</code> and <code>lat</code> always — so a scorer can do
+its own geometry against a declared vector source.</p>
 
 <div class="tw">
 <table>
@@ -102,11 +117,18 @@ define is a plan-time error.</p>
 <h2 id="aux">AuxAccessor</h2>
 
 <pre><code><span class="k">class</span> AuxAccessor:
-    <span class="k">def</span> raster(self, alias: str, *, date: datetime | <span class="k">None</span> = <span class="k">None</span>) -&gt; np.ndarray:
-        <span class="c">"""(H, W) on THIS block's grid. Warped, windowed, cached."""</span>
+    <span class="k">def</span> raster(self, alias: str, *, date: datetime | <span class="k">None</span> = <span class="k">None</span>,
+               epoch: Epoch | <span class="k">None</span> = <span class="k">None</span>) -&gt; np.ndarray:
+        <span class="c">"""(H, W) on THIS block's grid. Warped, windowed, cached. epoch= for temporal: epoch sources."""</span>
 
     <span class="k">def</span> vector(self, alias: str) -&gt; np.ndarray:
         <span class="c">"""Rasterized to this block's grid."""</span>
+
+    <span class="k">def</span> features(self, alias: str, *, margin: float = 0.0) -&gt; Sequence[BaseGeometry]:
+        <span class="c">"""The source's geometries, clipped to this block plus margin, in the block CRS."""</span>
+
+    <span class="k">def</span> distance(self, alias: str, *, cutoff: float | <span class="k">None</span> = <span class="k">None</span>) -&gt; np.ndarray:
+        <span class="c">"""(H, W) distance from each cell centre to the nearest feature. Cached like a warp."""</span>
 
     <span class="k">def</span> table(self, alias: str) -&gt; AuxTable:
         <span class="c">""".at(date) -&gt; scalar. No gridding."""</span>
@@ -147,6 +169,7 @@ scorer, mask, reducer or mapper never sees one. See
     <span class="k">def</span> variables(self, ctx) -&gt; Mapping[str, VarSpec]: ...
     <span class="k">def</span> read(self, ctx, var: str, window: SensorWindow | <span class="k">None</span> = <span class="k">None</span>) -&gt; MaskedArray: ...
     <span class="k">def</span> geolocation(self, ctx) -&gt; LocArray | <span class="k">None</span>: ...
+    <span class="k">def</span> glt(self, ctx) -&gt; GLT | <span class="k">None</span>: ...      <span class="c"># the product's own lookup table, if it ships one</span>
     <span class="k">def</span> class_table(self, ctx, path, key, attributes) -&gt; ClassTable | <span class="k">None</span>: ...
 
 <span class="k">class</span> GranuleSource(Protocol):
@@ -235,20 +258,23 @@ scorer, mask, reducer or mapper never sees one. See
     datetime: datetime            <span class="c"># tz-aware UTC, acquisition start</span>
     end_datetime: datetime
     bbox: tuple[float, float, float, float]
-    assets: Mapping[str, str]     <span class="c"># role -&gt; URI</span>
-    build_version: str            <span class="c"># "010635"  granule build   [observed]</span>
-    product_version: str          <span class="c"># "V001"    granule stamp   [observed]</span>
+    assets: Mapping[str, str]     <span class="c"># asset name -&gt; URI</span>
+    build_version: str            <span class="c"># "010635"  CMR SOFTWARE_BUILD_VERSION   [observed]</span>
+    product_version: str          <span class="c"># "V001"    file header; not in CMR      [observed]</span>
     collection_version: str       <span class="c"># "001"     the collection's version</span>
     cloud_fraction: float | <span class="k">None</span>
-    day_night: str | <span class="k">None</span>       <span class="c"># "Day"        [observed]</span></code></pre>
+    day_night: str | <span class="k">None</span>       <span class="c"># "Day"        [observed]</span>
+    attributes: Mapping[str, str] <span class="c"># the source's remaining fields, verbatim</span></code></pre>
 
 <p><code>GranuleFrame</code> is the plural form — a dataframe with these as columns, which is what
 <code>GranuleFilter.keep()</code> receives. Operate on it vectorized.</p>
 
-<p>Three version fields, deliberately. <code>build_version</code> and <code>product_version</code>
-are properties of <em>this granule</em>, read from its own attributes, and are what a vintage filter
-pins. <code>collection_version</code> is a property of the collection, so it is identical for every
-granule in it and can never tell a reprocessed granule from an original one.</p>
+<p>Three version fields, deliberately. <code>build_version</code> is a property of <em>this
+granule</em> and moves often — one collection already holds eight of them.
+<code>product_version</code> is the file's own stamp and in practice tracks the collection.
+<code>collection_version</code> is identical for every granule in a collection. None of the three
+is the vintage check; that is the class table's fingerprint, because a class shift is what a
+reprocessing changes. All three are carried so a run can report exactly what it read.</p>
 
 <p><code>cloud_fraction</code> is nullable and the nullness is meaningful: <code>None</code> means
 the granule reports no cloud metadata, which is a different situation from reporting a high value.
@@ -261,10 +287,31 @@ Filters take an explicit <code>on_missing</code> policy rather than guessing.</p
   </ul>
 </div>
 
-<h2 id="stacks">SnapshotStack, BandStack, BandSpec</h2>
+<h2 id="stacks">SnapshotSchema, LayerSpec, SnapshotStack, BandStack, BandSpec</h2>
 
 <pre><code>@dataclass(frozen=<span class="k">True</span>)
+<span class="k">class</span> LayerSpec:
+    name: str
+    kind: Literal[<span class="k">"categorical"</span>, <span class="k">"continuous"</span>]
+    source: str                           <span class="c"># role or band alias - one namespace</span>
+    dtype: str
+    bands: tuple[int, ...] | <span class="k">None</span>         <span class="c"># subset of a multi-band source; None = all</span>
+    classes: ClassTable | <span class="k">None</span>            <span class="c"># the enumeration; categorical only</span>
+    aggregate: Aggregation                <span class="c"># method + params</span>
+
+@dataclass(frozen=<span class="k">True</span>)
+<span class="k">class</span> SnapshotSchema:
+    name: str
+    layers: Sequence[LayerSpec]
+    extends: Sequence[str] = ()           <span class="c"># ancestor schema names; hashes recorded beside them</span>
+    @property
+    <span class="k">def</span> layers_hash(self) -&gt; str: ...     <span class="c"># enters the snapshot key</span>
+    @property
+    <span class="k">def</span> aggregate_hash(self) -&gt; str: ...  <span class="c"># enters the product key</span>
+
+@dataclass(frozen=<span class="k">True</span>)
 <span class="k">class</span> BandSpec:
+    <span class="c">"""A delivered output band. Derived from the schema, or declared by a Reducer plugin."""</span>
     name: str
     dtype: str
     description: str
@@ -273,8 +320,9 @@ Filters take an explicit <code>on_missing</code> policy rather than guessing.</p
 
 <span class="k">class</span> SnapshotStack:
     <span class="c">"""Reducer input. Epoch-major."""</span>
+    schema: SnapshotSchema
     epochs: Sequence[Epoch]                           <span class="c"># ordered, ascending</span>
-    <span class="k">def</span> __getitem__(self, band: str) -&gt; np.ndarray:   <span class="c"># (n_epochs, H, W)</span>
+    <span class="k">def</span> __getitem__(self, layer: str) -&gt; np.ndarray:  <span class="c"># (n_epochs, H, W) or (n_epochs, H, W, B)</span>
     @property
     <span class="k">def</span> valid(self) -&gt; np.ndarray:                    <span class="c"># (n_epochs, H, W) bool</span>
     @property
@@ -285,18 +333,19 @@ Filters take an explicit <code>on_missing</code> policy rather than guessing.</p
     <span class="k">def</span> __getitem__(self, band: str) -&gt; np.ndarray:   <span class="c"># (H, W)</span>
     specs: Sequence[BandSpec]</code></pre>
 
-<p><code>snaps[...]</code> resolves any band the <code>Scorer</code> named in
-<code>carry</code>, plus <code>score</code> and <code>valid</code>. A snapshot is an internal
-artifact rather than a rendered product, so it can be as wide as the reduction needs. Scorer-computed
-bands are <a href="../status.html#planned">planned, not in v1</a>. See
+<p><code>snaps[...]</code> resolves any layer the <code>SnapshotSchema</code> declares, plus
+<code>score</code> and <code>valid</code>. A categorical layer holds product ids from its
+enumeration, never a raw class. Every snapshot in a run shares one schema, and its
+<code>layers_hash</code> is in every snapshot's cache key. Scorer-computed layers are
+<a href="../status.html#planned">planned, not in v1</a>. See
 <a href="../guide/plugins.html#snapshot-schema">what the snapshot carries</a>.</p>
 
 <p>Check <code>snaps.valid</code> rather than testing values against a sentinel. An epoch with no
 observation over a pixel must not count toward an agreement fraction, and
 <code>valid</code> is how you tell.</p>
 
-<p><code>snaps.score</code> carries the score that won each cell in each epoch, so a reducer can
-weight by confidence instead of treating every epoch equally.</p>
+<p><code>snaps.score</code> carries the score that won each cell in each epoch, so an aggregation
+can weight by confidence instead of treating every epoch equally.</p>
 
 <h2 id="glt">GLT</h2>
 
@@ -307,7 +356,7 @@ weight by confidence instead of treating every epoch equally.</p>
     data: np.ndarray              <span class="c"># (H, W, 3) int32</span>
     grid: GridDef
     tile: TileRef
-    granules: Sequence[GranuleRef]    <span class="c"># File Index is 1-based into this</span>
+    granule: GranuleRef               <span class="c"># one GLT per granule; band 3 is always 1</span>
     score: np.ndarray | <span class="k">None</span>      <span class="c"># (H, W) float32 - the winning score</span></code></pre>
 
 <div class="tw">
@@ -316,7 +365,7 @@ weight by confidence instead of treating every epoch equally.</p>
 <tbody>
 <tr><td>1</td><td><code>GLT X</code> — source column, 1-based</td></tr>
 <tr><td>2</td><td><code>GLT Y</code> — source row, 1-based</td></tr>
-<tr><td>3</td><td><code>File Index</code> — which granule, 1-based into <code>granules</code></td></tr>
+<tr><td>3</td><td><code>File Index</code> — always <code>1</code>, kept so existing tooling opens the file. <code>granule_id</code> is in the metadata</td></tr>
 </tbody>
 </table>
 </div>
@@ -366,7 +415,7 @@ classes.</p>
 <tr><td>Mineral groups present</td><td>Two — <code>group_1_*</code> and <code>group_2_*</code></td></tr>
 <tr><td>Band depth range</td><td>0.0 &ndash; 0.5</td></tr>
 <tr><td>Conventions</td><td><code>CF-1.13</code> / <code>NCEI_NetCDF_Swath_Template_v2.0</code></td></tr>
-<tr><td>Vintage fields</td><td><code>software_build_version</code>, <code>software_delivery_version</code>, <code>product_version</code>, plus <code>history</code></td></tr>
+<tr><td>Vintage fields</td><td><code>software_build_version</code>, <code>software_delivery_version</code>, <code>product_version</code>, plus <code>history</code>. The first two are also granule-level CMR attributes</td></tr>
 </tbody>
 </table>
 </div>

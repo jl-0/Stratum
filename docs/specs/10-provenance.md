@@ -38,7 +38,8 @@ Written by `Finalize`, immutable, kept indefinitely at
     "frozen_index": "s3://.../runs/cm-.../index.parquet",
     "frozen_index_hash": "sha256:...",
     "granule_count": 4127,
-    "class_tables": {"mineral": "sha256:..."},
+    "build_versions": {"010632": 1810, "010635": 2317},
+    "class_tables": {"EMITL2BMIN": ["sha256:..."]},
     "collections": {"EMITL2BMIN": "001", "EMITL2AMASK": "002"}
   },
 
@@ -53,8 +54,15 @@ Written by `Finalize`, immutable, kept indefinitely at
 
   "plugins": {
     "scorer":  {"ref": "cleanest_nadir",     "version": "0.4.2", "params": {...}},
-    "reducer": {"ref": "mode_through_time",  "version": "0.4.2", "params": {...}},
+    "reducer": {"ref": "schema",             "version": "0.3.1"},
     "mapper":  {"ref": "categorical",        "version": "0.4.2", "params": {...}}
+  },
+
+  "schema": {
+    "name": "cm-v1",
+    "layers_hash": "sha256:...",
+    "aggregate_hash": "sha256:...",
+    "extends": [{"name": "cm-v0", "layers_hash": "sha256:..."}]
   },
 
   "aux": [
@@ -109,6 +117,10 @@ fingerprint of every input class table the run resolved against.
 The class table appearing in the STAC item is what closes the loop on AMD's problem — the meaning
 of a colour travels with the product instead of living in a config on a cluster account.
 
+**This catalogue is the delivery boundary.** Stratum writes a STAC collection and its items under
+`products/{run_id}` beside the files, and stops. Loading into MMGIS or registering with a DAAC
+reads that output; neither is something Stratum does.
+
 ---
 
 ## 5. The run report
@@ -129,11 +141,14 @@ mystery in the product.
 
 ## 6. Open questions
 
-1. Is the STAC item the authoritative catalogue entry, or do we also register with an internal
-   catalogue / the DAAC? Depends on the collection layout question (D6), still open.
-2. Should provenance record *every* cache key used, or just the top-level hashes? Full lists are
-   large but make "which GLT produced this pixel" answerable.
-3. How do we express lineage across reprocessing — a `derived_from` link to the previous run, or
-   a separate lineage graph?
-4. Do we need signed/verifiable provenance for a delivered NASA product, or is a JSON record
-   sufficient?
+1. ~~Is the STAC item the authoritative catalogue entry, or do we also register with an internal
+   catalogue / the DAAC?~~ **Resolved:** out of scope. Stratum writes a STAC catalogue and files
+   under `products/{run_id}` and stops there (§4); registering with a DAAC or loading into MMGIS is
+   a downstream step that reads that output.
+2. ~~Should provenance record *every* cache key used, or just the top-level hashes?~~ **Resolved:**
+   top-level hashes. Per-artifact `.inputs.json` files answer "which GLT produced this pixel"
+   without the record carrying every key.
+3. ~~How do we express lineage across reprocessing — a `derived_from` link to the previous run, or a
+   separate lineage graph?~~ **Resolved:** a `derived_from` link to the previous run.
+4. ~~Do we need signed/verifiable provenance for a delivered NASA product, or is a JSON record
+   sufficient?~~ **Resolved:** a JSON record, until a delivery requirement says otherwise.

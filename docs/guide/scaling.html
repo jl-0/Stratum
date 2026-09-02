@@ -55,7 +55,7 @@ stratum run -m manifest.yaml --executor aws</code></pre>
 
 <h3 id="seam">What makes this work</h3>
 
-<p>Stage 1 emits a <strong>work list</strong> — a flat file of independent items, each naming a
+<p>The plan stage emits a <strong>work list</strong> — a flat file of independent items, each naming a
 (granule, tile) or a (tile, epoch, block). Every executor does the same thing with it: run each item,
 somewhere. Items do not talk to each other, and each writes to a content-addressed key.</p>
 
@@ -291,7 +291,7 @@ from a local file. There is no database to operate in any of the three cases.</p
 stratum index verify -m manifest.yaml --collection EMITL2BMIN</code></pre>
 
 <p>Building it is a separate periodic job, deliberately: a run never depends on an upstream catalogue
-being reachable, and stage 1 freezes the granule set it selected into the run prefix so the same
+being reachable, and the plan stage freezes the granule set it selected into the run prefix so the same
 manifest reproduces the same inputs later. The index records when each row was last seen, so an
 upstream reprocessing is detectable rather than silent.</p>
 

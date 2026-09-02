@@ -40,6 +40,7 @@
 <tr><td><strong>Source</strong></td><td>Where the index comes from &mdash; a catalogue, or a directory. Never queried by a run.</td></tr>
 <tr><td><strong>Observation</strong></td><td>One granule's contribution to one block, after regrid and masking.</td></tr>
 <tr><td><strong>Snapshot</strong></td><td>The winning value per cell for one epoch. What a <code>Scorer</code> produces.</td></tr>
+<tr><td><strong>Schema</strong></td><td>The declared set of snapshot layers — type, enumeration, aggregation. One per run, constant across epochs.</td></tr>
 <tr><td><strong>Product</strong></td><td>The reduced result per tile, plus its rendering.</td></tr>
 </tbody>
 </table>
@@ -344,15 +345,15 @@ several thousand workers.</p>
 <tbody>
 <tr><td><strong>sensor</strong></td><td><code>(downtrack, crosstrack)</code></td><td>Raw granule variables; a <code>PixelMask</code> with <code>space = "sensor"</code></td></tr>
 <tr><td><strong>granule-ortho</strong></td><td><code>(ortho_y, ortho_x)</code></td><td>The GLT shipped inside a granule. Not the run grid.</td></tr>
-<tr><td><strong>block</strong></td><td><code>(y, x)</code></td><td>Everything from stage 3 onward, and any <code>space = "map"</code> mask</td></tr>
+<tr><td><strong>block</strong></td><td><code>(y, x)</code></td><td>Everything from resolve onward, and any <code>space = "map"</code> mask</td></tr>
 </tbody>
 </table>
 </div>
 
 <p>The distinction matters for masks. Some conditions are properties of a <em>location</em> — this
-cell is water — and are expressed in map space after regridding. Others are properties of the
+cell is water — and are expressed in map space, after the gather through the GLT. Others are properties of the
 <em>detector</em> — this cross-track column is unreliable — and can only be expressed in sensor
-space, because regridding discards the source column. Declare which one you mean; see
+space, because the gather through the GLT discards the source column. Declare which one you mean; see
 <a href="plugins.html#pixel-mask">Writing plugins</a>.</p>
 
 <div class="note">
@@ -483,25 +484,24 @@ different vintages.</p>
 <p>Stratum handles this in two ways, and both are things you configure rather than code:</p>
 
 <ol>
-<li><strong>Pin a vintage</strong> in <code>granule_filter</code> so a run does not span the
-change. This is required, not optional — see <a href="running.html#vintage">Running a
-mosaic</a>.</li>
-<li><strong>Refer to classes by attribute</strong> wherever you name one — in lumping, in colour
-tables. Stratum resolves the attributes to integers per granule at plan time.</li>
+<li><strong>Refuse mixed vintages</strong> at plan time, by fingerprinting every contributing
+granule's class table. This is automatic and required — see <a href="running.html#vintage">Running a
+mosaic</a>. Pinning a <code>build_version</code> is an optional filter, not the guard: one
+collection already spans eight builds with no change to its classes.</li>
+<li><strong>Refer to classes by attribute</strong> wherever you name one — in the classes file a
+snapshot layer declares, in colour tables. Stratum resolves the attributes per granule at plan
+time and remaps pixels into the product's own enumeration as they are read.</li>
 </ol>
 
-<pre><code>lumping:
-  match_on: [library, record, group]
-  classes:
-    goethite:
-      - {library: sprlb06, record: 882,  group: 1}
-      - {library: splib06, record: 5736, group: 1}</code></pre>
+<pre><code>match_on: [library, record, group]
+classes:
+  - {id: 1, name: goethite, members: [{library: sprlb06, record: 882,  group: 1},
+                                      {library: splib06, record: 5736, group: 1}]}</code></pre>
 
 <p>At plan time Stratum fingerprints every contributing granule's class table. If they all agree,
 it proceeds and records the fingerprint in provenance. If they differ, it fails and tells you —
-unless you have explicitly permitted a cross-vintage remap, in which case it computes the
-correspondence through the attribute columns and reports any entry it cannot resolve
-unambiguously.</p>
+unless you have explicitly permitted mixed vintages, in which case every table must still resolve
+fully into the enumeration, and it reports any entry it cannot resolve unambiguously.</p>
 
 <p>An entry that matches zero or multiple rows is a plan-time error, never a guess.</p>
 
@@ -514,7 +514,7 @@ product, never a substitute for it.</p>
 <table>
 <thead><tr><th>Artifact</th><th>Contains</th><th>For</th></tr></thead>
 <tbody>
-<tr><td><strong>Data</strong></td><td>Class indices, counts, agreement, score — the bands your reducer declared</td><td>Analysis, statistics, reprocessing, restyling</td></tr>
+<tr><td><strong>Data</strong></td><td>Class indices, counts, agreement, score — the layers your schema declared</td><td>Analysis, statistics, reprocessing, restyling</td></tr>
 <tr><td><strong>Image</strong></td><td>RGBA rendering</td><td>MMGIS, QGIS, looking at a map</td></tr>
 <tr><td><strong>Legend</strong></td><td>Class table or ramp stops, as a sidecar and in the STAC item</td><td>Making the image interpretable and the data joinable</td></tr>
 <tr><td><strong>STAC item</strong></td><td>Assets, class table, projection, processing metadata</td><td>Cataloguing and discovery</td></tr>

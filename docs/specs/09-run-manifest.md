@@ -19,7 +19,7 @@ versioned in git, reviewed like code, and hashed into provenance.
 | ECR, image build/push | Grid, tiling, blocks | The framework package |
 | Batch compute envs, queues | AOI and zones | The plugin package |
 | Lambda functions, SFN definition | Time range, epochs, delivery windows | Contracts, accessors, readers |
-| S3 buckets + lifecycle | Filters, masks, scorer, reducer, mapper | Tests and fixtures |
+| S3 buckets + lifecycle | Filters, masks, scorer, snapshot schema, reducer, mapper | Tests and fixtures |
 | IAM roles, EDL secret | Aux sources | |
 | Budgets, alarms | Budget ceilings, output formats | |
 
@@ -38,6 +38,7 @@ grid:
   origin: [-180, -90]
   block: 512
   max_distance: 0.00064       # regrid cutoff; default 1.5 x the grid diagonal - see 03 section 3
+  regrid_method: kdtree       # kdtree | warp_embedded - see 03 section 3
   # force_positive_y: true    # only to defeat the guard rail in 01 section 1
 
 aoi:
@@ -71,12 +72,14 @@ inputs:
         path: /mineral_metadata
         key: index
         attributes: [name, record, library, group, url]
-    mineral_uncert: {collection: EMITL2BMIN,  var: group_1_band_depth_unc}
+    mineral_depth:  {collection: EMITL2BMIN,  var: group_1_band_depth}
+    mineral_uncert: {collection: EMITL2BMIN,  asset: MINUNCERT, var: group_1_band_depth_unc}
     mask:           {collection: EMITL2AMASK, var: mask}
     frcov:          {collection: EMITL2BFRCOV, var: soil}   # already orthorectified
   band_aliases:
     view_zenith:  {role: geometry, band: 5}
     solar_zenith: {role: geometry, band: 4}
+    # swir_2200:  {role: reflectance, match: {wavelength: 2200}, tolerance: 10}   # by reader-reported attribute
 
 aux:
   slope: {uri: "s3://.../slope.tif", kind: continuous,  resampling: bilinear}
@@ -86,34 +89,54 @@ aux:
 # allow_mixed_vintage: true           # top level; requires a documented reason - see section 5
 
 granule_filter:
-  - {build_version: b0107_v02}          # REQUIRED - see 02 section 3
+  # - {build_version: "010635"}         # filterable, not required: the vintage check is the
+  #                                     # class-table fingerprint - see 02 section 3
   - {max_cloud_fraction: 0.5, on_missing: fail}
   - {max_solar_zenith: 70}
   - {month_in: [8, 9, 10, 11]}          # recurring seasonal window, not an interval
 
 pixel_mask:
-  - {ref: emit.masks:EdgeTrim, columns: 7}     # sensor-space; detector edges
-  - {ref: emit.masks:L2AStandard, flags: [cloud, cirrus, water, spacecraft]}
-  - {ref: emit.masks:SoilFraction, min_soil: 0.65}
+  - {ref: edge_trim, columns: 7}               # sensor-space; detector edges
+  - {ref: l2a_standard, flags: [cloud, cirrus, water, spacecraft]}
+  - {ref: soil_fraction, min_soil: 0.65}       # refs: entry-point name, or module:Class
 
 scorer:
   ref: cleanest_nadir
   params: {slope_penalty: 0.5}
 
-reducer:
-  ref: mode_through_time
-  params: {min_count: 3, ignore: [0, -4], tie_break: highest_score}
+snapshot:                                 # what resolve writes and how reduce collapses it - see 13
+  name: cm-v1
+  layers:
+    mineral_1:
+      kind: categorical
+      source: mineral
+      classes: "@ref:classes/cm-v1.yaml"  # the product enumeration; also the legend
+      aggregate: {method: vote, min_count: 3, ignore: [none], tie_break: highest_score}
+    depth_1:
+      kind: continuous
+      source: mineral_depth
+      aggregate: {method: inverse_variance, unc: depth_1_unc, conditional_on: mineral_1, spread: iqr}
+    depth_1_unc:
+      kind: continuous
+      source: mineral_uncert
+      aggregate: {method: none}
+    view_zenith:
+      kind: continuous
+      source: view_zenith
+      aggregate: {method: none}
+
+# reducer:                                # only for logic the schema vocabulary cannot express
+#   ref: my_package:ClassifyLast
 
 outputs:
   bucket: s3://emit-l3-products
   formats: [cog, netcdf]
   stac: true
   render:
-    mineral_id:
-      mapper: categorical
-      classes: "@ref:lumping/cm-v1.yaml"
+    mineral_1:
+      mapper: categorical                 # classes come from the layer's enumeration
       on_unmapped: fail
-      alpha_from: {band: agreement, domain: [0.3, 0.8], range: [60, 255]}
+      alpha_from: {band: mineral_1_agreement, domain: [0.3, 0.8], range: [60, 255]}
 
 plugins:
   wheel: s3://emit-l3/plugins/stratum_emit-0.4.2-py3-none-any.whl
@@ -168,13 +191,14 @@ alongside the manifest diff.
 
 ## 5. Validation at plan time
 
-Everything below fails in stage 1, loudly, while it is cheap:
+Everything below fails in the plan stage, loudly, while it is cheap:
 
 - schema validity (Pydantic v2) with precise error locations;
 - named scorer/reducer/mapper/mask plugins resolve, and versions are recordable;
 - every plugin's `required_roles` present in `inputs.roles`;
 - every role's `collection` resolves to exactly one registered `GranuleReader`, and its `var`
-  exists in that reader's variables ([12 §7](12-data-access.md));
+  exists in that reader's variables ([12 §7](12-data-access.md)); a collection the index holds
+  under more than one `collection_version` is pinned with `version:`;
 - every asset URI scheme is supported and credentials for it are obtainable now;
 - every plugin's `required_aux` declared in `aux` — undeclared reads are refused
   ([05 §5](05-ancillary-data.md));
@@ -183,26 +207,28 @@ Everything below fails in stage 1, loudly, while it is cheap:
 - `capability` and `halo` consistent with `block`;
 - `deliver.every` and `deliver.window` are whole multiples of `epoch`, and
   `window >= every`; `deliver.align` is `exact` only when `window == every`;
-- every `lumping` entry resolves to **exactly one** row in the contributing granules' embedded
-  class tables — matched on attributes, never on positional index — and every class referenced by
-  a colour table exists after lumping ([07 §6](07-output-mapping.md));
+- the snapshot schema resolves: every layer `source` names a role or alias, every categorical
+  layer's enumeration resolves to **exactly one** row per member in each contributing granule's
+  embedded table — matched on attributes, never on positional index — `conditional_on` and `unc`
+  name declared layers, and every class a colour table names exists in the enumeration
+  ([13](13-snapshot-schema.md), [07 §6](07-output-mapping.md));
 - the contributing granules' class tables **agree by fingerprint**, or a cross-vintage remap is
   explicitly permitted ([11 §9](11-types.md));
 - filter `on_missing` policy explicit;
-- **a vintage is pinned** on a granule-level field (`build_version` / `product_version`, never
-  `collection_version`), and the frozen index does not span multiple vintages unless
-  `allow_mixed_vintage: true` is set with a documented reason ([02 §3](02-granule-index.md));
+- **the vintage check** is that fingerprint agreement. A disagreement fails the plan unless
+  `allow_mixed_vintage: true` is set with a documented reason, and then only if every raw table
+  resolves fully into the enumeration ([13 §3](13-snapshot-schema.md)); `build_version` is
+  reported, not pinned ([02 §3](02-granule-index.md));
 - budget present and non-infinite.
 
 ---
 
 ## 6. Open questions
 
-1. YAML or TOML? YAML matches AMD and reads better for nested structure; TOML has fewer footguns.
-   Leaning YAML with a strict loader (no implicit typing).
-2. Should `aoi.zones` resolve from a checked-in registry, or take inline geometry? A registry
-   makes runs comparable and names stable; inline is more flexible.
-3. Do we version the manifest schema itself, so old manifests keep parsing? Almost certainly yes —
+1. ~~YAML or TOML?~~ **Resolved:** YAML, with a strict loader and no implicit typing.
+2. ~~Should `aoi.zones` resolve from a checked-in registry, or take inline geometry?~~ **Resolved:**
+   a checked-in registry, so runs are comparable and names stable.
+3. ~~Do we version the manifest schema itself, so old manifests keep parsing?~~ **Resolved:** yes —
    `schema_version` at the top.
-4. Should `run_id` be user-supplied or derived from the manifest hash? User-supplied is readable;
-   derived is unambiguous. Possibly both: `{user_label}-{hash[:8]}`.
+4. ~~Should `run_id` be user-supplied or derived from the manifest hash?~~ **Resolved:** both:
+   `{label}-{hash[:8]}`.

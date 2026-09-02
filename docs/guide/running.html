@@ -86,11 +86,18 @@ inputs:
     view_zenith: {role: geometry, band: 5}
 
 granule_filter:
-  - {build_version: b0107_v02}
   - {max_cloud_fraction: 0.5, on_missing: fail}
 
 scorer:
   ref: min_view_zenith
+
+snapshot:
+  layers:
+    mineral:
+      kind: categorical
+      source: mineral
+      classes: source          <span class="c"># adopt the granules' own class table; no lumping</span>
+      aggregate: {method: vote}
 
 outputs:
   bucket: ./products        <span class="c"># a local path; s3:// works the same way</span>
@@ -102,9 +109,10 @@ budget:
   max_granules: 500
   max_vcpu_hours: 20</code></pre>
 
-<p>No <code>reducer</code> block means no temporal reduction — the single epoch passes through
-unchanged. Add one when you want to combine epochs; see
-<a href="plugins.html#reducer">Writing plugins</a>.</p>
+<p>The <code>snapshot</code> block says what each epoch records and how epochs combine. With a
+single epoch every aggregation is the identity, so this run is a plain mosaic; shorten
+<code>epoch</code> below the time range when you want a vote through time. See
+<a href="plugins.html#snapshot-schema">what the snapshot carries</a>.</p>
 
 <p>The full field list is in the <a href="../reference/manifest.html">manifest reference</a>.</p>
 
@@ -133,9 +141,9 @@ Area          1 zone → 2 tiles
 Time          2024-01-01 … 2024-12-31 → 1 epoch, 1 delivery period
 
 Granules      1 284 candidates
-              −  412  build_version == b0107_v02
-              −  147  cloud_fraction &lt;= 0.5
-              =  725  selected          vintage: b0107_v02 (single)
+              −  559  cloud_fraction &lt;= 0.5
+              =  725  selected          class table: 1 fingerprint (sha256:4e1a…)
+                                        builds: 010632, 010635
 
 Work          725 regrid · 84 resolve · 0 reduce · 2 publish
 Cache         GLT 681/725 hit (94%)  →  44 to build
@@ -175,9 +183,9 @@ stratum reject  --run cm-zones-2026-annual-r3</code></pre>
 in order, and each one's effect is counted and reported.</p>
 
 <pre><code>granule_filter:
-  - {build_version: b0107_v02}                    <span class="c"># required — see below</span>
   - {max_cloud_fraction: 0.5, on_missing: fail}
   - {max_solar_zenith: 70}
+  - {build_version: "010635"}                     <span class="c"># optional — see below</span>
   - {month_in: [8, 9, 10, 11]}                    <span class="c"># recurring seasonal window</span></code></pre>
 
 <h3 id="seasonal">Absolute versus seasonal windows</h3>
@@ -206,12 +214,12 @@ bounds the run, the month filter selects within it.</p>
 too cloudy are different situations, and silently merging them loses data with no signal. If you
 know which you want, say so.</p>
 
-<h3 id="vintage">Vintage pinning is required</h3>
+<h3 id="vintage">Mixed vintages are refused</h3>
 
 <div class="warn">
-  <span class="label">Required</span>
-  <p>A run must pin a product vintage. If the frozen granule set spans more than one,
-  <code>stratum plan</code> fails unless the manifest explicitly opts in with
+  <span class="label">Checked at plan time</span>
+  <p>Stratum fingerprints the class table embedded in every contributing granule. If they do not
+  all agree, <code>stratum plan</code> fails unless the manifest explicitly opts in with
   <code>allow_mixed_vintage: true</code> and a documented reason.</p>
 </div>
 
@@ -219,17 +227,21 @@ know which you want, say so.</p>
 reprocessing boundary blends two incompatible products into a result that looks entirely plausible
 and is not. Nothing in the data announces the problem, so Stratum refuses rather than warns.</p>
 
-<p>The plan output always states the vintage or vintages selected.</p>
+<p>The check is on the class table, not on a build number. One collection already carries eight
+software builds with no change to its classes, so <code>build_version</code> is a filter you may
+apply and never the guard. The plan output states every build the run consumed and the fingerprint
+it validated.</p>
 
 <h2 id="masks">Masking pixels</h2>
 
 <p>Masks compose by conjunction — a pixel is eligible only if every mask admits it — and are
-applied during regrid, so masked pixels never enter the observation stack.</p>
+applied in resolve as each observation is read, so masked pixels never enter the observation
+stack. Regrid does not see them, which is why changing a mask never rebuilds geometry.</p>
 
 <pre><code>pixel_mask:
-  - {ref: emit.masks:EdgeTrim, columns: 7}
-  - {ref: emit.masks:L2AStandard, flags: [cloud, cirrus, water, spacecraft]}
-  - {ref: emit.masks:SoilFraction, min_soil: 0.65}</code></pre>
+  - {ref: edge_trim, columns: 7}
+  - {ref: l2a_standard, flags: [cloud, cirrus, water, spacecraft]}
+  - {ref: soil_fraction, min_soil: 0.65}</code></pre>
 
 <p>Masks say <em>unusable</em>, not <em>worse</em>. If you want to express a preference between two
 usable observations, that is a scorer, not a mask.</p>
@@ -251,7 +263,7 @@ to be routine; see <a href="caching.html">Caching &amp; reruns</a>.</p>
 
 <pre><code>{outputs.bucket}/products/{run_id}/
   {tile}/
-    {tile}_{period}_data.tif        <span class="c"># bands your reducer declared</span>
+    {tile}_{period}_data.tif        <span class="c"># bands your schema delivers</span>
     {tile}_{period}_image.tif       <span class="c"># RGBA rendering</span>
     {tile}_{period}_legend.json     <span class="c"># class table or ramp stops</span>
     {tile}_{period}.json            <span class="c"># STAC item</span>

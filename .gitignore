@@ -12,3 +12,4 @@ __pycache__/
 *.nc
 *.parquet
 !refs/**/*.parquet
+trial-data/

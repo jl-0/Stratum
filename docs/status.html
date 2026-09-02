@@ -35,13 +35,14 @@
 <table>
 <thead><tr><th>Component</th><th>Status</th><th>Notes</th></tr></thead>
 <tbody>
-<tr><td>Core types</td><td><span class="chip chip-draft">specified</span></td><td>Shapes settled; one open field. See <a href="reference/types.html">Type reference</a>.</td></tr>
+<tr><td>Core types</td><td><span class="chip chip-draft">specified</span></td><td>Shapes settled; <code>ClassTable</code>'s container and the new schema types are open. See <a href="reference/types.html">Type reference</a>.</td></tr>
 <tr><td>Plugin contracts</td><td><span class="chip chip-draft">specified</span></td><td>All five science hooks, plus the two access hooks</td></tr>
+<tr><td>Snapshot schema</td><td><span class="chip chip-draft">specified</span></td><td>Layers, enumerations, aggregation vocabulary; the built-in reducer runs it</td></tr>
 <tr><td>Manifest schema</td><td><span class="chip chip-draft">specified</span></td><td>Pydantic models not written</td></tr>
 <tr><td>Granule reader contract</td><td><span class="chip chip-draft">specified</span></td><td>Registry keyed on collection; readers ship in the plugin package</td></tr>
 <tr><td>L2B reader</td><td><span class="chip chip-open">not started</span></td><td>First deliverable — no reader exists for the L2B mineral products today</td></tr>
 <tr><td>Asset store — staging</td><td><span class="chip chip-open">not started</span></td><td>Stage-in first; works against existing code unmodified</td></tr>
-<tr><td>Asset store — streaming</td><td><span class="chip chip-open">not started</span></td><td>Second; turns a block read into a range request over under 4% of a file</td></tr>
+<tr><td>Asset store — streaming</td><td><span class="chip chip-open">not started</span></td><td>Second; genuine range requests need a windowable layout &mdash; Stratum's COGs are, the delivered L2B science bands are not until prepared (spec 12 §4)</td></tr>
 <tr><td>CMR source</td><td><span class="chip chip-open">not started</span></td><td>Bridge over <code>earthaccess</code>. Blocked on confirming which vintage fields CMR exposes</td></tr>
 <tr><td>Local source</td><td><span class="chip chip-open">not started</span></td><td>Directory scan; what makes a laptop run possible with no account</td></tr>
 <tr><td>Regrid wrapper</td><td><span class="chip chip-open">not started</span></td><td>Wraps existing KD-tree regrid rather than reimplementing it</td></tr>
@@ -67,7 +68,16 @@
 <tr><td>Compute unit</td><td>Block, distinct from tile; halos declared by plugins; block size never changes output</td></tr>
 <tr><td>Core types</td><td>Settled apart from two fields — see <a href="reference/types.html#stability">stability table</a></td></tr>
 <tr><td>Class identity</td><td>Products carry their own class tables; classes are named by attribute and resolved per granule at plan time</td></tr>
+<tr><td>Snapshot schema</td><td>One declaration per run of what a snapshot holds and how each layer aggregates. Lumping resolves into it at resolve; extend, never redefine</td></tr>
 <tr><td>Missing data</td><td><code>-9999</code> ≠ <code>0</code>; validity masks internally, sentinels only on write</td></tr>
+<tr><td>Vintage</td><td>Checked by class-table fingerprint at plan time; <code>build_version</code> is filterable and reported, not pinned. CMR exposes it per granule, and one collection already spans eight builds &mdash; verified 2026-09-01</td></tr>
+<tr><td>Masking</td><td>In resolve's read path, never in regrid. Regrid reads <code>loc</code> only; masked observations are cached only as an optimization</td></tr>
+<tr><td>Cache scope</td><td>Per deployment. Every run in a deployment shares it; deployments do not share with each other</td></tr>
+<tr><td>Delivery boundary</td><td>Files plus a STAC catalogue under <code>products/{run_id}</code>. MMGIS and DAAC ingestion are downstream steps that read it</td></tr>
+<tr><td>Legend</td><td>STAC <code>classification</code> is authoritative; the COG colour table and JSON sidecar derive from it. Data COGs ship single-band with a colour table <em>and</em> an RGBA rendering</td></tr>
+<tr><td>Prepared assets</td><td>Every asset is transcoded once on first touch into tiled per-variable COGs, keyed on its checksum and shared by every run. A node-local asset cache fills by atomic rename and never locks</td></tr>
+<tr><td>GLT</td><td>One per granule. Band 3 stays <code>1</code> so existing tooling opens the file; <code>granule_id</code> is in the metadata. Regrid by KD-tree, or by warping the product's own lookup table through the reader (<code>regrid_method</code>)</td></tr>
+<tr><td>Plan routing</td><td>The plan is routed like any work item, by manifest-implied size, and checkpoints per-tile work lists</td></tr>
 <tr><td>Execution</td><td>Step Functions + Lambda control plane, Batch on Spot data plane, routed per work item</td></tr>
 <tr><td>Packaging</td><td>Container image Lambdas with a shared CLI entrypoint; not zip layers</td></tr>
 <tr><td>Config boundary</td><td>Terraform owns the platform; the manifest owns the science</td></tr>
@@ -97,7 +107,6 @@ and that is much cheaper to find out now than after orchestration is built on to
 <table>
 <thead><tr><th>Question</th><th>Blocks</th><th>Owner</th></tr></thead>
 <tbody>
-<tr><td>Are the <strong>granule-level</strong> version fields exposed by the catalogue before download? The collection's own version is always available and is not a vintage &mdash; it is constant across the collection.</td><td>Whether vintage filtering is an index predicate or a header scan at index-build time — see <a href="guide/reading-data.html#bridge">Reading data</a>. The run-time contract is the same either way</td><td>Phil</td></tr>
 <tr><td>Is the existing temporal-stack <code>freq-N</code> parameter a frequency rank or a time period?</td><td>How much of mode-through-time is new work versus a port</td><td>James</td></tr>
 <tr><td>Reduce over class labels, or over continuous quantities first?</td><td>The shape of the baseline reducer</td><td>Phil</td></tr>
 <tr><td>Zone selection for the pilot</td><td>The first fixtures and the V002 comparison target</td><td>Dana</td></tr>
@@ -109,49 +118,10 @@ and that is much cheaper to find out now than after orchestration is built on to
 
 <h2 id="open">Open, not blocking</h2>
 
-<p>Real questions that have a working default, rolled up from the open-questions section of every
-spec. Six further implicit choices should become ADRs before implementation hardens them &mdash;
-those are listed under <a href="decisions/index.html#pending">Not yet recorded</a>.</p>
-
-<div class="tw">
-<table>
-<thead><tr><th>Area</th><th>Question</th><th>Working answer</th></tr></thead>
-<tbody>
-<tr><td>Types</td><td>Should <code>ObsWindow</code> expose per-granule uncertainty as a first-class alias, or is it just another role?</td><td>Role</td></tr>
-<tr><td>Types</td><td>Should <code>ClassTable</code> be an Arrow table or plain columns?</td><td>Arrow &mdash; makes fingerprinting and attribute matching easy</td></tr>
-<tr><td>Types</td><td>Is fingerprint-and-fail enough for class-table disagreement, or is remapping needed in v1?</td><td>Fail first; test against a real multi-vintage set before deciding</td></tr>
-<tr><td>Grid</td><td>Do we need a second, coarser grid for a 0.5&deg; aggregate product?</td><td>Probably a separate product built from these outputs</td></tr>
-<tr><td>Grid</td><td>Should block size vary per stage?</td><td>One size until a pilot is measured</td></tr>
-<tr><td>Grid</td><td>May tiles be non-square, or aligned to something other than whole degrees?</td><td>Whole-degree squares until something needs otherwise</td></tr>
-<tr><td>Index</td><td>Index internal collections as well as delivered ones?</td><td>Delivered, since L3 must touch every delivered file &mdash; but reprocessing may need internal builds</td></tr>
-<tr><td>Index</td><td>Should the frozen index carry full asset URIs, or resolve them from a pinned collection version?</td><td>Full URIs &mdash; more reproducible, at the cost of size</td></tr>
-<tr><td>Data access</td><td>Does <code>inputs.source</code> belong in the run manifest, or a separate index config?</td><td>Manifest &mdash; one document, one hash, at the cost of a field <code>run</code> ignores</td></tr>
-<tr><td>Data access</td><td>Should staged granules share a node-level cache across concurrent workers?</td><td>Clear win on a cluster node; needs a lock, and locks on shared filesystems are where reliability goes to die</td></tr>
-<tr><td>Data access</td><td>Should a sensor window round out to the file's chunk boundaries?</td><td>A tight box can be slower than a chunk-aligned over-read. Measure first</td></tr>
-<tr><td>Data access</td><td>Does multi-instrument support need wavelength awareness in a reader?</td><td>Band-alias mapping covers EMIT and AVIRIS-3; it probably does not cover resampling between differing band centres</td></tr>
-<tr><td>Regrid</td><td>Is nearest-neighbour sufficient, or do we need area-weighted resampling?</td><td>Nearest</td></tr>
-<tr><td>Scorer</td><td>Does a scorer need the previous epoch's snapshot?</td><td>No &mdash; it would break epoch independence and therefore parallelism</td></tr>
-<tr><td>Aux</td><td>Allow remote HTTP sources, or require staging into our bucket?</td><td>Staging &mdash; more reproducible, no third-party uptime dependency mid-run</td></tr>
-<tr><td>Aux</td><td>Do we need vector-to-vector joins, e.g. distance to nearest feature?</td><td>Plausible near-term ask; not expressible as a burn</td></tr>
-<tr><td>Aux</td><td>How is a source that varies per <em>epoch</em> rather than per granule expressed?</td><td>Probably a <code>temporal: epoch</code> mode; it interacts with block caching</td></tr>
-<tr><td>Caching</td><td>Do we need negative caching &mdash; recording that a (granule, tile) pair does not intersect?</td><td>Not yet; measure the cost of rediscovery first</td></tr>
-<tr><td>Output</td><td>Does the downstream viewer want RGBA COGs, or single-band plus colour table?</td><td>Materially changes stage 5 output &mdash; worth asking before building it</td></tr>
-<tr><td>Output</td><td>Is the legend a STAC <code>classification</code> entry, a GDAL colour table, or standalone JSON?</td><td>Probably all three; the authoritative one should be named</td></tr>
-<tr><td>Output</td><td>Build overviews in stage 5, or leave them to the downstream tiling step?</td><td>Leave them to tiling, which merges tiles anyway</td></tr>
-<tr><td>Execution</td><td>Should planning itself run on Batch for global runs?</td><td>Enumerating tens of thousands of blocks may exceed a Lambda's 15 minutes</td></tr>
-<tr><td>Execution</td><td>Is partial failure tolerance acceptable for a delivered product?</td><td>Tolerate in experiments; zero tolerance for delivery</td></tr>
-<tr><td>Execution</td><td>Do we need a priority queue so a delivered-product run preempts experiments?</td><td>Not until two campaigns actually contend for the same deployment</td></tr>
-<tr><td>Manifest</td><td>Is <code>run_id</code> user-supplied or derived from the manifest hash?</td><td>Possibly both &mdash; <code>{label}-{hash[:8]}</code></td></tr>
-<tr><td>Manifest</td><td>YAML or TOML?</td><td>YAML, with a strict loader and no implicit typing</td></tr>
-<tr><td>Manifest</td><td>Do <code>aoi.zones</code> resolve from a checked-in registry, or take inline geometry?</td><td>Registry &mdash; it keeps runs comparable and names stable</td></tr>
-<tr><td>Manifest</td><td>Do we version the manifest schema itself, so old manifests keep parsing?</td><td>Yes &mdash; <code>schema_version</code> at the top</td></tr>
-<tr><td>Provenance</td><td>Is the STAC item the authoritative catalogue entry, or do we also register elsewhere?</td><td>Depends on the collection-layout question, still open</td></tr>
-<tr><td>Provenance</td><td>Record every cache key used, or just the top-level hashes?</td><td>Top-level. Full lists make &ldquo;which GLT produced this pixel&rdquo; answerable, but are large</td></tr>
-<tr><td>Provenance</td><td>How is lineage across reprocessing expressed?</td><td>A <code>derived_from</code> link to the previous run, rather than a separate lineage graph</td></tr>
-<tr><td>Provenance</td><td>Do we need signed provenance for a delivered NASA product?</td><td>A JSON record until someone requires otherwise</td></tr>
-</tbody>
-</table>
-</div>
+<p>None at the moment. Every question from the specs' open-questions sections has been decided and
+struck in place, with the decision beside it. Two implicit choices should still become ADRs
+before implementation hardens them &mdash; listed under
+<a href="decisions/index.html#pending">Not yet recorded</a>.</p>
 
 <h2 id="planned">Planned enhancements</h2>
 
@@ -164,7 +134,7 @@ those are listed under <a href="decisions/index.html#pending">Not yet recorded</
 <tr>
   <td><strong>Scorer-derived snapshot bands</strong><br><code>Scorer.outputs</code> + <code>emit()</code>, for bands the scorer computes rather than copies — runner-up margin, per-candidate evidence, broadcast timestamps</td>
   <td>Several motivating bands (<code>source_granule</code>, <code>acquired</code>, <code>runner_up_score</code>) are already known to the selection loop and may belong as framework built-ins instead, which would leave the plugin-facing form much smaller. Per-candidate evidence also needs a representation decision that is premature without a reducer that consumes it.</td>
-  <td><strong>Reprocessing.</strong> Snapshots are cached artifacts; a band that was never emitted cannot be recovered from them. Adding this invalidates and rebuilds stage 3.</td>
+  <td><strong>Reprocessing.</strong> Snapshots are cached artifacts; a band that was never emitted cannot be recovered from them. Adding this invalidates and rebuilds resolve.</td>
 </tr>
 <tr>
   <td><strong>Classify-last reduction</strong> — aggregate per-candidate evidence across epochs, then classify the aggregate, instead of voting on labels</td>
@@ -188,7 +158,7 @@ those are listed under <a href="decisions/index.html#pending">Not yet recorded</
 <div class="note">
   <span class="label">Why this list exists</span>
   <p>The rows differ in one important way: the first two cost a <strong>reprocessing pass</strong> if
-  adopted after data exists, because they change what stage 3 writes. The others are additive. That
+  adopted after data exists, because they change what resolve writes. The others are additive. That
   distinction is worth weighing before the first production run, not after.</p>
 </div>
 
