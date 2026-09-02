@@ -20,13 +20,17 @@
 <div class="prose">
 
 <h1>Status</h1>
-<p class="lede">What exists, what is specified, and what is still undecided.</p>
+<p class="lede">What exists, what is specified, and what is still undecided. As of 2026-09-02.</p>
 
-<div class="warn">
-  <span class="label">Nothing is implemented yet</span>
-  <p>Every command and contract in these pages is specified and reviewed but <strong>not
-  built</strong>. Treat this site as the contract being built to. The specs in
-  <a href="specs/00-overview.md"><code>docs/specs/</code></a> are the authoritative version.</p>
+<div class="key">
+  <span class="label">The first slice is built</span>
+  <p>A local run exists end to end: <code>stratum run -m manifest.yaml</code> over granules on
+  disk plans, regrids, resolves, reduces and publishes, with content-addressed caching, a STAC
+  item and collection, and a provenance record. 241 tests pass (<code>pixi run test</code>). The
+  cloud and cluster paths, catalogue sources, remote assets and the approval gate are specified
+  but <strong>not built</strong>; each refuses with its spec section named. The specs in
+  <a href="specs/00-overview.md"><code>docs/specs/</code></a> remain the contract, and the code is
+  authoritative for signatures.</p>
 </div>
 
 <h2 id="components">Component status</h2>
@@ -35,21 +39,24 @@
 <table>
 <thead><tr><th>Component</th><th>Status</th><th>Notes</th></tr></thead>
 <tbody>
-<tr><td>Core types</td><td><span class="chip chip-draft">specified</span></td><td>Shapes settled; <code>ClassTable</code>'s container and the new schema types are open. See <a href="reference/types.html">Type reference</a>.</td></tr>
-<tr><td>Plugin contracts</td><td><span class="chip chip-draft">specified</span></td><td>All five science hooks, plus the two access hooks</td></tr>
-<tr><td>Snapshot schema</td><td><span class="chip chip-draft">specified</span></td><td>Layers, enumerations, aggregation vocabulary; the built-in reducer runs it</td></tr>
-<tr><td>Manifest schema</td><td><span class="chip chip-draft">specified</span></td><td>Pydantic models not written</td></tr>
-<tr><td>Granule reader contract</td><td><span class="chip chip-draft">specified</span></td><td>Registry keyed on collection; readers ship in the plugin package</td></tr>
-<tr><td>L2B reader</td><td><span class="chip chip-open">not started</span></td><td>First deliverable — no reader exists for the L2B mineral products today</td></tr>
-<tr><td>Asset store — staging</td><td><span class="chip chip-open">not started</span></td><td>Stage-in first; works against existing code unmodified</td></tr>
-<tr><td>Asset store — streaming</td><td><span class="chip chip-open">not started</span></td><td>Second; genuine range requests need a windowable layout &mdash; Stratum's COGs are, the delivered L2B science bands are not until prepared (spec 12 §4)</td></tr>
-<tr><td>CMR source</td><td><span class="chip chip-open">not started</span></td><td>Bridge over <code>earthaccess</code>. Blocked on confirming which vintage fields CMR exposes</td></tr>
-<tr><td>Local source</td><td><span class="chip chip-open">not started</span></td><td>Directory scan; what makes a laptop run possible with no account</td></tr>
-<tr><td>Regrid wrapper</td><td><span class="chip chip-open">not started</span></td><td>Wraps existing KD-tree regrid rather than reimplementing it</td></tr>
-<tr><td>Resolve / scorer runtime</td><td><span class="chip chip-open">not started</span></td><td></td></tr>
-<tr><td>Reduce / reducer runtime</td><td><span class="chip chip-open">not started</span></td><td></td></tr>
-<tr><td>Publish, STAC, provenance</td><td><span class="chip chip-open">not started</span></td><td></td></tr>
-<tr><td>Caching / content addressing</td><td><span class="chip chip-open">not started</span></td><td>Cache-key table is settled</td></tr>
+<tr><td>Core types</td><td><span class="chip chip-locked">built</span></td><td><code>src/stratum/types.py</code>. Additive changes during the build: <code>ObsWindow.sensor_shape</code> / <code>band_attrs</code>, <code>EmbeddedGLT</code>, <code>BandSpec.bands</code>, <code>LayerSpec.lumping</code>, <code>GranuleRef.checksums</code>. See <a href="reference/types.html">Type reference</a>.</td></tr>
+<tr><td>Plugin contracts</td><td><span class="chip chip-locked">built</span></td><td>All five science hooks and both access hooks are protocols in <code>hooks.py</code> / <code>types.py</code>; <code>streaming</code> scorers, sensor- and map-space masks and config mappers run. <code>stack</code>/<code>tile</code> scorers, <code>Reducer</code> plugins and <code>threshold</code>/<code>composite</code> mappers are refused at plan time.</td></tr>
+<tr><td>Snapshot schema</td><td><span class="chip chip-locked">built</span></td><td>Layers, enumerations, the full aggregation vocabulary; the built-in reducer runs it. <code>extends</code> is modelled but the ancestor probe is not built.</td></tr>
+<tr><td>Manifest schema</td><td><span class="chip chip-locked">built</span></td><td>Pydantic models, <code>@ref:</code> classes files, static validation, hash and <code>run_id</code>. Patch composition (<code>-p</code>) is parsed and refused; <code>aoi.geometry</code> is not modelled.</td></tr>
+<tr><td>Granule readers</td><td><span class="chip chip-locked">built</span></td><td>Registry keyed on collection; <code>L2BMin</code>, <code>L1BObs</code>, <code>L2AMask</code>, <code>L2BFrcov</code> in the plugin package. MASK is tested on synthetic files only; FRCOV opens but its ortho-native read path is a later slice.</td></tr>
+<tr><td>Asset store — staging</td><td><span class="chip chip-locked">built</span> local</td><td><code>file://</code> and bare paths; stage-in is the identity. <code>s3://</code> and <code>https://</code> refuse.</td></tr>
+<tr><td>Asset store — streaming, prepared assets</td><td><span class="chip chip-open">not started</span></td><td>Genuine range requests need a windowable layout — Stratum's own GeoTIFFs are, the delivered L2B science bands are not until prepared (spec 12 §4). Every observation read today decodes the whole variable.</td></tr>
+<tr><td>CMR source</td><td><span class="chip chip-open">not started</span></td><td>Stub. Bridge over <code>earthaccess</code>; must map the OBS asset of <code>EMITL1BRAD</code> onto the <code>EMITL1BOBS</code> role the manifests use.</td></tr>
+<tr><td>Local source</td><td><span class="chip chip-locked">built</span></td><td>Directory walk, header read, <code>patterns: {collection: {asset: glob}}</code>. <code>stratum plan</code> builds a missing index from it.</td></tr>
+<tr><td>Granule index</td><td><span class="chip chip-locked">built</span></td><td>GeoParquet schema, build, query, freeze with sha256, refs. <code>index verify</code> is not built.</td></tr>
+<tr><td>Regrid wrapper</td><td><span class="chip chip-locked">built</span></td><td>KD-tree by wrapping SpectralUtil, one GLT per granule per tile, algorithm-version hash gate. <code>warp_embedded</code> is not built.</td></tr>
+<tr><td>Resolve / scorer runtime</td><td><span class="chip chip-locked">built</span></td><td>Streaming argmax per block; masks in the read path; remap at the gather; seam-equivalence test passes.</td></tr>
+<tr><td>Reduce / reducer runtime</td><td><span class="chip chip-locked">built</span></td><td>The schema-driven built-in reducer. Plugin reducers refused.</td></tr>
+<tr><td>Publish, STAC, provenance</td><td><span class="chip chip-locked">built</span></td><td>Stitched data GeoTIFFs, categorical/continuous renders, legends, <code>classes.json</code>, STAC item + collection, <code>provenance.json</code>. Outputs are tiled GeoTIFFs, not validator-clean COGs, while the media type says COG — open below. <code>formats: [netcdf]</code> and <code>stratum render</code> refuse.</td></tr>
+<tr><td>Caching / content addressing</td><td><span class="chip chip-locked">built</span></td><td>Local root, atomic file and directory writes, <code>.inputs.json</code> sidecars, <code>cache explain</code> / <code>diff</code>. Key-sensitivity tests pass. <code>stats</code> / <code>gc</code> not built.</td></tr>
+<tr><td>Local executor and CLI</td><td><span class="chip chip-locked">built</span></td><td>Spawn-context process pool, per-item outcomes, budget gate, exit codes. See <a href="reference/cli.html">Commands</a> for what each command supports.</td></tr>
+<tr><td>Aux data (<code>AuxAccessor</code>)</td><td><span class="chip chip-open">not started</span></td><td>The accessor exists and every alias raises; an <code>aux</code> block or a plugin with <code>required_aux</code> is refused at validation.</td></tr>
+<tr><td>SLURM executor</td><td><span class="chip chip-open">not started</span></td><td><code>stratum exec</code>, the array-task entrypoint, exists</td></tr>
 <tr><td>Step Functions orchestration</td><td><span class="chip chip-open">not started</span></td><td>Blocked on AWS account provisioning</td></tr>
 <tr><td>Terraform deployment</td><td><span class="chip chip-open">not started</span></td><td>Blocked on AWS account provisioning</td></tr>
 </tbody>
@@ -65,19 +72,20 @@
 <tr><td>Pipeline shape</td><td>Five stages, five science hooks; geometry cached and independent of science</td></tr>
 <tr><td>Data access</td><td>Discovery, access and read are separate seams. A run reads a frozen index and never queries a catalogue</td></tr>
 <tr><td>Catalogue client</td><td><code>earthaccess</code>, behind a bridge — it handles Earthdata Login, but returns generic metadata and carries global state</td></tr>
-<tr><td>Compute unit</td><td>Block, distinct from tile; halos declared by plugins; block size never changes output</td></tr>
-<tr><td>Core types</td><td>Settled apart from two fields — see <a href="reference/types.html#stability">stability table</a></td></tr>
-<tr><td>Class identity</td><td>Products carry their own class tables; classes are named by attribute and resolved per granule at plan time</td></tr>
-<tr><td>Snapshot schema</td><td>One declaration per run of what a snapshot holds and how each layer aggregates. Lumping resolves into it at resolve; extend, never redefine</td></tr>
-<tr><td>Missing data</td><td><code>-9999</code> ≠ <code>0</code>; validity masks internally, sentinels only on write</td></tr>
+<tr><td>Compute unit</td><td>Block, distinct from tile; halos declared by plugins; block size never changes output — tested</td></tr>
+<tr><td>Core types</td><td>Settled; the code is authoritative for signatures and <a href="reference/types.html#stability">the stability table</a> says which are safe to build on</td></tr>
+<tr><td>Class identity</td><td>Products carry their own class tables; classes are named by attribute and resolved per granule at plan time; product ids are <code>1…65534</code> with <code>0</code> reserved for <code>none</code></td></tr>
+<tr><td>Snapshot schema</td><td>One declaration per run of what a snapshot holds and how each layer aggregates. Lumping resolves into it at resolve; the enumeration's fingerprint is in the snapshot key, so re-lumping invalidates snapshots and never GLTs</td></tr>
+<tr><td>Missing data</td><td><code>-9999</code> ≠ <code>0</code>; validity masks internally, sentinels only on write. Delivered categorical nodata is <code>65535</code></td></tr>
 <tr><td>Vintage</td><td>Checked by class-table fingerprint at plan time; <code>build_version</code> is filterable and reported, not pinned. CMR exposes it per granule, and one collection already spans eight builds &mdash; verified 2026-09-01</td></tr>
-<tr><td>Masking</td><td>In resolve's read path, never in regrid. Regrid reads <code>loc</code> only; masked observations are cached only as an optimization</td></tr>
-<tr><td>Cache scope</td><td>Per deployment. Every run in a deployment shares it; deployments do not share with each other</td></tr>
-<tr><td>Delivery boundary</td><td>Files plus a STAC catalogue under <code>products/{run_id}</code>. MMGIS and DAAC ingestion are downstream steps that read it</td></tr>
-<tr><td>Legend</td><td>STAC <code>classification</code> is authoritative; the COG colour table and JSON sidecar derive from it. Data COGs ship single-band with a colour table <em>and</em> an RGBA rendering</td></tr>
-<tr><td>Prepared assets</td><td>Every asset is transcoded once on first touch into tiled per-variable COGs, keyed on its checksum and shared by every run. A node-local asset cache fills by atomic rename and never locks</td></tr>
-<tr><td>GLT</td><td>One per granule. Band 3 stays <code>1</code> so existing tooling opens the file; <code>granule_id</code> is in the metadata. Regrid by KD-tree, or by warping the product's own lookup table through the reader (<code>regrid_method</code>)</td></tr>
+<tr><td>Masking</td><td>In resolve's read path, never in regrid. Regrid reads <code>loc</code> only, from one declared geolocation role; masked observations are keyed but not yet cached</td></tr>
+<tr><td>Cache scope</td><td>Per deployment. Every run in a deployment shares it; deployments do not share with each other. Locally the deployment is a directory: <code>outputs.bucket</code> is the root</td></tr>
+<tr><td>Delivery boundary</td><td>Files plus a STAC catalogue under <code>products/{run_id}/{tx}_{ty}/{start}_{end}/</code>. MMGIS and DAAC ingestion are downstream steps that read it</td></tr>
+<tr><td>Legend</td><td>STAC <code>classification</code> is authoritative; the COG colour table and JSON sidecar derive from it. Data COGs ship single-band with a colour table <em>and</em> an RGBA rendering; a GeoTIFF colour table carries no alpha, so the data COG's only transparency is its nodata value</td></tr>
+<tr><td>Prepared assets</td><td>Every asset is transcoded once on first touch into tiled per-variable COGs, keyed on its checksum and shared by every run. A node-local asset cache fills by atomic rename and never locks. Not yet built</td></tr>
+<tr><td>GLT</td><td>One per granule. Band 3 stays <code>1</code> so existing tooling opens the file; <code>granule_id</code> is in the metadata; a granule that misses the tile writes an all-zero GLT. Regrid by KD-tree, or by warping the product's own lookup table through the reader (<code>regrid_method</code>)</td></tr>
 <tr><td>Example grid</td><td>One arcsecond, 3600 cells per degree, 1&deg; tiles, <code>block: 720</code>. Tiles are cut on the cell lattice by cell-centre containment, so any resolution aligns; one that divides the tile keeps every tile the same shape</td></tr>
+<tr><td>Band aliases</td><td><code>band:</code> is a 0-based index, validated against the reader at plan time; <code>match:</code> selects by a reader-reported attribute. EMIT L1B OBS view zenith is band 2, solar zenith band 4</td></tr>
 <tr><td>Plan routing</td><td>The plan is routed like any work item, by manifest-implied size, and checkpoints per-tile work lists</td></tr>
 <tr><td>Execution</td><td>Step Functions + Lambda control plane, Batch on Spot data plane, routed per work item</td></tr>
 <tr><td>Packaging</td><td>Container image Lambdas with a shared CLI entrypoint; not zip layers</td></tr>
@@ -90,17 +98,37 @@
 <h2 id="first-slice">First implementation slice</h2>
 
 <div class="key">
-  <span class="label">Scope</span>
+  <span class="label">Scope as agreed</span>
   <p>One tile, one epoch, <code>MinViewZenith</code>, granules staged on local disk, output
   compared against an existing V002 cell. <strong>No</strong> blocks, caching, Step Functions,
   Batch or manifest patching.</p>
 </div>
 
-<p>Build order: <strong>types → L2B reader → regrid wrapper → resolve → publish.</strong></p>
+<p>Blocks and cache keys were built from the start after all, because the two non-negotiable
+tests — seam equivalence and cache-key sensitivity — need them; both pass. The build contract
+is <code>docs/notes/2026-09-02-first-slice-plan.md</code> (internal).</p>
 
-<p>The success criterion is parity. A <code>streaming</code> scorer over a single epoch with no
-reducer must reproduce the existing V002 output exactly — if it does not, the abstraction is wrong,
-and that is much cheaper to find out now than after orchestration is built on top of it.</p>
+<h3 id="trial">Validation target and result</h3>
+
+<p>The success criterion is parity: a <code>streaming</code> scorer over a single epoch with no
+reducer must reproduce the existing V002 output exactly. No V002 output for the pilot tile was
+available locally, so the first slice was validated against the next best thing — SpectralUtil's
+<code>build_obs_nc</code> fused mosaic over exactly the same grid, criterion and granules.</p>
+
+<div class="tw">
+<table>
+<thead><tr><th>Trial</th><th>Result</th></tr></thead>
+<tbody>
+<tr><td>Tile (&minus;118, 41), June 2026, 14 granules, one arcsecond, <code>block: 720</code></td><td>Plan through publish in 40 s on a laptop; a fully cached re-run in 11 s</td></tr>
+<tr><td>Cell-wise agreement with the fused mosaic (mineral id, view zenith)</td><td><strong>1.000000</strong> on 12,957,415 valid cells; zero cells valid in one and not the other; view zenith identical to &lt;10<sup>&minus;4</sup>&deg;</td></tr>
+<tr><td>Independent check, no shared code (per-granule KD-tree, nearest within <code>max_distance</code>, minimum zenith, earliest wins)</td><td>3000 / 3000 sampled cells match</td></tr>
+<tr><td>Seam equivalence and key sensitivity</td><td>Pass, in the suite</td></tr>
+</tbody>
+</table>
+</div>
+
+<p>Parity against a real V002 cell is still owed once a V002 product for the tile is obtainable;
+the abstraction has passed the test that was available.</p>
 
 <h2 id="blocking">Open and blocking</h2>
 
@@ -110,19 +138,42 @@ and that is much cheaper to find out now than after orchestration is built on to
 <tbody>
 <tr><td>Is the existing temporal-stack <code>freq-N</code> parameter a frequency rank or a time period?</td><td>How much of mode-through-time is new work versus a port</td><td>James</td></tr>
 <tr><td>Reduce over class labels, or over continuous quantities first?</td><td>The shape of the baseline reducer</td><td>Phil</td></tr>
-<tr><td>Zone selection for the pilot</td><td>The first fixtures and the V002 comparison target</td><td>Dana</td></tr>
-<tr><td>Confirm the 7-column edge trim and slit-dust column counts</td><td>Built-in mask defaults in <code>stratum_emit</code></td><td>Phil</td></tr>
-<tr><td>AWS account, quota and Earthdata credential path</td><td>All cloud work. Blocks nothing in the first slice.</td><td>—</td></tr>
+<tr><td>Zone selection for the pilot</td><td>The zone registry (<code>examples/zones.yaml</code>) holds approximate boxes; confirm before a delivered run</td><td>Dana</td></tr>
+<tr><td>Confirm the 7-column edge trim and slit-dust column counts</td><td>Built-in mask defaults in <code>stratum_emit</code>; <code>SlitDust</code> refuses until confirmed</td><td>Phil</td></tr>
+<tr><td>AWS account, quota and Earthdata credential path</td><td>All cloud work. Blocks nothing locally.</td><td>—</td></tr>
 </tbody>
 </table>
 </div>
 
 <h2 id="open">Open, not blocking</h2>
 
-<p>None at the moment. Every question from the specs' open-questions sections has been decided and
-struck in place, with the decision beside it. Two implicit choices should still become ADRs
-before implementation hardens them &mdash; listed under
-<a href="decisions/index.html#pending">Not yet recorded</a>.</p>
+<p>Questions the build opened. Each is recorded in the spec named, at the end of its
+open-questions list.</p>
+
+<div class="tw">
+<table>
+<thead><tr><th>Question</th><th>Where</th></tr></thead>
+<tbody>
+<tr><td>With one epoch and <code>ignore: [none]</code>, every observed-but-nothing-identified cell delivers nodata, not <code>0</code>; only <code>n_epochs</code> distinguishes it from never observed. Deliver <code>none</code> instead, or document <code>ignore: []</code> for single-epoch products?</td><td><a href="specs/13-snapshot-schema.md">13</a> §7</td></tr>
+<tr><td>Products and GLTs are tiled GeoTIFFs without the COG header layout or overviews, while the STAC media type claims COG. Write through the COG driver, or stop calling them COGs?</td><td><a href="specs/03-regrid-glt.md">03</a> §6, <a href="specs/07-output-mapping.md">07</a></td></tr>
+<tr><td>CMR has no <code>EMITL1BOBS</code> short name; OBS is an asset of <code>EMITL1BRAD</code>. The manifests must change when a CMR source exists</td><td><a href="specs/12-data-access.md">12</a> §8, <a href="specs/09-run-manifest.md">09</a> §6</td></tr>
+<tr><td>Two class-table fingerprints in flight: the raw table's in plan/report/provenance, the product table's on the STAC item</td><td><a href="specs/13-snapshot-schema.md">13</a> §7</td></tr>
+<tr><td>Local sources have no asset checksum, so a re-delivered file under the same name is invisible to the observation key</td><td><a href="specs/06-caching.md">06</a> §8</td></tr>
+<tr><td>Regrid's KD-tree query runs single-threaded inside a pool that already fills the node; size <code>n_workers</code> from the allocation</td><td><a href="specs/03-regrid-glt.md">03</a> §6, <a href="specs/08-execution.md">08</a> §7</td></tr>
+<tr><td><code>max_vcpu_hours</code> is reported as "not estimated"; the router needs per-stage constants from the first measurements</td><td><a href="specs/08-execution.md">08</a> §7</td></tr>
+<tr><td><code>aoi.geometry</code> is on this site but not modelled</td><td><a href="specs/09-run-manifest.md">09</a> §6</td></tr>
+<tr><td>The STAC collection's <code>license</code> is not a manifest field and defaults to <code>various</code></td><td><a href="specs/10-provenance.md">10</a></td></tr>
+</tbody>
+</table>
+</div>
+
+<p>Two implicit choices should still become ADRs — listed under
+<a href="decisions/index.html#pending">Not yet recorded</a>. One packaging fix is pending and is
+a dependency change, so it waits for a deliberate commit: <code>netCDF4</code> is imported by the
+core package but is only a pixi dependency, not a <code>[project]</code> dependency, so a
+pip/wheel install would fail at import; the proposed diff adds
+<code>netCDF4&gt;=1.6,&lt;1.7.1</code> to <code>pyproject.toml</code> and the dependency row of
+ADR-0001.</p>
 
 <h2 id="planned">Planned enhancements</h2>
 

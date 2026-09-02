@@ -26,6 +26,10 @@ GDAL and netCDF4 are native libraries with no usable pure-pip story. Both `Spect
 `tetracorder-lite` already use pixi, so this is consistency rather than novelty — and it means a
 developer who can build one repo can build this one.
 
+`netCDF4` is also declared under `[project].dependencies` (pinned `<1.7.1` to match the pixi
+pin), because `stratum` core imports it for local header reads; the pixi environment is where it
+actually comes from, but a wheel install must not import-fail.
+
 Rejected:
 - **pip + wheels** — GDAL wheels exist but are fragile and diverge from the conda-forge build the
   rest of the org uses.
@@ -45,7 +49,17 @@ bridges cleanly to the xarray data model below.
 
 `SpectralUtil` uses `osgeo.gdal` directly and `tetracorder-lite`'s `tetrapy` uses
 xarray + rioxarray. We match tetrapy for our own code and call SpectralUtil as-is at its
-boundary rather than rewriting it.
+boundary rather than rewriting it. SpectralUtil has no PyPI release and no tags, and its
+`pyproject.toml` declares `packages = ["spectral_util"]` only, so a non-editable install
+(a pinned git dependency, tried 2026-09-02) ships none of `mosaic`, `spec_io`, `common` or
+`ea_assist`. Until that is fixed upstream (a one-line `packages.find` change - the third
+contribution worth making, beside the two in spec 03 section 4) it is a **git submodule at
+`vendor/SpectralUtil`, pinned to a commit and installed editable** through pixi. A sibling
+checkout was rejected because it makes the directory layout a dependency. `[project]` does
+not list it; pixi is the supported environment (section 2).
+
+**Revisit when** upstream ships subpackages: replace the submodule with a pinned git
+dependency, then with a PyPI pin once a release exists.
 
 **Consequence:** both `gdal` and `rasterio` will be in the image. They share the same underlying
 libgdal from conda-forge, so this is a namespace overlap, not two copies.

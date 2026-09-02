@@ -1,7 +1,9 @@
 # Stratum — working notes for Claude
 
-Cost-function-driven mosaic engine for imaging spectroscopy. **Design stage: there is no
-implementation yet.** Everything in `docs/` is specification.
+Cost-function-driven mosaic engine for imaging spectroscopy. **The first slice exists** (built
+2026-09-02, `src/stratum` + `src/stratum_emit`, 241 tests): a local run over staged granules,
+plan through publish. `docs/specs/` is still the contract; the build contract it was written
+against is [`docs/notes/2026-09-02-first-slice-plan.md`](docs/notes/2026-09-02-first-slice-plan.md).
 
 Read [`docs/specs/00-overview.md`](docs/specs/00-overview.md) before doing anything substantive;
 it fixes the vocabulary the rest of the repo assumes.
@@ -22,7 +24,7 @@ one.
 | **Specs** | `docs/specs/*.md` | The contract. Carries citations, invariants, open questions. **Authoritative.** |
 | **Site** | `docs/*.html` | How the tool works and how to use it. |
 | **Heritage** | `docs/notes/heritage.md` | Prior art, where the old code lives, why choices were made. **Internal.** |
-| **Code** | *(none yet)* | Authoritative for signatures once it exists. |
+| **Code** | `src/stratum/`, `src/stratum_emit/` | **Authoritative for signatures.** `11-types.md` is the narrative around them, not a second copy. |
 
 **When you make a design decision, record it in the same commit that makes it.**
 
@@ -39,9 +41,10 @@ one.
 | Anything that moves a boundary between platform and science config | [`ADR-0002`](docs/decisions/ADR-0002-terraform-manifest-boundary.md) |
 | Anything a reader of the design site would now find **wrong** | the matching HTML page — see the map below |
 
-Once code exists, `11-types.md` describes the types **and the code is authoritative**. Keep the
+Code exists, so `11-types.md` describes the types **and the code is authoritative**. Keep the
 spec as the narrative — why the type is shaped that way, what the observed constraints are — and
-do not duplicate field lists that will drift.
+do not duplicate field lists that will drift. When a spec and `src/` disagree on a signature, the
+code is right and the spec is the thing to fix.
 
 ### Spec → site map
 
@@ -156,10 +159,15 @@ docs/decisions/    ADR digest (HTML) + the ADRs themselves (Markdown)
 docs/status.html   what is implemented, what is open
 docs/assets/       stratum.css, stratum.js - the only shared chrome
 docs/specs/        00-13, numbered by dependency order   <- authoritative
-docs/notes/        heritage.md, meeting notes, archived proposal    <- internal
+docs/notes/        heritage.md, meeting notes, archived proposal,
+                   2026-09-02-first-slice-plan.md (the build contract)  <- internal
 refs/              verbatim external artifacts - do not edit
 trial-data/        local granules for trial runs - git-ignored, never committed
 ```
+
+`examples/trial-nevada/` is the first-slice trial run (one tile, June 2026, `MinViewZenith`);
+its `out/` is a full local root - `cache/`, `runs/`, `products/` - and `parity.py` is the
+SpectralUtil `build_obs_nc` comparison. `examples/zones.yaml` is the AOI zone registry.
 
 ---
 
@@ -376,40 +384,57 @@ ignored; the reference granule in `refs/` goes once trial data exists.
 
 ## Inspecting the reference granule
 
-The project environment is pixi (`pixi install`, `pixi run test`) per ADR-0001; `pixi` is not yet
-on this machine (`brew install pixi`). Until then a `uv venv --python 3.11` with the pure-Python
-dependencies runs the tests. To read the NetCDF without either:
+The project environment is pixi per [`ADR-0001`](docs/decisions/ADR-0001-tech-stack.md):
+`pixi 0.78` is at `/opt/homebrew/bin/pixi`, the environment is built, and `pixi run test` runs
+the suite (`pixi run lint` for ruff). `SpectralUtil` comes from the `vendor/SpectralUtil` submodule
+(`git submodule update --init` after cloning), installed editable by pixi; a plain git or PyPI
+dependency is not possible until upstream fixes its packaging - see ADR-0001 section 3. To read the NetCDF:
 
 ```bash
-export MAMBA_ROOT_PREFIX="$HOME/micromamba"
-micromamba create -y -n emit-inspect -c conda-forge python=3.11 netcdf4
-micromamba run -n emit-inspect python -c "
+pixi run python -c "
 import netCDF4 as nc
 d = nc.Dataset('refs/EMIT_L2B_MIN_001_20260825T151308_2623710_050.nc')
 print(d.groups['mineral_metadata'].variables.keys())"
 ```
 
-Once implementation starts this becomes `pixi run`, per
-[`ADR-0001`](docs/decisions/ADR-0001-tech-stack.md).
+`netCDF4` is a pixi dependency but not yet a `[project]` dependency in `pyproject.toml`, so the
+package only imports inside the pixi environment (see the pending pyproject diff in
+[`docs/status.html`](docs/status.html)).
 
 ---
 
-## When implementation starts
+## The first slice exists
 
-The agreed first slice — deliberately narrow:
+The agreed scope was deliberately narrow:
 
 > One tile, one epoch, `MinViewZenith`, staged granules on local disk, output diffed against a
 > V002 cell. **No** blocks, caching, Step Functions, Batch, or manifest patching.
 
-Build order within it: types → L2B reader → regrid wrapper → resolve → publish.
+What was built relaxes two of those on purpose — blocks and cache keys exist from the start so
+the two non-negotiable tests are real — and is recorded in
+[`docs/notes/2026-09-02-first-slice-plan.md`](docs/notes/2026-09-02-first-slice-plan.md) §1
+(in / out) and §4 (the internal signatures). In: manifest, index, `LocalSource`, the four EMIT
+readers, KD-tree regrid wrapping SpectralUtil, streaming resolve with sensor- and map-space masks,
+the schema-driven reducer, publish (data COGs, categorical/continuous mappers, legends, STAC,
+provenance), the `local` executor and the CLI. Out, refused with the spec section named:
+`CMRSource`, S3/HTTPS assets, prepared assets, aux data, `stack`/`tile` scorers, `Reducer`
+plugins, `threshold`/`composite` mappers, `stratum render`, patches, `approve`, `slurm`/`aws`.
+No V002 output was available locally; a SpectralUtil `build_obs_nc` parity run stands in and
+matches cell for cell (`docs/notes/heritage.md`, "First measurements").
 
-Two tests are non-negotiable from the first commit that makes them meaningful
+The two tests are non-negotiable and now exist
 ([ADR-0001 §10](docs/decisions/ADR-0001-tech-stack.md)):
 
-1. **Seam equivalence** — block-wise output bit-identical to tile-wise. Without it, block
-   decomposition silently corrupts any plugin with spatial extent.
+1. **Seam equivalence** — block-wise output bit-identical to tile-wise:
+   `tests/test_invariants.py::test_seam_equivalence_block_wise_equals_tile_wise` and
+   `tests/test_resolve.py::test_seam_equivalence_blocks_equal_whole_tile`.
 2. **Cache-key sensitivity** — a scorer change invalidates snapshots and does *not* invalidate
-   GLTs. This is the property the entire iteration story rests on.
+   GLTs: `tests/test_invariants.py::test_cache_key_sensitivity_scorer_change_keeps_glts` and
+   `test_lumping_change_invalidates_snapshots_not_glts`.
+
+A third guards the second: `test_regrid_algo_version_bumped_with_module_hash` fails when anything
+under `src/stratum/regrid/` changes without `python -m stratum.regrid --record` being re-run
+([06 §3](docs/specs/06-caching.md) rule 2).
 
 ---
 

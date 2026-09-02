@@ -1,0 +1,14 @@
+# The product enumeration for a categorical snapshot layer - spec 13 section 3.
+# id is explicit and never reused; 0 is reserved for `none` ("observed, nothing identified").
+name: cm-v1
+version: 1
+match_on: [library, record, group]
+unmapped: fail
+classes:
+  - {id: 1, name: goethite,
+     members: [{library: sprlb06, record: 882,  group: 1},
+               {library: splib06, record: 5736, group: 1}]}
+  - {id: 2, name: hematite,
+     members: [{library: splib06, record: 5880, group: 1}]}
+  - {id: 3, name: pyrite,
+     members: [{library: splib06, record: 2568, group: 1}]}

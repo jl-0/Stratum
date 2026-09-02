@@ -43,6 +43,7 @@ grid:
 
 aoi:
   zones: [bingham-canyon, cuprite-nv, leadville-co, south-central-az]
+  registry: ../zones.yaml     # zone name -> [w, s, e, n]; relative to this file
 
 time:
   start: 2022-08-01
@@ -76,9 +77,11 @@ inputs:
     mineral_uncert: {collection: EMITL2BMIN,  asset: MINUNCERT, var: group_1_band_depth_unc}
     mask:           {collection: EMITL2AMASK, var: mask}
     frcov:          {collection: EMITL2BFRCOV, var: soil}   # already orthorectified
-  band_aliases:
-    view_zenith:  {role: geometry, band: 5}
-    solar_zenith: {role: geometry, band: 4}
+  # geolocation: geometry                    # the role regrid takes loc from; default: the
+  #                                          # first sensor-space role above - see 03 section 3
+  band_aliases:                 # 0-based band indices into the L1B OBS `obs` variable:
+    view_zenith:  {role: geometry, band: 2}   # 2 = to-sensor zenith
+    solar_zenith: {role: geometry, band: 4}   # 4 = to-sun zenith
     # swir_2200:  {role: reflectance, match: {wavelength: 2200}, tolerance: 10}   # by reader-reported attribute
 
 aux:
@@ -86,7 +89,8 @@ aux:
   snow:  {uri: "s3://.../snow/{date}.tif", kind: categorical, resampling: nearest,
           temporal: nearest, max_age: P3D}
 
-# allow_mixed_vintage: true           # top level; requires a documented reason - see section 5
+# allow_mixed_vintage: true           # top level; requires mixed_vintage_reason - see section 5
+# mixed_vintage_reason: "..."
 
 granule_filter:
   # - {build_version: "010635"}         # filterable, not required: the vintage check is the
@@ -155,6 +159,27 @@ of something the framework would otherwise decide or refuse. They are named here
 implicit because `max_distance` enters the GLT cache key ([06 §2](06-caching.md)) — an input that
 determines an artifact must be settable — and because the other two are the documented escape
 hatches for guard rails in [01 §1](01-grid-tiling.md) and [02 §3](02-granule-index.md).
+`allow_mixed_vintage` needs its "documented reason" as a concrete field, `mixed_vintage_reason`;
+one without the other is a schema error. `force_positive_y` is accepted by the model but
+`GridDef` cannot honour it, so `grid_def()` raises `NotImplementedError` — the guard rail cannot
+be bypassed without a shared-type change.
+
+### Forms the models fix
+
+The Pydantic models are `src/stratum/manifest/models.py`; `extra="forbid"` everywhere, so a
+misspelt key is an error with a location. Choices the build settled:
+
+| Field | Contract |
+|---|---|
+| `aoi` | Exactly one of `zones` (names looked up in `registry`, a manifest-relative YAML of `name → [w, s, e, n]`), `bbox` `[w, s, e, n]`, or `tiles` `[[tx, ty], ...]`. `tiles()` is the **union** of the tiles meeting each zone box, not the tiles of the enclosing box, so two distant zones do not tile the gap between them; a box edge exactly on a tile edge does not pull in the next tile. A zone not in the registry, or `zones` without `registry`, is a `validate_static` problem. `geometry` (a polygon file) is not modelled yet |
+| `time.deliver` | Normalised to the long form at load, so `P1Y` and `{every: P1Y, window: P1Y, align: exact}` produce the same merged document and the same hash; `window` defaults to `every`, and `deliver` itself defaults to the epoch. The rules in §5 are checked by the model |
+| `time.align` | `start` (default) or `calendar`: `calendar` anchors the epoch lattice on the epoch's calendar unit and truncates the first epoch at `start`. Month arithmetic is computed from `start` in one step and clamps to month end (31 Jan + 2 × P1M = 31 Mar); month- and day-based durations are incommensurable. `center` places surplus epochs half before and half after, the odd one after; windows clip to `[start, end)` |
+| `inputs.geolocation` | The role regrid takes `loc` from; defaults to the first sensor-space role in `inputs.roles` order ([03 §3](03-regrid-glt.md)). Must name a role |
+| `inputs.index` / `inputs.source` | Both optional, at least one required. `source` for `kind: local` takes `root` plus either one `pattern` (honoured only when every role reads one collection) or `patterns` ([12 §5](12-data-access.md)) |
+| `band_aliases` | `band:` is a **0-based** index, validated against the reader's band count at plan time; `match:` selects the single band whose reported attribute equals the value (string comparison, or within `tolerance`) and fails unless exactly one matches ([11 §5](11-types.md)). EMIT L1B OBS: 0 path length, 1 to-sensor azimuth, **2 to-sensor zenith**, 3 to-sun azimuth, **4 to-sun zenith**, 5 phase, 6 slope, 7 aspect, 8 cosine i, 9 UTC time, 10 earth–sun distance |
+| `granule_filter` | The four built-ins plus `product_version`, `collection_version` and `day_night`. `on_missing` is `reject \| keep \| fail`, `fail` when omitted — so `{max_solar_zenith: 70}` is valid and means `fail`; `on_missing` on `month_in` is a schema error, since nothing can be missing. A `{ref, params}` entry resolves a `GranuleFilter` plugin |
+| `snapshot.layers.*.aggregate` | Parameters are validated per `(kind, method)`: `vote` takes `min_count` / `ignore` / `tie_break`; `percentile` requires `p` in `[0, 100]`; `inverse_variance` requires `unc`; `conditional_on` and `spread` apply to any delivered continuous method and not to `none`. A parameter a method does not take is an error ([13 §4](13-snapshot-schema.md)) |
+| `budget.on_exceed` | `require_approval` (default) \| `fail` \| `warn` — §4 |
 
 ---
 
@@ -186,6 +211,20 @@ otherwise a five-figure mistake, and this pipeline actively invites that mistake
 `stratum plan` emits a **dry-run report** by default — tile count, granule count, estimated bytes
 read, projected cache hit rate, estimated vCPU-hours — which should be reviewed in the PR
 alongside the manifest diff.
+
+**The gate as built** (`stratum/plan/run.py`, `stratum/executors/local.py`): `plan_run` never
+raises on budget. It records `{over, problems, on_exceed}` in `plan.json` and the report,
+`stratum plan` exits `2` when over, and `stratum run` refuses before the first stage unless
+`on_exceed: warn`. `require_approval` refuses too, naming `stratum approve` as the later slice
+([08 §3](08-execution.md)); `warn` proceeds with the exceedance reported. Only `max_tiles` and
+`max_granules` gate today; vCPU-hours are reported as "not estimated" until per-stage constants
+exist ([08 §2](08-execution.md)). Two selection rules sit in front of the count: the query bbox
+is the AOI's enclosing box, but the selection is then **clipped to the AOI's tiles** and the
+granules in the gap are reported as a "meets a tile of the AOI" filter row, so `granule_count`
+and the budget count what a work item can actually read ([02 §6](02-granule-index.md)); and an
+empty selection is a `PlanError` ("no granule survives selection"), not an empty plan — the
+data-dependent checks need a sample granule, and an empty run is almost always a wrong `aoi` or
+`time`.
 
 ---
 
@@ -221,14 +260,52 @@ Everything below fails in the plan stage, loudly, while it is cheap:
   reported, not pinned ([02 §3](02-granule-index.md));
 - budget present and non-infinite.
 
+### Where each check lives
+
+Three layers, in the order a manifest meets them:
+
+| Layer | Checks | Reports |
+|---|---|---|
+| **Models** (`stratum/manifest/models.py`) | The shape of one block: types, enumerated values, which fields go together, aux `kind`/`resampling` agreement, the time rules, a categorical layer needing `classes`, `mixed_vintage_reason` | The first failure, with a location |
+| **`validate_static`** (`stratum/manifest/validate.py`; `stratum validate`) | Every cross-block reference, with no data: role/alias collision; `alias.role` and `geolocation` declared; scorer/mask/filter/mapper refs resolve and accept their params; `required_roles` in roles or aliases; `required_aux` in `aux`; scorer `halo` vs `block`; layer `source` in the namespace; a categorical source role declares a `class_table` whose attributes cover `match_on`; `conditional_on` names another *delivered* categorical layer and `unc` another continuous one; `ignore`/`colors` name enumeration classes; render targets a delivered layer of the right kind; `alpha_from` names a band the reducer actually delivers; zones resolve | Every problem, as a list |
+| **Planner** (`stratum/plan/run.py`) | What needs data: the collection resolves to one reader; `var` exists in its `variables()`; band aliases resolve against a real granule's `VarSpec`; per-granule enumeration resolution and fingerprint agreement; a collection under several `collection_version`s is pinned; every granule provides an asset for every role that will be read | `PlanError` |
+
+`validate_static` instantiates the scorer and masks with their params to read `required_roles`,
+`halo` and `capability`, so a plugin constructor with side effects runs at validation; the
+shipped plugins are pure. The checks that the slice cannot back are refused *here* rather than
+in a worker: `aux` (and any `required_aux`), `formats: [netcdf]`, a `reducer:` block, a
+non-`streaming` scorer. `-p` patches, `threshold`/`composite` mappers and `class_table.source:
+file` raise `NotImplementedError` naming their section.
+
+### Hash and run id
+
+`manifest_hash` is `canonical_hash` of the merged document as the models dump it — key order
+in the YAML never changes it, `deliver` always in long form — **plus** `resolved_refs`: the
+fingerprint of every enumeration a `@ref:` resolved to. Editing a classes file under the same
+path therefore yields a new `run_id`, as [00 §5](00-overview.md) invariant 4 requires; a manifest
+without `@ref:` hashes as its document alone. The zone registry's contents do not enter the
+hash. `run_id` is `f"{run_label}-{hash[7:15]}"` — the YAML `run_id` plus the first eight hex
+digits after the `sha256:` prefix.
+
 ---
 
 ## 6. Open questions
 
 1. ~~YAML or TOML?~~ **Resolved:** YAML, with a strict loader and no implicit typing.
 2. ~~Should `aoi.zones` resolve from a checked-in registry, or take inline geometry?~~ **Resolved:**
-   a checked-in registry, so runs are comparable and names stable.
+   a checked-in registry, so runs are comparable and names stable — `aoi.registry`, a YAML of
+   `name → [w, s, e, n]` relative to the manifest (`examples/zones.yaml`).
 3. ~~Do we version the manifest schema itself, so old manifests keep parsing?~~ **Resolved:** yes —
-   `schema_version` at the top.
+   `schema_version` at the top, `1.0`; any other value is refused.
 4. ~~Should `run_id` be user-supplied or derived from the manifest hash?~~ **Resolved:** both:
-   `{label}-{hash[:8]}`.
+   `{label}-{hash[7:15]}` (§5).
+5. `aoi.geometry` — a polygon file — appears in the example on the site but is not modelled;
+   `extra="forbid"` rejects it. Add it when a consumer needs it.
+6. `EMITL1BOBS` is a local collection name only: CMR has no such short name — the OBS file is
+   the second asset of an `EMITL1BRAD.001` record. A `CMRSource` must map
+   `{collection: EMITL1BRAD, asset: OBS}` onto it ([12 §5](12-data-access.md), question 7), and
+   the example manifests will have to say so once that source exists.
+7. The zone registry's contents are not in the manifest hash, so moving a zone's box keeps the
+   `run_id`. The frozen index still changes, and provenance records it; whether run identity
+   should track the registry the way it tracks `@ref:` enumerations is a one-line change in
+   `Manifest.document()` if wanted.

@@ -440,11 +440,18 @@ mineral_1_runner_up  hematite
 n_epochs             9</code></pre>
 
 <p>Had the modal count fallen below <code>min_count</code>, the cell would be written as nodata —
-the class is real but too thinly supported to assert.</p>
+the class is real but too thinly supported to assert. <code>min_count</code> defaults to
+<code>1</code>. The same rule applies when every valid epoch was ignored: with a single epoch and
+<code>ignore: [none]</code>, an observed cell that identified nothing is delivered as nodata
+rather than as <code>none</code>, and only <code>n_epochs</code> tells it apart from a cell never
+observed — say <code>ignore: []</code> for single-epoch products. Delivered categorical nodata is
+<code>65535</code>; <code>&lt;layer&gt;_agreement</code> is reported whether or not the cell was
+suppressed, because it describes the tally rather than the decision.</p>
 
 <h4 id="ties">Ties</h4>
 
-<p>When two classes tie for the mode, <code>tie_break</code> decides. Choose it deliberately:</p>
+<p>When two classes tie for the mode, <code>tie_break</code> decides. Choose it deliberately —
+when omitted it is <code>nodata</code>, so a tie is refused rather than guessed:</p>
 
 <div class="tw">
 <table>

@@ -189,16 +189,28 @@ cheaper path when it can.</p>
 <h3 id="local">From a directory</h3>
 
 <pre><code>inputs:
-  index: ./index/emit-granules.parquet   <span class="c"># what a RUN reads</span>
+  index: ./index.parquet                 <span class="c"># what a RUN reads</span>
   source:                                <span class="c"># how that index is BUILT</span>
     kind: local
-    root: ./granules
-    pattern: <span class="k">"EMIT_L2B_MIN_*.nc"</span></code></pre>
+    root: ./granules                     <span class="c"># relative to the manifest</span>
+    patterns:                            <span class="c"># {collection: {asset: glob}}</span>
+      EMITL2BMIN:
+        MIN: <span class="k">"EMIT_L2B_MIN_001_*.nc"</span>
+        MINUNCERT: <span class="k">"EMIT_L2B_MINUNCERT_001_*.nc"</span>
+      EMITL1BOBS:
+        OBS: <span class="k">"EMIT_L1B_OBS_001_*.nc"</span></code></pre>
 
 <p><code>stratum index build</code> walks the directory, reads each file's header once, and writes
-the same index the archive path produces. No network, no Earthdata account, no catalogue. Nothing
-downstream can tell the difference &mdash; which is the test that this seam is in the right
-place.</p>
+the same index the archive path produces; <code>stratum plan</code> does the same on its own when
+the index file does not exist. The granule id is what the glob's <code>*</code> matched, so the
+MIN and MINUNCERT files of one granule become one record with two assets. No network, no
+Earthdata account, no catalogue. Nothing downstream can tell the difference &mdash; which is the
+test that this seam is in the right place.</p>
+
+<p>Two things a directory cannot tell you: the cloud fraction (it is <code>None</code> for every
+granule, so a <code>max_cloud_fraction</code> filter with the default <code>on_missing: fail</code>
+refuses everything) and a catalogue checksum (none is recorded). <code>--since</code> on
+<code>index build</code> uses file modification time.</p>
 
 <h3 id="cmr">From NASA's archive</h3>
 

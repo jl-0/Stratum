@@ -24,8 +24,9 @@
 
 <div class="gen">
   <span class="label">Generated later</span>
-  <p>This reference is hand-written for now and will be generated from the Pydantic models, so the
-  field list cannot drift from the validator. For the task-oriented version, see
+  <p>This reference is hand-written against the Pydantic models in
+  <code>src/stratum/manifest/models.py</code>, which are authoritative, and will be generated from
+  them so the field list cannot drift from the validator. For the task-oriented version, see
   <a href="../guide/running.html">Running a mosaic</a>.</p>
 </div>
 
@@ -51,7 +52,7 @@
 <tr><td><a href="#outputs"><code>outputs</code></a></td><td>yes</td><td>Destination, formats, rendering</td></tr>
 <tr><td><a href="#plugins"><code>plugins</code></a></td><td>no</td><td>Plugin wheel to fetch at cold start</td></tr>
 <tr><td><a href="#budget"><code>budget</code></a></td><td>yes</td><td>Fan-out ceilings and what to do when exceeded</td></tr>
-<tr><td><code>allow_mixed_vintage</code></td><td>no</td><td>Permits a frozen index spanning more than one vintage. Requires a documented reason</td></tr>
+<tr><td><code>allow_mixed_vintage</code></td><td>no</td><td>Permits a frozen index spanning more than one vintage. Requires <code>mixed_vintage_reason</code>, a string; one without the other is an error</td></tr>
 </tbody>
 </table>
 </div>
@@ -89,16 +90,20 @@ worker produces a warning.</p>
 <h2 id="aoi">aoi</h2>
 
 <pre><code>aoi:
-  zones: [bingham-canyon, cuprite-nv]     <span class="c"># named zones from the registry</span>
+  zones: [bingham-canyon, cuprite-nv]     <span class="c"># named zones from the registry ...</span>
+  registry: ../zones.yaml                 <span class="c"># ... a YAML of name -&gt; [w, s, e, n], relative to this file</span>
 
 aoi:
-  bbox: [-115.5, 37.2, -114.8, 37.9]      <span class="c"># or an explicit box</span>
+  bbox: [-115.5, 37.2, -114.8, 37.9]      <span class="c"># or an explicit box [w, s, e, n]</span>
 
 aoi:
-  geometry: s3://.../study-area.geojson   <span class="c"># or a polygon file</span></code></pre>
+  tiles: [[-118, 41], [-117, 41]]         <span class="c"># or explicit tiles by position</span></code></pre>
 
-<p>Exactly one of <code>zones</code>, <code>bbox</code> or <code>geometry</code>. The area resolves
-to the set of tiles intersecting it.</p>
+<p>Exactly one of <code>zones</code>, <code>bbox</code> or <code>tiles</code>. The area resolves
+to the set of tiles intersecting each zone box or the bbox — the union, so two distant zones do
+not tile the gap between them; a box edge exactly on a tile edge does not pull in the next tile.
+Granules that meet the query box but no tile are dropped and counted in the report. A polygon
+file (<code>geometry</code>) is not supported yet.</p>
 
 <h2 id="time">time</h2>
 
@@ -168,9 +173,15 @@ in the plan report.</p>
     mineral_uncert: {collection: EMITL2BMIN, asset: MINUNCERT, var: group_1_band_depth_unc}
     mask:  {collection: EMITL2AMASK,  var: mask}
     frcov: {collection: EMITL2BFRCOV, var: soil}
-  band_aliases:
-    view_zenith:  {role: geometry, band: 5}
-    solar_zenith: {role: geometry, band: 4}</code></pre>
+  geolocation: geometry                           <span class="c"># the role regrid takes loc from; default: the first sensor-space role</span>
+  band_aliases:                                   <span class="c"># band: is a 0-BASED index into the role's variable</span>
+    view_zenith:  {role: geometry, band: 2}       <span class="c"># L1B OBS band 2 = to-sensor zenith</span>
+    solar_zenith: {role: geometry, band: 4}       <span class="c"># band 4 = to-sun zenith</span>
+    # swir_2200:  {role: reflectance, match: {wavelength: 2200}, tolerance: 10}   <span class="c"># by a reader-reported attribute</span></code></pre>
+
+<p><code>index</code> and <code>source</code> are each optional, and at least one is required. A
+<code>band:</code> index is checked against the reader's band count at plan time; a
+<code>match:</code> alias must select exactly one band.</p>
 
 <h3 id="source">source</h3>
 
@@ -186,8 +197,9 @@ from</a>.</p>
 <tr><td><code>kind</code></td><td><code>cmr</code> &middot; <code>stac</code> &middot; <code>local</code> &middot; <code>parquet</code></td><td>Which <code>GranuleSource</code> builds the index</td></tr>
 <tr><td><code>provider</code></td><td>e.g. <code>LPCLOUD</code></td><td><code>cmr</code> only — the DAAC distributing the collection</td></tr>
 <tr><td><code>prefer</code></td><td><code>direct</code> &middot; <code>https</code></td><td><code>direct</code> resolves to <code>s3://</code> URIs where offered. In-region only; falls back to HTTPS</td></tr>
-<tr><td><code>root</code></td><td>path</td><td><code>local</code> only — directory to walk</td></tr>
-<tr><td><code>pattern</code></td><td>glob</td><td><code>local</code> only</td></tr>
+<tr><td><code>root</code></td><td>path</td><td><code>local</code> only — directory to walk, relative to the manifest</td></tr>
+<tr><td><code>patterns</code></td><td><code>{collection: {asset: glob}}</code></td><td><code>local</code> only. The granule id is what the glob's <code>*</code> matched, so the MIN and MINUNCERT files of one granule land in one record. Pin a collection version with the long form <code>{collection: {version: "001", assets: {asset: glob}}}</code></td></tr>
+<tr><td><code>pattern</code></td><td>glob</td><td><code>local</code> only — one glob, accepted only when every role reads a single collection</td></tr>
 </tbody>
 </table>
 </div>
@@ -475,19 +487,22 @@ deployments may disable wheel fetching by policy for delivered products.</p>
 <tr><td><code>max_tiles</code></td><td>Ceiling on resolved tile count</td></tr>
 <tr><td><code>max_granules</code></td><td>Ceiling on the frozen granule set</td></tr>
 <tr><td><code>max_vcpu_hours</code></td><td>Ceiling on estimated compute</td></tr>
-<tr><td><code>on_exceed</code></td><td><code>require_approval</code> (default) | <code>fail</code> | <code>warn</code></td></tr>
+<tr><td><code>on_exceed</code></td><td><code>require_approval</code> (default) | <code>fail</code> | <code>warn</code>. <code>warn</code> reports and proceeds. <code>require_approval</code> refuses like <code>fail</code> until <code>stratum approve</code> exists</td></tr>
 </tbody>
 </table>
 </div>
 
-<p>Required, and cannot be infinite.</p>
+<p>Required, and cannot be infinite. Only <code>max_tiles</code> and <code>max_granules</code>
+gate today; vCPU-hours are reported as "not estimated". <code>stratum plan</code> exits
+<code>2</code> when a ceiling is exceeded and still writes the plan.</p>
 
 <h2 id="composition">Composition</h2>
 
 <pre><code>stratum plan -m base.yaml -p zones-pilot -p scorer-v3</code></pre>
 
 <p>Patches are ordered dict-merges applied <em>before</em> validation, so the merged document is
-what gets validated and hashed. Lists replace rather than append.</p>
+what gets validated and hashed. Lists replace rather than append. Not built yet: <code>-p</code>
+is refused.</p>
 
 <h2 id="validation">Validation</h2>
 

@@ -24,14 +24,14 @@
 
 <h2 id="workflow">The workflow</h2>
 
-<pre><code><span class="c"># 1. See what would run. Reads the index; starts nothing.</span>
+<pre><code><span class="c"># 1. See what would run. Reads (or, for a directory of granules, builds) the index; starts nothing.</span>
 stratum plan -m manifest.yaml
 
-<span class="c"># 2. Run it. On this machine, by default.</span>
+<span class="c"># 2. Run it. On this machine, by default; everything lands under outputs.bucket.</span>
 stratum run -m manifest.yaml
 
-<span class="c"># 3. Read the report.</span>
-stratum report --run cuprite-2024</code></pre>
+<span class="c"># 3. Read the report. --run is the run directory, or the run id under --root.</span>
+stratum report --run cuprite-2024-3f9a1c2e --root ./out</code></pre>
 
 <p>The manifest is the entire interface. It is versioned in git, reviewed like code, and hashed
 into the provenance record — so a run can be traced back to the exact document that produced
@@ -41,15 +41,18 @@ it.</p>
   <span class="label">This runs on your machine</span>
   <p>Stratum is an ordinary Python package. <code>stratum run</code> executes the whole pipeline
   locally by default — no cloud account, no cluster, no infrastructure to stand up. Storage is a
-  directory instead of a bucket.</p>
+  directory instead of a bucket: <code>outputs.bucket</code> is a path, relative to the manifest,
+  and <code>cache/</code>, <code>runs/</code> and <code>products/</code> are created under it.</p>
   <p>Bigger runs change <em>where the work is dispatched</em>, not the code, the manifest, or the
-  result: <code>--executor slurm</code> or <code>--executor aws</code>. See
-  <a href="scaling.html">Running at scale</a>.</p>
+  result: <code>--executor slurm</code> or <code>--executor aws</code>. Neither is built yet; both
+  refuse with their spec section. See <a href="scaling.html">Running at scale</a>.</p>
 </div>
 
 <h2 id="manifest">A minimal manifest</h2>
 
-<p>Enough to produce a single-epoch mosaic of one area, preferring the most nadir look:</p>
+<p>Enough to produce a single-epoch mosaic of one area from granules you already have on disk,
+preferring the most nadir look. This is the shape the first trial run used
+(<code>examples/trial-nevada/manifest.yaml</code> in the repository):</p>
 
 <pre><code>run_id: cuprite-2024
 
@@ -62,19 +65,24 @@ grid:
 
 aoi:
   zones: [cuprite-nv]
+  registry: ./zones.yaml    <span class="c"># zone name -> [w, s, e, n]; or use bbox: / tiles: instead</span>
 
 time:
   start: 2024-01-01
-  end:   2024-12-31
-  epoch: P1Y              <span class="c"># one epoch = one vote; here there is only one</span>
-  deliver: P1Y            <span class="c"># so no temporal reduction happens at all</span>
+  end:   2025-01-01         <span class="c"># half-open: [start, end)</span>
+  epoch: P1Y                <span class="c"># one epoch = one vote; here there is only one</span>
+  deliver: P1Y              <span class="c"># so no temporal reduction happens at all</span>
 
 inputs:
-  index: ./index/emit-granules.parquet    <span class="c"># local file or s3:// URI</span>
-  source:                                 <span class="c"># only used by `stratum index build`</span>
+  index: ./index.parquet    <span class="c"># built here by `stratum plan` if it does not exist</span>
+  source:                   <span class="c"># how the index is built; never read by a run</span>
     kind: local
     root: ./granules
-    pattern: <span class="k">"EMIT_L2B_MIN_*.nc"</span>
+    patterns:               <span class="c"># {collection: {asset: glob}}; the granule id is what * matched</span>
+      EMITL2BMIN:
+        MIN: <span class="k">"EMIT_L2B_MIN_001_*.nc"</span>
+      EMITL1BOBS:
+        OBS: <span class="k">"EMIT_L1B_OBS_001_*.nc"</span>
   roles:
     geometry: {collection: EMITL1BOBS, var: obs}
     mineral:
@@ -83,31 +91,45 @@ inputs:
       class_table: {source: embedded, path: /mineral_metadata, key: index,
                     attributes: [name, record, library, group, url]}
   band_aliases:
-    view_zenith: {role: geometry, band: 5}
+    view_zenith: {role: geometry, band: 2}    <span class="c"># 0-based; 2 = to-sensor zenith</span>
 
-granule_filter:
-  - {max_cloud_fraction: 0.5, on_missing: fail}
+granule_filter: []          <span class="c"># a directory has no cloud fraction; a cloud filter would refuse everything</span>
+
+pixel_mask:
+  - {ref: edge_trim, columns: 7}
 
 scorer:
   ref: min_view_zenith
 
 snapshot:
+  name: cuprite-v1
   layers:
     mineral:
       kind: categorical
       source: mineral
       classes: source          <span class="c"># adopt the granules' own class table; no lumping</span>
-      aggregate: {method: vote}
+      aggregate: {method: vote, ignore: []}   <span class="c"># see the note below</span>
 
 outputs:
-  bucket: ./products        <span class="c"># a local path; s3:// works the same way</span>
+  bucket: ./out             <span class="c"># the local root; s3:// is the same layout, not yet supported</span>
   formats: [cog]
   stac: true
+  render:
+    mineral: {mapper: categorical, on_unmapped: grey}
 
 budget:
   max_tiles: 4
   max_granules: 500
-  max_vcpu_hours: 20</code></pre>
+  max_vcpu_hours: 20
+  on_exceed: fail</code></pre>
+
+<div class="note">
+  <span class="label">One epoch and <code>ignore</code></span>
+  <p>With a single epoch, <code>ignore: [none]</code> turns every cell that was observed and had
+  nothing identified into nodata — the vote has nothing left to count. Say
+  <code>ignore: []</code> for a single-epoch product so class <code>0</code> is delivered as
+  itself; reach for <code>ignore</code> when there are several epochs to vote over.</p>
+</div>
 
 <p>The <code>snapshot</code> block says what each epoch records and how epochs combine. With a
 single epoch every aggregation is the identity, so this run is a plain mosaic; shorten
@@ -131,28 +153,53 @@ nothing else in the document changes; see <a href="reading-data.html">Reading da
 <h2 id="dry-run">Check before you run</h2>
 
 <p><code>stratum plan</code> resolves everything and provisions nothing. It reports the real
-fan-out — tiles &times; epochs &times; blocks &times; granules — before a worker starts:</p>
+fan-out — tiles &times; epochs &times; blocks &times; granules — before a worker starts, and writes
+the run directory (<code>{bucket}/runs/{run_id}/</code>) with the merged manifest, the frozen
+index, <code>plan.json</code>, the work lists and <code>report.md</code>. The report is what it
+prints:</p>
 
 <pre><code>$ stratum plan -m manifest.yaml
 
-Manifest      cuprite-2024  (sha256:9f2c1ab8…)
-Grid          EPSG:4326 @ 1 arcsec, tile 1.0°, block 720       [emit30]
-Area          1 zone → 2 tiles
-Time          2024-01-01 … 2024-12-31 → 1 epoch, 1 delivery period
+# Stratum plan report: cuprite-2024-3f9a1c2e
 
-Granules      1 284 candidates
-              −  559  cloud_fraction &lt;= 0.5
-              =  725  selected          class table: 1 fingerprint (sha256:4e1a…)
-                                        builds: 010632, 010635
+- manifest_hash: `sha256:3f9a1c2e…`
+- run_dir: `…/out/runs/cuprite-2024-3f9a1c2e`
 
-Work          725 regrid · 46 resolve · 0 reduce · 2 publish
-Cache         GLT 681/725 hit (94%)  →  44 to build
-Estimate      3.1 GB read · ~11 vCPU-hours · ~28 min wall
+## Selection
 
-Budget        ⚠ EXCEEDED — 725/500 granules  (tiles 2/4 OK, vCPU-hours ~11/20 OK)
-              on_exceed: require_approval
+- granules in AOI x time: 14
+- granules after filters: 14 (28 index rows)
 
-Plan is valid. Submit will pause for approval.</code></pre>
+| filter | removed | on_missing |
+|---|---|---|
+| meets a tile of the AOI | 0 | - |
+| provides an asset for every role read ['geometry', 'mineral'] | 0 | - |
+
+### Build versions consumed
+- `010635`: 14 granule(s)
+
+### Class-table fingerprints (the vintage check)
+- mineral: `sha256:fc392354…` on 14 granule(s)
+
+## Fan-out
+
+| stage | work items |
+|---|---|
+| regrid | 14 |
+| resolve | 25 |
+| reduce | 25 |
+| publish | 1 |
+
+## Budget
+
+- tiles: 1 / 4
+- granules: 14 / 500
+- vcpu hours: not estimated / 20.0
+- status: within budget (on_exceed: fail)</code></pre>
+
+<p>Exit code <code>2</code> means the plan is valid but over budget; the run directory is still
+written so you can read why. vCPU-hours are not estimated yet — only the tile and granule
+ceilings gate.</p>
 
 <div class="key">
   <span class="label">Review this in the pull request</span>
@@ -177,6 +224,10 @@ anything and waits for a human. Approve or reject it with:</p>
 <pre><code>stratum approve --run cm-zones-2026-annual-r3
 stratum reject  --run cm-zones-2026-annual-r3</code></pre>
 
+<p>Those two commands are not built yet, so today <code>require_approval</code> behaves like
+<code>fail</code> and says so. <code>warn</code> reports the exceedance and proceeds; use it when
+you have read the plan and mean it.</p>
+
 <h2 id="filters">Selecting granules</h2>
 
 <p>Filters run against the index before any pixel is read, so rejecting early is free. They apply
@@ -187,6 +238,14 @@ in order, and each one's effect is counted and reported.</p>
   - {max_solar_zenith: 70}
   - {build_version: "010635"}                     <span class="c"># optional — see below</span>
   - {month_in: [8, 9, 10, 11]}                    <span class="c"># recurring seasonal window</span></code></pre>
+
+<p>The built-in predicates are <code>max_cloud_fraction</code>, <code>max_solar_zenith</code>,
+<code>month_in</code>, <code>build_version</code>, <code>product_version</code>,
+<code>collection_version</code> and <code>day_night</code>; a <code>{ref: …, params: …}</code>
+entry names a filter plugin. Two selection steps run after your filters and appear in the report
+as rows of their own: granules that meet the query box but no tile of the area are dropped, and so
+are granules lacking an asset for a role the run will read — a mineral granule with no matching
+geometry file, say.</p>
 
 <h3 id="seasonal">Absolute versus seasonal windows</h3>
 
@@ -220,7 +279,9 @@ know which you want, say so.</p>
   <span class="label">Checked at plan time</span>
   <p>Stratum fingerprints the class table embedded in every contributing granule. If they do not
   all agree, <code>stratum plan</code> fails unless the manifest explicitly opts in with
-  <code>allow_mixed_vintage: true</code> and a documented reason.</p>
+  <code>allow_mixed_vintage: true</code> and a <code>mixed_vintage_reason</code>, and then only
+  when every table resolves into an explicit classes file — <code>classes: source</code> cannot
+  span vintages.</p>
 </div>
 
 <p>Upstream reprocessing regenerates products and can shift class definitions. A run that spans a
@@ -253,7 +314,8 @@ usable observations, that is a scorer, not a mask.</p>
 <pre><code>stratum plan -m base.yaml -p zones-pilot -p scorer-v3</code></pre>
 
 <p>Patches merge in the order given, before validation, so the merged document is what gets
-validated and hashed. Lists <strong>replace</strong> rather than append.</p>
+validated and hashed. Lists <strong>replace</strong> rather than append. Patch composition is not
+built yet — <code>-p</code> is refused — so for now a variant is a second manifest file.</p>
 
 <p>Because cached geometry does not depend on your scorer, running several competing cost functions
 over the same area costs roughly one regrid plus <em>n</em> cheap passes. Comparing scorers is meant
@@ -262,22 +324,29 @@ to be routine; see <a href="caching.html">Caching &amp; reruns</a>.</p>
 <h2 id="outputs">What you get back</h2>
 
 <pre><code>{outputs.bucket}/products/{run_id}/
-  {tile}/
-    {tile}_{period}_data.tif        <span class="c"># bands your schema delivers</span>
-    {tile}_{period}_image.tif       <span class="c"># RGBA rendering</span>
-    {tile}_{period}_legend.json     <span class="c"># class table or ramp stops</span>
-    {tile}_{period}.json            <span class="c"># STAC item</span>
+  collection.json                   <span class="c"># STAC collection over every tile x period</span>
+  {tx}_{ty}/{start}_{end}/          <span class="c"># e.g. -118_41/20260601_20260701/</span>
+    {band}.tif                      <span class="c"># one file per delivered band: mineral.tif,</span>
+                                    <span class="c">#   mineral_agreement.tif, mineral_runner_up.tif, n_epochs.tif ...</span>
+    {name}_rgba.tif                 <span class="c"># RGBA rendering, one per outputs.render entry</span>
+    {name}_legend.json              <span class="c"># its legend: class table or ramp stops</span>
+    classes.json                    <span class="c"># the product's class table</span>
+    item.json                       <span class="c"># STAC item</span>
 
 {outputs.bucket}/runs/{run_id}/
+  manifest.merged.yaml              <span class="c"># the document that was hashed</span>
   index.parquet                     <span class="c"># the frozen granule set</span>
-  provenance.json                   <span class="c"># what ran, against what</span>
+  plan.json                         <span class="c"># everything a worker needs beyond the manifest</span>
+  work/{stage}.jsonl                <span class="c"># the work lists</span>
+  work/{stage}.results.jsonl        <span class="c"># per-item outcomes: ok, key or error, cache hit, seconds</span>
   report.md                         <span class="c"># the human-readable summary</span>
-  failures.jsonl                    <span class="c"># per-item outcomes, if any</span></code></pre>
+  provenance.json                   <span class="c"># what ran, against what</span></code></pre>
 
-<p>The data product always ships alongside the image. If you only want to change how it looks, you
-do not need to re-run anything:</p>
-
-<pre><code>stratum render --run cuprite-2024 --mapper my_colours</code></pre>
+<p>Categorical bands are <code>uint16</code> with nodata <code>65535</code> — class <code>0</code>
+is a real value, "observed, nothing identified". Continuous bands are <code>float32</code> with
+<code>NaN</code> nodata; counts are <code>uint16</code> with no nodata. The data product always
+ships alongside the image. Re-rendering with a different mapper without re-running the pipeline
+(<code>stratum render</code>) is specified but not built yet.</p>
 
 <div class="reading">
   <span class="label">Further reading</span>
@@ -290,13 +359,15 @@ do not need to re-run anything:</p>
 
 <h2 id="report">Reading the report</h2>
 
-<p><code>stratum report</code> answers, without opening JSON: how many granules each filter
-removed and why; cache hit rate by artifact type and what a rerun would cost; which blocks failed;
-cost against budget; and a diff against the previous run of the same manifest lineage.</p>
+<p><code>stratum report</code> prints <code>report.md</code>: how many granules each filter
+removed; the builds consumed and the class-table fingerprint validated; work items per stage;
+the budget verdict; and, once the run has executed, items, cache hits and seconds per stage.
+<code>stratum status --run … --failed</code> lists failed items with their errors.</p>
 
-<p>That last one is the most useful in practice. <em>"This run selected 812 fewer granules than the
-last one"</em> is how you catch an upstream reprocessing or an index change before it becomes a
-mystery in the product.</p>
+<p>A diff against the previous run of the same manifest lineage is specified but not built. It is
+the most useful check in practice — <em>"this run selected 812 fewer granules than the last
+one"</em> is how you catch an upstream reprocessing or an index change before it becomes a
+mystery in the product — so until it exists, compare the two reports' selection sections.</p>
 
 <h2 id="reproduce">Reproducing a run</h2>
 
@@ -308,7 +379,9 @@ every ancillary source.</p>
 
 <p>This re-runs against the frozen index rather than re-querying, so it reproduces the original
 result rather than asking the same question of a catalogue that has since changed. It works across
-executors too — a run planned locally can be reproduced on a cluster, and vice versa.</p>
+executors too — a run planned locally can be reproduced on a cluster, and vice versa. The flag is
+not built yet; today, re-running the same manifest against the same index gives the same
+<code>run_id</code> and hits every cached artifact.</p>
 
 <h2 id="bigger">When one machine is not enough</h2>
 
@@ -319,7 +392,9 @@ single worker, so the same code path runs everywhere.</p>
 stratum run -m manifest.yaml --executor aws</code></pre>
 
 <p>The cache is content-addressed and shared, so a run you started locally and stopped can be
-finished on a cluster — completed items are hits and get skipped. See
+finished on a cluster — completed items are hits and get skipped. Neither executor is built yet;
+what exists is the seam they will use, <code>stratum exec --plan DIR --stage STAGE --index N</code>,
+which runs one work item and is what an array task will call. See
 <a href="scaling.html">Running at scale</a>.</p>
 
 </div>

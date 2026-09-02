@@ -1,0 +1,16 @@
+# Zone registry (09 section 2, resolution 2): zone name -> [west, south, east, north] in degrees
+# (EPSG:4326). A manifest names it with `aoi.registry` (a path relative to the manifest) and
+# picks zones by name in `aoi.zones`, so runs are comparable and names stable.
+#
+# nevada-pilot is the first-slice trial tile exactly. The four Critical Minerals pilot zones are
+# APPROXIMATE one-degree-ish boxes around the named district, placed from the district's
+# well-known coordinates and NOT yet confirmed against the project's zone definitions - refine
+# them before any delivered run.
+
+nevada-pilot: [-118.0, 41.0, -117.0, 42.0]
+
+# approximate - see the note above
+bingham-canyon: [-112.6, 40.2, -111.8, 40.9]        # Oquirrh Mountains, Utah
+cuprite-nv: [-117.6, 37.2, -117.0, 37.8]            # Cuprite / Goldfield, Nevada
+leadville-co: [-106.7, 39.0, -105.9, 39.6]          # Leadville mining district, Colorado
+south-central-az: [-111.8, 31.9, -110.4, 33.1]      # Tucson - Globe - Safford porphyry belt

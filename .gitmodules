@@ -1,0 +1,3 @@
+[submodule "vendor/SpectralUtil"]
+	path = vendor/SpectralUtil
+	url = https://github.com/emit-sds/SpectralUtil.git

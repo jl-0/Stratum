@@ -25,27 +25,36 @@ on a laptop, on a cluster, and as the worker entrypoint.</p>
 
 <div class="gen">
   <span class="label">Generated later</span>
-  <p>This page will be generated from the click command tree, so options cannot drift from the
-  implementation.</p>
+  <p>This page is hand-written against <code>src/stratum/cli.py</code> and will be generated from
+  the click command tree, so options cannot drift from the implementation.</p>
+</div>
+
+<div class="key">
+  <span class="label">What runs today</span>
+  <p><span class="chip chip-locked">built</span> marks a command or option that exists as of
+  2026-09-02. <span class="chip chip-open">not yet</span> marks one that is specified and refused
+  with a message naming its spec section (<code>not implemented in this slice: …</code>, exit
+  <code>1</code>). Only the <code>local</code> executor exists; <code>--executor slurm</code> and
+  <code>aws</code> are refused.</p>
 </div>
 
 <h2 id="summary">Commands</h2>
 
 <div class="tw">
 <table>
-<thead><tr><th>Command</th><th>Does</th></tr></thead>
+<thead><tr><th>Command</th><th>Does</th><th>Status</th></tr></thead>
 <tbody>
-<tr><td><a href="#plan"><code>stratum plan</code></a></td><td>Resolve a manifest and report what would run. Provisions nothing.</td></tr>
-<tr><td><a href="#run"><code>stratum run</code></a></td><td>Execute a run — locally by default, or on SLURM or AWS</td></tr>
-<tr><td><a href="#exec"><code>stratum exec</code></a></td><td>Execute one work item from a plan. The worker entrypoint.</td></tr>
-<tr><td><a href="#status"><code>stratum status</code></a></td><td>Progress of a run in flight</td></tr>
-<tr><td><a href="#report"><code>stratum report</code></a></td><td>Human-readable summary of a finished run</td></tr>
-<tr><td><a href="#approve"><code>stratum approve</code> / <code>reject</code></a></td><td>Release or cancel a run paused at the budget gate</td></tr>
-<tr><td><a href="#render"><code>stratum render</code></a></td><td>Re-render published data with a different mapper</td></tr>
-<tr><td><a href="#cache"><code>stratum cache</code></a></td><td>Inspect, explain and collect the cache</td></tr>
-<tr><td><a href="#index"><code>stratum index</code></a></td><td>Build and verify the granule index</td></tr>
-<tr><td><a href="#plugins"><code>stratum plugins</code></a></td><td>List registered plugins</td></tr>
-<tr><td><a href="#validate"><code>stratum validate</code></a></td><td>Schema-check a manifest without touching the index</td></tr>
+<tr><td><a href="#plan"><code>stratum plan</code></a></td><td>Resolve a manifest, freeze the granule set, write the work list, report the fan-out. Provisions nothing.</td><td><span class="chip chip-locked">built</span></td></tr>
+<tr><td><a href="#run"><code>stratum run</code></a></td><td>Plan and execute every stage — locally</td><td><span class="chip chip-locked">built</span> local only</td></tr>
+<tr><td><a href="#exec"><code>stratum exec</code></a></td><td>Execute one work item from a plan. The worker entrypoint.</td><td><span class="chip chip-locked">built</span></td></tr>
+<tr><td><a href="#status"><code>stratum status</code></a></td><td>Per-stage progress of a run, from its work lists and results files</td><td><span class="chip chip-locked">built</span></td></tr>
+<tr><td><a href="#report"><code>stratum report</code></a></td><td>Print the run report</td><td><span class="chip chip-locked">built</span></td></tr>
+<tr><td><a href="#approve"><code>stratum approve</code> / <code>reject</code></a></td><td>Release or cancel a run paused at the budget gate</td><td><span class="chip chip-open">not yet</span></td></tr>
+<tr><td><a href="#render"><code>stratum render</code></a></td><td>Re-render published data with a different mapper</td><td><span class="chip chip-open">not yet</span></td></tr>
+<tr><td><a href="#cache"><code>stratum cache</code></a></td><td>Explain and diff cache entries; collect the cache</td><td><span class="chip chip-locked">built</span> <code>explain</code>, <code>diff</code></td></tr>
+<tr><td><a href="#index"><code>stratum index</code></a></td><td>Build, query and verify the granule index</td><td><span class="chip chip-locked">built</span> <code>build</code>, <code>query</code></td></tr>
+<tr><td><a href="#plugins"><code>stratum plugins</code></a></td><td>List registered plugins and show what one declares</td><td><span class="chip chip-locked">built</span></td></tr>
+<tr><td><a href="#validate"><code>stratum validate</code></a></td><td>Schema and cross-reference checks on a manifest, with no data</td><td><span class="chip chip-locked">built</span></td></tr>
 </tbody>
 </table>
 </div>
@@ -54,211 +63,237 @@ on a laptop, on a cluster, and as the worker entrypoint.</p>
 
 <div class="tw">
 <table>
-<thead><tr><th>Option</th><th>Effect</th></tr></thead>
+<thead><tr><th>Option</th><th>Effect</th><th>Status</th></tr></thead>
 <tbody>
-<tr><td><code>-m, --manifest PATH</code></td><td>Base manifest</td></tr>
-<tr><td><code>-p, --patch NAME</code></td><td>Patch to merge, repeatable, applied in order</td></tr>
-<tr><td><code>--executor NAME</code></td><td><code>local</code> (default) | <code>slurm</code> | <code>aws</code>. A platform choice, never a manifest field.</td></tr>
-<tr><td><code>--profile NAME</code></td><td>Named executor settings — cluster partition, or AWS endpoints and region</td></tr>
-<tr><td><code>--log-level LEVEL</code></td><td><code>debug</code> | <code>info</code> | <code>warning</code> | <code>error</code></td></tr>
-<tr><td><code>--json</code></td><td>Machine-readable output instead of formatted text</td></tr>
+<tr><td><code>--version</code></td><td>Print the package version</td><td><span class="chip chip-locked">built</span></td></tr>
+<tr><td><code>-m, --manifest PATH</code></td><td>Base manifest — per command, on every command that takes one</td><td><span class="chip chip-locked">built</span></td></tr>
+<tr><td><code>-p, --patch NAME</code></td><td>Patch to merge, repeatable, applied in order</td><td><span class="chip chip-open">not yet</span> — parsed and refused</td></tr>
+<tr><td><code>--executor NAME</code></td><td><code>local</code> (default) | <code>slurm</code> | <code>aws</code>. A platform choice, never a manifest field. On <code>run</code> only.</td><td><span class="chip chip-locked">built</span> <code>local</code></td></tr>
+<tr><td><code>--profile NAME</code></td><td>Named executor settings — cluster partition, or AWS endpoints and region</td><td><span class="chip chip-open">not yet</span></td></tr>
+<tr><td><code>--log-level LEVEL</code></td><td><code>debug</code> | <code>info</code> | <code>warning</code> | <code>error</code></td><td><span class="chip chip-open">not yet</span></td></tr>
+<tr><td><code>--json</code></td><td>Machine-readable output instead of formatted text</td><td><span class="chip chip-locked">built</span> on <code>plan</code></td></tr>
 </tbody>
 </table>
 </div>
 
 <h2 id="plan">stratum plan</h2>
 
-<pre><code>stratum plan -m manifest.yaml [-p PATCH]... [--json] [--out PATH]</code></pre>
+<pre><code>stratum plan -m manifest.yaml [--out PATH] [--json]</code></pre>
 
-<p>Merges patches, validates the result, queries the index, applies filters, resolves tiles and
-epochs, probes the cache, and prints the fan-out with a cost estimate. Reads the index; provisions
-nothing; writes nothing unless <code>--out</code> is given.</p>
+<p>Validates the manifest, queries the index, applies filters, resolves tiles and epochs, resolves
+every categorical layer's classes against each contributing granule's embedded table, and writes
+the run directory: <code>manifest.merged.yaml</code>, the frozen <code>index.parquet</code>,
+<code>plan.json</code>, <code>work/{stage}.jsonl</code> and <code>report.md</code>. Provisions
+nothing and reads no pixels — headers, variable lists and class tables only.</p>
+
+<p>If <code>inputs.index</code> does not exist and <code>inputs.source</code> is
+<code>kind: local</code>, the index is built first, so a laptop run is one command.</p>
 
 <div class="tw">
 <table>
-<thead><tr><th>Option</th><th>Effect</th></tr></thead>
+<thead><tr><th>Option</th><th>Effect</th><th>Status</th></tr></thead>
 <tbody>
-<tr><td><code>--out PATH</code></td><td>Write the resolved plan and frozen candidate set locally</td></tr>
-<tr><td><code>--explain-filters</code></td><td>List the granules each filter removed, not just counts</td></tr>
-<tr><td><code>--no-cache-probe</code></td><td>Skip the cache probe; estimate as if nothing were cached</td></tr>
+<tr><td><code>--out PATH</code></td><td>The run directory. Default <code>{outputs.bucket}/runs/{run_id}</code>, with <code>outputs.bucket</code> a path relative to the manifest</td><td><span class="chip chip-locked">built</span></td></tr>
+<tr><td><code>--json</code></td><td>Print <code>run_id</code>, <code>run_dir</code>, the counts and the budget verdict as JSON</td><td><span class="chip chip-locked">built</span></td></tr>
+<tr><td><code>--explain-filters</code></td><td>List the granules each filter removed, not just counts</td><td><span class="chip chip-open">not yet</span></td></tr>
+<tr><td><code>--no-cache-probe</code></td><td>Skip the cache probe; estimate as if nothing were cached</td><td><span class="chip chip-open">not yet</span></td></tr>
 </tbody>
 </table>
 </div>
 
-<p>Exit codes: <code>0</code> valid and within budget, <code>2</code> valid but over budget,
-<code>1</code> invalid.</p>
+<p>Exit codes: <code>0</code> valid and within budget, <code>2</code> valid but over budget
+(the plan is still written), <code>1</code> invalid. An empty selection — no granule survives the
+area, time and filters — is invalid, not an empty plan.</p>
 
 <h2 id="run">stratum run</h2>
 
-<pre><code>stratum run -m manifest.yaml [-p PATCH]... [--executor NAME]
-stratum run --from-provenance &lt;uri&gt;</code></pre>
+<pre><code>stratum run -m manifest.yaml [--workers N] [--out PATH] [--dry-run]</code></pre>
 
-<p>Executes the pipeline. With no <code>--executor</code> it runs here, in a process pool, and
-blocks until finished.</p>
+<p>Plans, then executes regrid → resolve → reduce → publish in a process pool on this machine,
+then writes the STAC collection and <code>provenance.json</code> and appends an execution table
+to <code>report.md</code>. Blocks until finished.</p>
 
 <div class="tw">
 <table>
-<thead><tr><th>Option</th><th>Effect</th></tr></thead>
+<thead><tr><th>Option</th><th>Effect</th><th>Status</th></tr></thead>
 <tbody>
-<tr><td><code>--executor NAME</code></td><td><code>local</code> (default), <code>slurm</code>, <code>aws</code></td></tr>
-<tr><td><code>--workers N</code></td><td><code>local</code>: pool size. Default one per core.</td></tr>
-<tr><td><code>--max-concurrent N</code></td><td><code>slurm</code>/<code>aws</code>: cap on simultaneous work items, so one run cannot take the whole partition or account</td></tr>
-<tr><td><code>--partition</code>, <code>--cpus-per-task</code>, <code>--mem</code>, <code>--time</code></td><td><code>slurm</code>: passed through to <code>sbatch</code></td></tr>
-<tr><td><code>--wait</code> / <code>--no-wait</code></td><td>Block until the run finishes. Default: wait for <code>local</code>, do not wait for the others.</td></tr>
-<tr><td><code>--from-provenance URI</code></td><td>Re-run against a previous run's frozen index rather than re-querying</td></tr>
-<tr><td><code>--dry-run</code></td><td>Equivalent to <code>plan</code></td></tr>
-<tr><td><code>--no-cache</code></td><td>Ignore cache hits and rebuild everything</td></tr>
-<tr><td><code>--no-cache-from STAGE</code></td><td>Rebuild from this stage onward — <code>glt</code>, <code>obs</code>, <code>snapshot</code>, <code>product</code></td></tr>
-<tr><td><code>--tag KEY=VALUE</code></td><td>Extra cost-allocation tags, repeatable</td></tr>
+<tr><td><code>--executor NAME</code></td><td><code>local</code> (default), <code>slurm</code>, <code>aws</code></td><td><span class="chip chip-locked">built</span> <code>local</code> only</td></tr>
+<tr><td><code>--workers N</code></td><td>Pool size. Default one per core. <code>1</code> runs every item in-process, which is the path to use under a debugger.</td><td><span class="chip chip-locked">built</span></td></tr>
+<tr><td><code>--out PATH</code></td><td>Run directory; default <code>{root}/runs/{run_id}</code></td><td><span class="chip chip-locked">built</span></td></tr>
+<tr><td><code>--dry-run</code></td><td>Equivalent to <code>plan</code></td><td><span class="chip chip-locked">built</span></td></tr>
+<tr><td><code>--from-provenance URI</code></td><td>Re-run against a previous run's frozen index rather than re-querying</td><td><span class="chip chip-open">not yet</span></td></tr>
+<tr><td><code>--max-concurrent N</code></td><td><code>slurm</code>/<code>aws</code>: cap on simultaneous work items</td><td><span class="chip chip-open">not yet</span></td></tr>
+<tr><td><code>--partition</code>, <code>--cpus-per-task</code>, <code>--mem</code>, <code>--time</code></td><td><code>slurm</code>: passed through to <code>sbatch</code></td><td><span class="chip chip-open">not yet</span></td></tr>
+<tr><td><code>--wait</code> / <code>--no-wait</code></td><td>Block until the run finishes. Default: wait for <code>local</code>, do not wait for the others.</td><td><span class="chip chip-open">not yet</span></td></tr>
+<tr><td><code>--no-cache</code>, <code>--no-cache-from STAGE</code></td><td>Ignore cache hits and rebuild from a stage onward</td><td><span class="chip chip-open">not yet</span></td></tr>
+<tr><td><code>--tag KEY=VALUE</code></td><td>Extra cost-allocation tags, repeatable</td><td><span class="chip chip-open">not yet</span></td></tr>
 </tbody>
 </table>
 </div>
 
-<p>A run over budget with <code>on_exceed: require_approval</code> pauses before provisioning
-anything and waits for <code>stratum approve</code>.</p>
+<p>A run over budget stops before the first stage with exit <code>2</code> unless the manifest
+says <code>on_exceed: warn</code>. <code>require_approval</code> also stops it today, because
+<code>stratum approve</code> does not exist yet; the message says so.</p>
 
-<p>Re-running the same manifest is cheap and safe: completed items are cache hits and are skipped,
-so an interrupted run resumes, and a run started on one executor can be finished on another.</p>
+<p>A run is all-or-nothing: any failed item stops it after its stage completes, with the failures
+listed and recorded in <code>work/{stage}.results.jsonl</code>. Re-running the same manifest is
+cheap and safe: completed regrid, resolve and reduce items are cache hits and are skipped, so an
+interrupted run resumes. Publish is never a hit — products are written fresh under the run id.</p>
 
 <h2 id="exec">stratum exec</h2>
 
-<pre><code>stratum exec --plan &lt;dir-or-uri&gt; --stage STAGE --index N
-stratum exec --plan &lt;dir-or-uri&gt; --stage STAGE --range A:B</code></pre>
+<pre><code>stratum exec --plan &lt;run-dir&gt; --stage STAGE --index N</code></pre>
 
-<p>Executes a single work item, or a contiguous slice, from a plan written by
-<code>stratum plan --out</code>. This is the worker entrypoint every executor ultimately calls, and
-it is what a scheduler array task should invoke:</p>
+<p>Executes a single work item from a run directory written by <code>stratum plan</code> and
+prints its outcome as one JSON line. This is the worker entrypoint every executor ultimately calls,
+and it is what a scheduler array task should invoke:</p>
 
 <pre><code>sbatch --array=0-724%64 --wrap \
   "stratum exec --plan $SCRATCH/run-01 --stage regrid --index \$SLURM_ARRAY_TASK_ID"</code></pre>
 
 <div class="tw">
 <table>
-<thead><tr><th>Option</th><th>Effect</th></tr></thead>
+<thead><tr><th>Option</th><th>Effect</th><th>Status</th></tr></thead>
 <tbody>
-<tr><td><code>--stage STAGE</code></td><td><code>regrid</code> | <code>resolve</code> | <code>reduce</code> | <code>publish</code></td></tr>
-<tr><td><code>--index N</code></td><td>Zero-based item index within that stage's work list</td></tr>
-<tr><td><code>--range A:B</code></td><td>A contiguous slice, for when per-item scheduler overhead dominates</td></tr>
-<tr><td><code>--force</code></td><td>Recompute even on a cache hit</td></tr>
+<tr><td><code>--stage STAGE</code></td><td><code>regrid</code> | <code>resolve</code> | <code>reduce</code> | <code>publish</code></td><td><span class="chip chip-locked">built</span></td></tr>
+<tr><td><code>--index N</code></td><td>Zero-based item index within that stage's work list</td><td><span class="chip chip-locked">built</span></td></tr>
+<tr><td><code>--range A:B</code></td><td>A contiguous slice, for when per-item scheduler overhead dominates</td><td><span class="chip chip-open">not yet</span></td></tr>
+<tr><td><code>--force</code></td><td>Recompute even on a cache hit</td><td><span class="chip chip-open">not yet</span></td></tr>
 </tbody>
 </table>
 </div>
 
-<p>Useful directly when debugging: it reproduces exactly what a Lambda or an array task did, on your
-machine, for one item.</p>
+<p>Useful directly when debugging: it reproduces exactly what a pool worker did, in your terminal,
+for one item.</p>
 
 <h2 id="status">stratum status</h2>
 
-<pre><code>stratum status --run RUN_ID [--watch] [--failed]</code></pre>
+<pre><code>stratum status --run RUN [--root ROOT] [--failed]</code></pre>
+
+<p><code>--run</code> is a run directory, or a run id looked up under <code>{ROOT}/runs/</code>.
+Prints, per stage, the number of work items, how many have a recorded outcome, how many succeeded,
+failed, and were cache hits.</p>
 
 <div class="tw">
 <table>
-<thead><tr><th>Option</th><th>Effect</th></tr></thead>
+<thead><tr><th>Option</th><th>Effect</th><th>Status</th></tr></thead>
 <tbody>
-<tr><td><code>--watch</code></td><td>Refresh until the run reaches a terminal state</td></tr>
-<tr><td><code>--failed</code></td><td>List failed work items with their errors</td></tr>
-<tr><td><code>--stage STAGE</code></td><td>Restrict to one stage</td></tr>
+<tr><td><code>--root PATH</code></td><td>Where to find <code>runs/</code> when <code>--run</code> is an id</td><td><span class="chip chip-locked">built</span></td></tr>
+<tr><td><code>--failed</code></td><td>List failed work items with their errors</td><td><span class="chip chip-locked">built</span></td></tr>
+<tr><td><code>--watch</code></td><td>Refresh until the run reaches a terminal state</td><td><span class="chip chip-open">not yet</span></td></tr>
+<tr><td><code>--stage STAGE</code></td><td>Restrict to one stage</td><td><span class="chip chip-open">not yet</span></td></tr>
 </tbody>
 </table>
 </div>
 
 <h2 id="report">stratum report</h2>
 
-<pre><code>stratum report --run RUN_ID [--diff PREVIOUS_RUN_ID] [--format md|json]</code></pre>
+<pre><code>stratum report --run RUN [--root ROOT]</code></pre>
 
-<p>Prints the run summary: granules considered and what each filter removed, cache hit rate by
-artifact type, failed blocks, cost against budget, the builds consumed and the class-table fingerprint validated.</p>
+<p>Prints <code>report.md</code>: the selection and what each filter removed, the builds consumed
+and the class-table fingerprint validated, the fan-out per stage, the budget verdict, and — once
+the run has executed — items, cache hits and seconds per stage.</p>
 
-<p><code>--diff</code> compares against an earlier run of the same manifest lineage. A large change
-in selected granules usually means an upstream reprocessing or an index rebuild, and is worth
-seeing before it becomes a mystery in the product.</p>
+<p><code>--diff PREVIOUS</code> and <code>--format md|json</code> are
+<span class="chip chip-open">not yet</span>. A large change in selected granules between runs of
+the same lineage usually means an upstream reprocessing or an index rebuild; until
+<code>--diff</code> exists, compare the two reports' selection sections.</p>
 
 <h2 id="approve">stratum approve / reject</h2>
 
-<pre><code>stratum approve --run RUN_ID [--note TEXT]
-stratum reject  --run RUN_ID [--note TEXT]</code></pre>
+<pre><code>stratum approve --run RUN_ID
+stratum reject  --run RUN_ID</code></pre>
 
-<p>Releases or cancels a run paused at the budget gate. The note is recorded in provenance. Applies to any executor.</p>
+<p><span class="chip chip-open">not yet</span> Both refuse with their spec section. Until they
+exist a run that exceeds its budget cannot be released; set <code>on_exceed: warn</code> to
+proceed, or raise the ceiling.</p>
 
 <h2 id="render">stratum render</h2>
 
-<pre><code>stratum render --run RUN_ID --mapper REF [--params JSON] [--tile TILE]...</code></pre>
+<pre><code>stratum render --run RUN_ID --mapper REF</code></pre>
 
-<p>Re-renders published data blocks with a different mapper. Does not re-run the pipeline — the
-image is a pure function of the data product and the mapper, so this costs seconds. Writes a new
-image and legend alongside the existing ones; the data product is untouched.</p>
+<p><span class="chip chip-open">not yet</span> The pieces it would call over published data —
+the config mappers and the image writer — exist and run inside <code>publish</code>; the
+standalone command does not.</p>
 
 <h2 id="cache">stratum cache</h2>
 
-<pre><code>stratum cache stats   [--run RUN_ID] [--type TYPE]
-stratum cache explain KEY
-stratum cache diff    KEY_A KEY_B
-stratum cache gc      [--dry-run] [--older-than PERIOD]</code></pre>
+<pre><code>stratum cache explain PATH
+stratum cache diff    PATH_A PATH_B</code></pre>
 
 <div class="tw">
 <table>
-<thead><tr><th>Subcommand</th><th>Does</th></tr></thead>
+<thead><tr><th>Subcommand</th><th>Does</th><th>Status</th></tr></thead>
 <tbody>
-<tr><td><code>stats</code></td><td>Hit rate by artifact type, and what a rerun would cost</td></tr>
-<tr><td><code>explain</code></td><td>Prints the <code>.inputs.json</code> that produced a key, plus who wrote it and who references it</td></tr>
-<tr><td><code>diff</code></td><td>Shows which input differs between two keys. The answer to "why did this miss?"</td></tr>
-<tr><td><code>gc</code></td><td>Removes unreferenced entries past their lifecycle. Always <code>--dry-run</code> first.</td></tr>
+<tr><td><code>explain</code></td><td>Prints the <code>.inputs.json</code> that produced an artifact. <code>PATH</code> is the artifact (<code>{hash}.tif</code>), its directory, or the sidecar itself</td><td><span class="chip chip-locked">built</span></td></tr>
+<tr><td><code>diff</code></td><td>Shows which input differs between two artifacts, nested fields as dotted names, a missing field as <code>None</code>. The answer to "why did this miss?"</td><td><span class="chip chip-locked">built</span></td></tr>
+<tr><td><code>stats</code></td><td>Hit rate by artifact type, and what a rerun would cost</td><td><span class="chip chip-open">not yet</span></td></tr>
+<tr><td><code>gc</code></td><td>Removes unreferenced entries past their lifecycle</td><td><span class="chip chip-open">not yet</span></td></tr>
 </tbody>
 </table>
 </div>
 
-<p>Artifact types for <code>--type</code>: <code>glt</code>, <code>obs</code>, <code>aux</code>,
-<code>snapshot</code>, <code>product</code>, <code>image</code>.</p>
+<p>Artifacts live under <code>{root}/cache/{type}/{grid}/{tx}_{ty}/</code> with type
+<code>glt</code> (one file), <code>snapshot</code> or <code>product</code> (a directory of
+single-band GeoTIFFs). Per-stage hit counts are in <code>stratum status</code> and in the
+report's execution table.</p>
 
 <h2 id="index">stratum index</h2>
 
-<pre><code>stratum index build  -m MANIFEST [--collection NAME] [--since DATE] [--until DATE]
-stratum index verify -m MANIFEST [--collection NAME]
-stratum index query  --index URI --bbox W,S,E,N --start DATE --end DATE</code></pre>
+<pre><code>stratum index build  -m MANIFEST [--collection NAME]... [--since DATETIME]
+stratum index query  --index PATH [--bbox W,S,E,N] [--start DATETIME] [--end DATETIME] [--collection NAME]... [--limit N]
+stratum index verify -m MANIFEST</code></pre>
 
 <div class="tw">
 <table>
-<thead><tr><th>Subcommand</th><th>Does</th></tr></thead>
+<thead><tr><th>Subcommand</th><th>Does</th><th>Status</th></tr></thead>
 <tbody>
-<tr><td><code>build</code></td><td>Populates or refreshes the GeoParquet index from <code>inputs.source</code> — a catalogue, or a directory. A periodic job, never part of a run.</td></tr>
-<tr><td><code>verify</code></td><td>Checks asset URIs resolve and reports rows not seen since the last build — how an upstream reprocessing is detected</td></tr>
-<tr><td><code>query</code></td><td>Ad-hoc query against a built index, without writing a manifest</td></tr>
+<tr><td><code>build</code></td><td>Populates <code>inputs.index</code> from <code>inputs.source</code>. A directory (<code>kind: local</code>) today; a catalogue later. Prints the row and granule counts</td><td><span class="chip chip-locked">built</span> local</td></tr>
+<tr><td><code>query</code></td><td>Ad-hoc query against a built index: a count and the first rows, with each granule's time, bbox and build</td><td><span class="chip chip-locked">built</span></td></tr>
+<tr><td><code>verify</code></td><td>Checks asset URIs resolve and reports rows not seen since the last build</td><td><span class="chip chip-open">not yet</span></td></tr>
 </tbody>
 </table>
 </div>
 
-<p><code>--since</code> passes through to the source as an updated-since filter, so a refresh is
-incremental <em>and</em> picks up granules that were re-delivered rather than newly acquired. See
+<p><code>--since</code> passes through to the source as an updated-since filter — for a directory,
+file modification time — so a refresh is incremental and picks up granules that were re-delivered
+rather than newly acquired. See
 <a href="../guide/reading-data.html#index">Building and refreshing the index</a>.</p>
 
 <div class="note">
   <span class="label">This is the only command that talks to a catalogue</span>
   <p><code>stratum plan</code>, <code>run</code> and <code>exec</code> read a frozen index and
-  never reach a live API. That is what makes a run reproducible, and what keeps a large fan-out
-  from rate-limiting an upstream service.</p>
+  never reach a live API. The one exception is convenience, not a query: <code>plan</code> builds a
+  missing index from a <em>local</em> directory. That is what makes a run reproducible, and what
+  keeps a large fan-out from rate-limiting an upstream service.</p>
 </div>
 
 <h2 id="plugins">stratum plugins</h2>
 
-<pre><code>stratum plugins list [--kind scorers|reducers|masks|filters|mappers|readers|sources]
-stratum plugins show REF</code></pre>
+<pre><code>stratum plugins list [--kind scorer|reducer|mask|filter|mapper|reader|source]
+stratum plugins show REF [--kind KIND]</code></pre>
 
-<p><code>list</code> enumerates what the current image or environment provides.
-<code>show</code> prints a plugin's capability, declared roles and aux, halo, and outputs — useful
-for checking what a manifest must supply before you run it.</p>
+<p><code>list</code> enumerates what the current environment provides, by entry-point group.
+<code>show</code> resolves <code>REF</code> — an entry-point name or <code>module:Class</code>,
+trying every registry when <code>--kind</code> is omitted — and prints its class, module,
+version, and what it declares: <code>capability</code>, <code>halo</code>,
+<code>required_roles</code>, <code>required_aux</code>, <code>space</code>, <code>outputs</code>,
+<code>collections</code>. Useful for checking what a manifest must supply before you run it.</p>
 
 <h2 id="validate">stratum validate</h2>
 
-<pre><code>stratum validate -m manifest.yaml [-p PATCH]...</code></pre>
+<pre><code>stratum validate -m manifest.yaml</code></pre>
 
-<p>Schema and cross-reference checks only. Does not touch the index or any ancillary source, so it
-works offline and is fast enough for a pre-commit hook. Use <code>plan</code> when you want the
-checks that need real data.</p>
+<p>Schema and cross-reference checks only: everything that can be checked without an index or a
+granule, reported as a list rather than the first failure. Prints <code>ok</code> and the
+<code>run_id</code>, or every problem and exit <code>1</code>. Works offline and is fast enough
+for a pre-commit hook. Use <code>plan</code> when you want the checks that need real data.</p>
 
 </div>
 <nav class="pager" aria-label="Pagination"></nav>
 <footer class="site">
   Specified across <a href="../specs/09-run-manifest.md"><code>specs/09</code></a>,
+  <a href="../specs/08-execution.md"><code>08</code></a>,
   <a href="../specs/06-caching.md"><code>06</code></a>,
   <a href="../specs/02-granule-index.md"><code>02</code></a>
 </footer>

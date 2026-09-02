@@ -327,11 +327,11 @@ manifest resolves it — which is what lets the same scorer run against a differ
     geometry: {collection: EMITL1BOBS,  var: obs}
     mineral:  {collection: EMITL2BMIN,  var: group_1_mineral_id}
     mask:     {collection: EMITL2AMASK, var: mask}
-  band_aliases:
-    view_zenith:  {role: geometry, band: 5}
+  band_aliases:                             <span class="c"># band: is a 0-based index into the role's variable</span>
+    view_zenith:  {role: geometry, band: 2}
     solar_zenith: {role: geometry, band: 4}</code></pre>
 
-<p>Your scorer then writes <code>obs["view_zenith"]</code>, never <code>obs[:, :, 5]</code>. If a
+<p>Your scorer then writes <code>obs["view_zenith"]</code>, never <code>obs[:, :, 2]</code>. If a
 plugin declares a role the manifest does not define, the run fails at plan time rather than in
 several thousand workers.</p>
 

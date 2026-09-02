@@ -160,9 +160,9 @@ class GranuleReader(Protocol):
     def geolocation(self, ctx) -> LocArray | None:
         """lat/lon/elev in sensor space. The regrid input; None when space == 'ortho'."""
 
-    def glt(self, ctx) -> GLT | None:
-        """The product's own lookup table on its own grid, if it ships one.
-        Feeds the warp_embedded regrid method - see 03 section 3."""
+    def glt(self, ctx) -> GLT | EmbeddedGLT | None:
+        """The product's own lookup table on its own grid, if it ships one - an EmbeddedGLT,
+        11 section 7. Feeds the warp_embedded regrid method - see 03 section 3."""
 
     def class_table(self, ctx, path: str, key: str, attributes) -> ClassTable | None:
         """Pull an embedded table out of the granule being read — see 11 section 9."""
@@ -184,6 +184,42 @@ Five rules:
    the file carries — in `VarSpec.band_attrs`, and it may subset or resample as it reads. The
    framework asks for a variable and a window and interprets nothing else. Every deployment writes
    at least a score function and a reader; the core never learns what either means.
+
+### As built
+
+`stratum/access/readers.py` and `stratum_emit/readers/` settle these:
+
+- **Instantiation.** A reader class is instantiated with no arguments and cached per
+  `(collection, ref)` in the process; readers hold no per-file state (that is the
+  `NetCDFContext`), so sharing is safe. There is deliberately **no** check that a reader's
+  `collections` tuple names the requested collection: a manifest `readers:` override exists
+  precisely to map a foreign collection (the `tetrapy` flavour) onto an existing reader.
+- **Fill handling** (rule 2, [11 §2](11-types.md)). `read` masks `_FillValue` and, for float
+  variables, non-finite values too; the dtype is never changed and the fill stays under the
+  mask. `geolocation()` departs by design: plain `float64` with `NaN` fills, because it is the
+  KD-tree input only and the regrid wrapper consumes `NaN`.
+- **Class tables** (`class_table`, [11 §9](11-types.md)). Columns come back in the order asked,
+  `[key, *attributes]`. A group that does not exist yields `None` — the product ships no table;
+  a column that does not exist raises `KeyError` — the manifest named it. Variable-length
+  strings become `pa.string`; unsigned ints keep their width.
+- **The shipped GLT** (`glt`, [11 §7](11-types.md)). Returned as an `EmbeddedGLT` with band 3
+  = `(glt_x != 0) & (glt_y != 0)`, the transform from the file's `geotransform` (GDAL order) and
+  the `spatial_ref` WKT verbatim; `None` when any of those is missing.
+- **Contexts** (rule 3). One `open` per distinct asset URI per observation — `MIN` and
+  `MINUNCERT` are two opens, `group_1` and `group_2` of one file are one — closed in a
+  `finally`; a context is never kept across observations or shipped across processes
+  (netCDF4 datasets are neither fork-safe nor picklable, which is why the local executor uses a
+  spawn pool, [08 §1](08-execution.md)).
+- **Coverage.** `L2BMin` is exercised on the reference granule and the trial data. `L1BObs`
+  and `L2AMask` are written from SpectralUtil's `open_emit_obs_nc` / `open_emit_l2a_mask_nc`
+  layouts (`obs` / `mask` over `(downtrack, crosstrack, bands)`, names in
+  `sensor_band_parameters/observation_bands|mask_bands`); OBS is now exercised by the trial run,
+  MASK only on synthetic files that copy that layout. `L2BFrcov` opens and reports `variables()`
+  so plan-time validation works, and `read` raises `NotImplementedError` naming §2: the
+  ortho-native path is a later slice.
+- `LOCAL_PATTERNS` — the EMIT filename globs a `LocalSource` needs — lives in
+  `stratum_emit.readers`, not core: filename conventions are domain knowledge (the layering
+  rule in [11 §9](11-types.md)).
 
 ### The L2B gap is a reader, not a patch
 
@@ -210,7 +246,12 @@ class AssetStore:
     def credentials_for(self, uri: str) -> Credentials
 ```
 
-Schemes: `file://`, `s3://`, and `https://` behind Earthdata Login.
+Schemes: `file://`, `s3://`, and `https://` behind Earthdata Login. The first slice
+(`stratum/access/store.py`) opens `file://` and bare paths only and raises `NotImplementedError`
+for the rest; stage-in is the identity. A local asset must **exist at `open()`** —
+`FileNotFoundError` — so a bad URI fails in plan-time validation (§7), not in a worker. Paths are
+made absolute without resolving symlinks, so the filename the granule id was derived from is
+preserved.
 
 | Mode | How | When |
 |---|---|---|
@@ -421,10 +462,16 @@ Without it, the archive changes underneath a stable query and nothing says so.
 
 ```yaml
 inputs:
+  index: ./index.parquet        # built here by `stratum plan` when absent
   source:
     kind: local
-    root: ./granules
-    pattern: "EMIT_L2B_MIN_*.nc"
+    root: ../../trial-data      # relative to the manifest
+    patterns:                   # {collection: {asset: glob}}; the id is what `*` matched
+      EMITL2BMIN:
+        MIN: "EMIT_L2B_MIN_001_*.nc"
+        MINUNCERT: "EMIT_L2B_MINUNCERT_001_*.nc"
+      EMITL1BOBS:
+        OBS: "EMIT_L1B_OBS_001_*.nc"
 ```
 
 `LocalSource` walks the directory and reads each file's header once, producing the same GeoParquet
@@ -433,6 +480,25 @@ laptop run possible with no network and no Earthdata account.
 
 Nothing downstream can tell which source built the index — which is the test that this seam is in
 the right place.
+
+The contracts `stratum/access/sources.py` fixes:
+
+| Rule | Contract |
+|---|---|
+| Pattern shapes | The primary form is `patterns: {collection: {asset: glob}}`. The long form `{collection: {version: "001", assets: {asset: glob}}}` pins a `collection_version` explicitly, detected by an `assets` key whose value is a mapping — so an asset literally named `assets` needs the long form. The one-glob `pattern:` is honoured only when every role reads **one** collection and agrees on its asset; the planner turns it into `{collection: {asset: glob}}` and refuses otherwise |
+| Granule id | The filename minus the glob's literal prefix and suffix: `EMIT_L2B_MIN_*.nc` over `EMIT_L2B_MIN_001_20260825T151308_2623710_050.nc` gives `001_20260825T151308_2623710_050`, so the `MIN` and `MINUNCERT` files of one granule land in one record as two assets |
+| Header source | The header is read from the **first asset in sorted name order** (`MIN` before `MINUNCERT`) — global attributes only, never a variable. A file lacking `time_coverage_start/end` or the four `*most_*` attributes raises `ValueError` naming the file rather than being dropped silently, which is the failure mode [02 §4](02-granule-index.md) warns about |
+| Attributes | Every scalar global attribute verbatim; arrays (`geotransform`) are not index attributes; numpy scalars become Python scalars. Absent `build_version`/`product_version` are stored as `""`, and the built-in equality filters treat `""` as missing so `on_missing` governs it |
+| `collection_version` | The pinned value → the id's leading all-digit token (`001`) → the header's `product_version` without its `V` → `""` |
+| `cloud_fraction` | `None`, always: absent locally, which is meaningful. A `max_cloud_fraction` filter with the default `on_missing: fail` therefore refuses every granule of a local source |
+| `search` | `bbox`, `start`, `end`, `collections` are all optional (an index build passes none). `updated_since` filters on file **modification time**, the nearest local analogue of a catalogue revision date; naive datetimes are UTC |
+| `checksums` | Empty. There is no catalogue checksum for a local file, and a size/mtime stand-in would leak locality into cache keys, which §4 forbids. `build_index` calls `source.checksums(record)` only when the source defines it |
+
+`stratum index build -m manifest.yaml` is the explicit build and the only path that takes
+`--since` / `--collection`. `stratum plan` builds `inputs.index` implicitly when the file is
+absent **and** the source is local, indexing every collection in `patterns`, so a laptop run is
+one command. `LocalSource` understands NetCDF headers with ACDD names only; an ENVI or other
+local source would need a header-reader hook (question 8).
 
 ---
 
@@ -455,7 +521,9 @@ inputs:
 that `stratum index build -m manifest.yaml` is driven by the same document a run is, and so
 provenance can record where the index came from ([10](10-provenance.md)). A field that one command
 uses and another ignores is a mild wart, and the alternative — a second config file that must be
-kept in step with the first — is a worse one. See open question 1.
+kept in step with the first — is a worse one. See open question 1. `index` and `source` are each
+optional, and at least one is required; a run whose `index` file is absent gets it built from a
+`local` source and is refused for any other kind (§5).
 
 ---
 
@@ -472,6 +540,17 @@ All of this fails in the plan stage, before compute is provisioned:
 
 The rule is the same one the aux accessor follows: a typo fails in the planner, not in four
 thousand workers ([05 §5](05-ancillary-data.md)).
+
+As built (`stratum/plan/run.py`, `inspect_granules`): the first three checks and the sensor-space
+one run against every contributing granule's header — `variables()` and the embedded class table,
+never a pixel; `band:` is validated against the band count and `match:` resolved to an index; a
+scheme other than `file://` is refused as a later slice rather than checked for credentials. One
+more check belongs here and exists: a granule lacking an asset for **any role that will be read**
+— the schema's sources, the scorer's and every mask's `required_roles` through their aliases, and
+the geolocation role — is dropped by the planner and counted as a filter row ("provides an asset
+for every role read …"), so the report and provenance say so. Resolve raises on such a granule,
+which a planned run therefore never reaches. On the trial data this is what removes MIN-only
+granules when the scorer needs OBS geometry.
 
 ---
 
@@ -498,4 +577,13 @@ thousand workers ([05 §5](05-ancillary-data.md)).
    band centres, if anyone wants it, is a reader's business, done as it reads.
 6. ~~**Transcode assets on first touch** into tiled per-variable COGs in the deployment cache
    (§4)?~~ **Resolved:** yes. Every asset is prepared once on first touch and cached by its checksum
-   (§4).
+   (§4). Not built yet; the trial confirmed the cost it removes — every observation read decodes
+   the whole 1664 × 1242 variable, cheap at int16 but paid per (granule, block).
+7. CMR has no `EMITL1BOBS` short name: `earthaccess.search_data(short_name="EMITL1BOBS")` returns
+   nothing, and the OBS file is the second asset of an `EMITL1BRAD.001` record beside
+   `EMIT_L1B_RAD_*.nc`. The manifests name `EMITL1BOBS` because `LocalSource` lets them; a
+   `CMRSource` must map `{collection: EMITL1BRAD, asset: OBS}` — the same one-record-several-files
+   shape as `MIN`/`MINUNCERT` — and the example manifests will need to follow.
+8. `LocalSource` reads NetCDF headers with ACDD attribute names and nothing else. A local ENVI
+   source — the `tetrapy` / cluster `.img` case in §3 — needs a header-reader hook that has not
+   been designed.

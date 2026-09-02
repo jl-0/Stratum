@@ -130,6 +130,32 @@ A raw class no member claims is governed by `unmapped`: `fail` (the default) sto
 lists them; a class name routes them there, so a product can declare an explicit `other` rather
 than silently dropping what it does not track.
 
+The resolution rules `stratum/classes.py` fixes:
+
+- `class_table()` **includes the reserved `(0, none)` row**, so `ignore: [none]`, legends and the
+  shipped product table all name it. Raw key `0` maps to product id `0` and is never reported as
+  unmapped. Product ids are bounded `1..65534`, because categorical storage is `uint16` with
+  `65535` as nodata (§4); `classes: source` refuses a raw table with keys above that.
+- A raw row matched by two members is an error even when both belong to one class. Attribute
+  equality crosses the YAML/pyarrow type gap by string comparison (`record: 882` matches `"882"`).
+  Keys beyond the raw table's range map to unmapped (`-1`) rather than raising.
+- **`classes: source`** is `identity_enumeration`: it matches on the key column *plus every
+  attribute column*, so it resolves only against a row-for-row identical table — which is the
+  fingerprint-agreement rule, and why `allow_mixed_vintage` cannot relax it; a real
+  mixed-vintage run needs an `@ref:` enumeration. The product table is the first (sorted)
+  granule's `(id, name)`; the other attribute columns survive only as the recorded raw
+  fingerprint. Duplicate raw names are disambiguated as `name#key` (the delivered table has
+  eleven names that appear twice, so twenty-two entries carry a suffix and a consumer matching
+  names against the USGS library will not find `Azurite WS316 W1R1Ba#56` — match on
+  `(library, record)` instead).
+- **The remap is applied per layer at the gather**, through the planner's per-granule lookup
+  (rule 3); an unmapped raw class makes the cell invalid for the whole observation. The
+  block-space `ObsWindow` bands stay *raw*, because two layers may remap one source differently
+  and a scorer is not supposed to interpret class integers; "nothing after resolve sees a raw
+  class" is honoured by the snapshot, not by the observation.
+- `plan.json` stores remaps per layer as `{tables: {raw_fingerprint: {lookup, enumeration}},
+  granules: {granule_id: fingerprint}}` — one lookup per vintage, not per granule.
+
 **What this does to the vintage check.** The plan-time rule in [02 §3](02-granule-index.md) —
 contributing class tables must agree by fingerprint — remains the default. With a schema it has a
 principled relaxation: tables that *differ* are admissible under `allow_mixed_vintage: true`
@@ -150,10 +176,32 @@ the manifest. A `Reducer` plugin ([04 §5](04-cost-functions.md)) is for what th
 |---|---|---|
 | `vote` | `min_count`, `ignore` (class names), `tie_break: earliest \| latest \| highest_score \| nodata` | `<layer>`, `<layer>_agreement`, `<layer>_runner_up` |
 | `best` | — | `<layer>` from the epoch with the highest `score` |
-| `none` | — | Nothing. Carried for another layer's `conditional_on`, or for a custom reducer |
+| `none` | — | Nothing. Carried for a custom reducer. A `none` categorical layer has no winner, so it **cannot** be the target of `conditional_on` — that needs `vote` or `best` |
 
 `vote` follows the decision order in [04 §5](04-cost-functions.md) exactly. `agreement` is the
 modal count over `n_epochs`, so ignored-but-observed epochs lower it, deliberately.
+
+Defaults and semantics the built-in reducer fixes (`stratum/reduce/`), where the table above is
+silent:
+
+| Rule | Contract |
+|---|---|
+| Delivered categorical nodata | `65535`; `none` stays `0`. Categorical bands are `uint16`, continuous `float32` with `NaN`, counts (`n_epochs`, `<layer>_n`) `uint16` with no nodata, whatever `LayerSpec.dtype` says about the snapshot ([11 §2](11-types.md)) |
+| `min_count` | `1` when omitted — the value under which a single epoch reduces to itself with no special case |
+| `tie_break` | `nodata` when omitted: refuse to choose unless the schema says how. Among tied classes with equal tie keys the lowest product id wins, so the result is deterministic |
+| `agreement` | `modal_count / n_epochs`, reported even where the layer is suppressed by `min_count` or a refused tie — it describes the tally, not the decision. `NaN` where `n_epochs == 0`; `0.0` where every valid epoch was ignored (the layer is then nodata) |
+| `runner_up` | The second-most-frequent class under the same `tie_break`; nodata wherever the layer is nodata |
+| `ignore` with one epoch | Every observed cell whose only class is ignored delivers **nodata**, with `agreement 0` and `n_epochs 1`: literal step 4 of [04 §5](04-cost-functions.md), and exactly the `0`-vs-nodata conflation [11 §2](11-types.md) warns about, surfacing at the product. On the trial tile that is 73 % of observed cells. Only `n_epochs` then separates "observed, nothing identified" from "never observed". Single-epoch products should say `ignore: []` — question 5 |
+| `score_weighted` | weights `= score − min(score over the aggregated epochs) + 1e-6`: scores are only an ordering (`MinViewZenith`'s are negative), equal scores reduce to a plain mean, the lowest-scoring epoch gets weight ε |
+| `inverse_variance` | Epochs whose uncertainty is `NaN` or `≤ 0` are dropped from both the estimate and `<layer>_n`; a single-band `unc` layer weights every band of a multi-band value layer |
+| Non-finite values | Inside a valid epoch they are skipped by every continuous statistic but still count toward `<layer>_n`; a cell with nothing aggregated delivers `NaN` and count `0`. `best` (either kind) treats an epoch with `NaN` score as unusable |
+| Epoch order | `reduce_stack` sorts epochs by `Epoch.start` internally rather than trusting array order, so `earliest`/`latest` are well defined |
+| Masked input | A layer arriving as a masked array has its mask folded into that layer's validity beside `snaps.valid`; a negative value in a categorical layer under `valid` raises — sentinels must be masked before reduce |
+
+`delivered_bands(schema)` derives `BandSpec.bands` from `LayerSpec.bands` (its length, else 1);
+the schema alone cannot know a `bands: None` multi-band source's width, so the planner records
+`band_counts` from the source `VarSpec` and publish passes it through ([11 §8](11-types.md)). A
+continuous multi-band layer is delivered as `(H, W, B)`.
 
 ### Continuous
 
@@ -192,7 +240,7 @@ The schema enters two cache keys, and the split is what keeps iteration cheap ([
 
 | Hash | Covers | Enters |
 |---|---|---|
-| `layers_hash` | Every layer's `name`, `kind`, `dtype`, `source`, and for categorical layers every `(id, name)` in the enumeration | The epoch-snapshot key |
+| `layers_hash` | Every layer's `name`, `kind`, `dtype`, `source`, `bands`, and for categorical layers every `(id, name)` in the enumeration **and** the enumeration document's fingerprint (`LayerSpec.lumping`: `match_on`, `unmapped`, every member) | The epoch-snapshot key |
 | `aggregate_hash` | Every layer's `aggregate` block | The product-block key |
 
 Changing an aggregation method re-runs reduce and publish only. Changing what a snapshot *holds*
@@ -202,7 +250,12 @@ re-runs resolve — from cached GLTs, never a regrid. Within that, three tiers:
 |---|---|---|
 | **Append** classes to an enumeration — new ids, nothing renumbered or renamed | Still valid | None. Declare the predecessor in `extends` and the planner accepts its snapshots |
 | **Add** a layer | Lack it | Resolve re-runs for every epoch that lacks the layer |
-| **Redefine** — change a layer's `kind`, `dtype` or `source`; rename, renumber or remove a class; remove a layer | Invalid | Resolve re-runs for every epoch |
+| **Redefine** — change a layer's `kind`, `dtype` or `source`; rename, renumber or remove a class; change a member's attributes so a raw class lumps differently; remove a layer | Invalid | Resolve re-runs for every epoch |
+
+Re-lumping is in the invalid tier even when every id and name is unchanged: the members are what
+decide which raw class lands in which product id, so a snapshot written under the old members
+holds different values. That is why the enumeration fingerprint, not only the `(id, name)` table,
+is in `layers_hash`. The `extends` probe below is specified but not yet built.
 
 Append is the tier that makes a long-lived product practical, so it is mechanical rather than
 trusted:
@@ -253,3 +306,17 @@ compatibility; it either extends its ancestor or it does not.
    recorded beside it?~~ **Resolved:** both. The classes file carries `name` and `version`, the
    manifest lists ancestors by name, and the planner records each ancestor's `layers_hash` beside it
    in `.inputs.json` and provenance.
+5. Should `vote` deliver `none` (`0`) rather than nodata where every valid epoch was ignored? As
+   built it follows [04 §5](04-cost-functions.md) step 4 literally, and a single-epoch product
+   with `ignore: [none]` turns "observed, nothing identified" into nodata on most of the tile
+   (§4). The alternative — deliver `0`, let `agreement` say it was ignored — keeps the
+   `-9999`-vs-`0` distinction at the product surface. Until decided, the recommendation is
+   `ignore: []` for single-epoch products.
+6. Two class-table fingerprints are in flight: `plan.json`, the report and provenance carry the
+   **raw** table's (every attribute column), while the STAC item's
+   `stratum:class_table_fingerprint` is the **product** `(id, name)` table's. `classes.json`
+   links them through its `source` field, but the STAC name suggests the vintage fingerprint.
+   Name both, or ship both on the item ([10 §4](10-provenance.md)).
+7. One product, one class table: `product_class_table` refuses a schema whose categorical layers
+   carry different tables. `mineral_1`/`mineral_2` share one enumeration today; a product whose
+   layers do not will need per-layer `classes.json` and colour tables ([07 §2](07-output-mapping.md)).

@@ -2,8 +2,10 @@
 
 A cost-function-driven mosaic engine for imaging spectroscopy, built to run in the cloud.
 
-> **Status: design.** No implementation yet. Everything here is specification and interface
-> design, deliberately ahead of code. "Stratum" is a working name.
+> **Status: first slice built (2026-09-02).** A local run — staged granules, one grid, the
+> streaming scorer, the built-in reducer, published COGs with STAC and provenance — exists and is
+> tested; the cloud and cluster paths are specified but not built. See
+> [`docs/status.html`](docs/status.html). "Stratum" is a working name.
 
 ## What this is
 
@@ -68,6 +70,7 @@ locally or browse it on GitHub Pages.
 | [`docs/specs/`](docs/specs/) | Component specifications, `00`–`13`. **Authoritative** — contracts, invariants, citations |
 | [`docs/decisions/`](docs/decisions/) | Architecture decision records |
 | [`docs/notes/heritage.md`](docs/notes/heritage.md) | Internal: prior art, where the historical code lives, why choices were made |
+| [`docs/notes/2026-09-02-first-slice-plan.md`](docs/notes/2026-09-02-first-slice-plan.md) | Internal: the build contract the first slice was written against — scope, module boundaries, internal signatures |
 | [`refs/`](refs/) | Reference material from the existing pipelines, kept verbatim |
 
 The site documents the tool. The specs state the contracts. Heritage and rationale stay in
@@ -78,7 +81,7 @@ The site documents the tool. The specs state the contracts. Heritage and rationa
 | Repo | Relationship |
 |------|--------------|
 | `SpectralUtil` | **Wrapped, not forked.** Provides the KD-tree GLT build. Two upstream contributions wanted: a pluggable selection seam, and persisting the score band. |
-| `emit-sds-l3` | V002 reference implementation, and the parity target for the first slice. |
+| `emit-sds-l3` | V002 reference implementation, and the parity target for the first slice. No V002 output was available locally, so the first parity check ran against SpectralUtil's `build_obs_nc` over the same grid instead. |
 | `EMIT-AMD` | Precedent for deferred reduction and for the lumping/colour config. Cluster-specific; not reusable directly. |
 | `tetracorder-lite` | Upstream L2B producer. Its reference matrix is the source of the class table each granule embeds. |
 

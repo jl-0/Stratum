@@ -12,6 +12,14 @@ Grounded in a real delivered granule:
 `software_build_version 010635`. Observations from that file are marked **[observed]**; anything
 else is a design decision.
 
+> **The code is authoritative for signatures.** Every type below lives in
+> `src/stratum/types.py` (the hook protocols in `src/stratum/hooks.py`), and where a field list
+> here and the dataclass disagree, the dataclass is right and this document is the thing to fix.
+> This spec is the narrative — why a type is shaped the way it is and what the delivered data
+> constrains — and the code blocks are illustrations, not a second copy. Additive changes made
+> while building the first slice are marked **[design]** in the section where the type lives;
+> they describe the reason and point at the module rather than repeating the field.
+
 ---
 
 ## 1. Coordinate spaces
@@ -148,6 +156,14 @@ a filter can pin any of them when there is a reason to ([02 §3](02-granule-inde
 `GranuleFrame` is the plural form: a dataframe with these as columns, which is what
 `GranuleFilter.keep()` receives. Filters are vectorized over it and never see individual granules.
 
+**[design]** `GranuleRef` also carries `checksums`, keyed like `assets`: the catalogue's per-file
+checksum, which is the asset identity that enters the masked-observation key
+([12 §4](12-data-access.md)). A source with no catalogue checksum — `LocalSource` — leaves it
+empty rather than inventing a size/mtime stand-in, and the observation key then carries
+`checksum: null` for that role; locality must never leak into a key. `attributes` is
+`Mapping[str, str]`: the map column cannot hold null, so `None`-valued source attributes are
+dropped and the promoted columns are excluded from it (`src/stratum/index/build.py`).
+
 > **[observed] Vintage identifiers.** The granule carries `software_build_version` (`010635`),
 > `software_delivery_version`, and `product_version` (`V001`). Its `history` attribute names
 > `tetracorder5.27c.cmds`, confirming this file predates the Tetracorder 6 reprocessing. CMR
@@ -237,6 +253,23 @@ class Coords:
 `coords` is what lets a scorer do its own geometry against a declared vector source
 ([05 §3](05-ancillary-data.md)) without the framework growing a spatial-join vocabulary.
 
+**[design] Two attributes added while building resolve**, both optional keywords with defaults
+so no existing construction changed (`src/stratum/types.py`, `ObsWindow.__init__`):
+
+- `sensor_shape` — the *full* `(downtrack, crosstrack)` of the variable the window was cut from,
+  `VarSpec.shape[:2]`; `None` in block space. `SensorWindow` says where the window *starts*; only
+  the full shape says where the detector *ends*, and `EdgeTrim` needs both to trim the far edge
+  (`src/stratum_emit/masks/__init__.py`). It comes from the geolocation role's variable when that
+  role is read, else the first role read; every role read must agree on it, because one GLT
+  indexes one sensor array ([12 §2](12-data-access.md)).
+- `band_attrs` — per role or alias, the `VarSpec.band_attrs` the reader reported, never
+  interpreted by the core. `L2AStandard` selects mask bands by their reported `name` through it
+  rather than by a positional guess ([04 §3](04-cost-functions.md)).
+
+In sensor space the bands are masked arrays; in block space they are plain arrays with `valid`
+carried beside them. A multi-band role appears as `(H, W, B)` under the role name as well as
+through its aliases, so a `bands:` layer subset has something to index.
+
 ### Aliases, not indices
 
 `obs["view_zenith"]`, never `obs[:, :, 5]`. The manifest maps aliases to `(role, band)` per
@@ -310,9 +343,20 @@ Bands are `(GLT X, GLT Y, File Index)`, 1-based, `0` = nodata, negatives = inter
 always `1` and is kept for interoperability; `granule_id` and `grid.id` are in the file's metadata
 ([03 §2](03-regrid-glt.md)).
 
-`score` is not optional in practice — persisting it is a requirement from
-[03 §2](03-regrid-glt.md), since "why did this pixel win?" must be answerable from the artifact.
-It is typed optional only because a GLT read back from a V002-era file will not have one.
+`score` is typed optional, and for a GLT regrid writes it **is** `None`: a per-granule GLT is
+built before any selection happens, so there is no winning score to persist. "Why did this pixel
+win?" is answered from the epoch snapshot's `score` layer instead ([03 §2](03-regrid-glt.md),
+[13 §2](13-snapshot-schema.md)). The field is kept so a GLT read back from a fused, V002-era file can
+carry the score that file has.
+
+**[design] `EmbeddedGLT`** (`src/stratum/types.py`, directly after `GLT`) is the type for the
+lookup table a product ships on its *own* ortho grid — the **[observed]** `location/glt_x`,
+`glt_y` below. It is not on any Stratum grid, so unlike `GLT` it has no `grid`, `tile` or
+`granule`; it carries its own `transform` (from the file's `geotransform`) and `crs` (the
+`spatial_ref` WKT), and a third band `hit` mirroring Stratum's file-index band.
+`GranuleReader.glt()` returns one (§10) and `warp_embedded` consumes it. Keeping it a separate
+type is what stops a granule-ortho array being mistaken for a tile-grid one — the confusion §1
+warns about.
 
 > **[observed] The granule already ships a GLT.** `location/glt_x` and `location/glt_y`
 > (`int32`, `_FillValue = 0`; observed ranges 1–1242 crosstrack, 1–1664 downtrack) map the
@@ -377,6 +421,20 @@ class BandStack:
     def __getitem__(self, band: str) -> np.ndarray:   # (H, W)
     specs: Sequence[BandSpec]
 ```
+
+**[design] Three additive changes from the build** (`src/stratum/types.py`):
+
+- `LayerSpec.dtype` is optional at manifest level and filled by the planner from the source
+  `VarSpec`, so `layers_hash` is final in `plan.json` and asserted on reload; categorical layers
+  default to `uint16`. `LayerSpec.classes` is likewise `None` for `classes: source` until the
+  planner substitutes the granules' own table ([13 §3](13-snapshot-schema.md)).
+- `LayerSpec.lumping` holds `Enumeration.fingerprint()` — the whole enumeration document, members
+  included — and enters `identity()`, so a change to *which raw classes* map to a product id
+  moves `layers_hash` even when every `(id, name)` is unchanged. Without it a re-lumped schema
+  would read stale snapshots as hits ([06 §3](06-caching.md) rule 1, [13 §5](13-snapshot-schema.md)).
+- `BandSpec.bands` (default `1`) says how many bands a delivered band keeps from a multi-band
+  layer, because the schema alone cannot know a `bands: None` source's width; the reducer's
+  `band_counts(snaps)` supplies it from a real stack ([13 §2](13-snapshot-schema.md)).
 
 ### What a snapshot holds
 
@@ -519,7 +577,7 @@ class GranuleReader(Protocol):
     def variables(self, ctx: ReaderContext) -> Mapping[str, VarSpec]: ...
     def read(self, ctx, var: str, window: SensorWindow | None = None) -> MaskedArray: ...
     def geolocation(self, ctx) -> LocArray | None: ...
-    def glt(self, ctx) -> GLT | None: ...      # the product's own lookup table, on its grid
+    def glt(self, ctx) -> GLT | EmbeddedGLT | None: ...   # the product's own lookup table, on its grid
     def class_table(self, ctx, path: str, key: str, attributes) -> ClassTable | None: ...
 
 class GranuleSource(Protocol):
@@ -568,7 +626,15 @@ class Credentials:
 
 `LocArray` is the geolocation triple `geolocation()` returns — `lat`, `lon` and `elev`, each
 `(downtrack, crosstrack)` `float64` in sensor space with fills already masked. It is the KD-tree
-input and nothing else consumes it ([03 §3](03-regrid-glt.md)).
+input and nothing else consumes it ([03 §3](03-regrid-glt.md)). **[design]** The EMIT readers
+return it as plain arrays with `NaN` fills rather than masked arrays — a deliberate departure from
+rule 2 below, because the regrid wrapper consumes `NaN` and nothing in the science tier ever sees
+a `LocArray`; the wrapper drops masked *or* non-finite points and does not recognise `-9999`.
+
+**[design]** `GranuleReader.glt()` returns `GLT | EmbeddedGLT | None` — widened from `GLT | None`
+when the embedded type was added (§7); nothing else in the protocol changed. Readers are
+instantiated with no arguments and cached per process (`src/stratum/access/readers.py`); they
+hold no per-file state — that is the `ReaderContext` — so sharing one across granules is safe.
 
 Three properties are worth stating as type-level guarantees, because each has a failure mode that
 is invisible if it is left to convention:
@@ -624,3 +690,6 @@ Recorded so nobody re-derives them.
 4. ~~Should `ClassTable` be `pyarrow.Table`, or a plain dataclass of columns?~~ **Resolved:**
    `pyarrow.Table`. Fingerprinting and attribute matching are easy, and GeoParquet already implies
    it.
+5. `GranuleReader.glt()` returning two types is a seam that `warp_embedded` (not yet built) will
+   have to dispatch on. Whether `GLT` should stop being a reader return type altogether — a reader
+   never produces a tile-grid GLT — is a question for the wave that builds `warp_embedded`.

@@ -1,0 +1,104 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "stratum"
+version = "0.0.1"
+description = "Cost-function-driven mosaic engine for imaging spectroscopy"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "Apache-2.0" }
+dependencies = [
+  "numpy>=1.26",
+  "pydantic>=2.5",
+  "click>=8.1",
+  "pyarrow>=15",
+  "pandas>=2.1",
+  "shapely>=2.0",
+  "affine>=2.4",
+  "pyyaml>=6",
+  "xarray>=2024.1",
+  "rasterio>=1.3",
+  "rioxarray>=0.15",
+  "scipy>=1.11",
+  "duckdb>=0.10",
+  "earthaccess>=0.9",
+  "netCDF4>=1.6,<1.7.1",
+  # spectral-util is NOT listed here: it has no PyPI release, and a non-editable install of
+  # the upstream repo ships no subpackages (its pyproject lists packages = ["spectral_util"]
+  # only). It comes from the vendor/SpectralUtil submodule via pixi - ADR-0001 section 3.
+]
+
+[project.scripts]
+stratum = "stratum.cli:main"
+
+# Plugin registration - spec 04 section 7. Names are what a manifest `ref` uses.
+[project.entry-points."stratum.scorers"]
+min_view_zenith   = "stratum_emit.scorers:MinViewZenith"
+cleanest_nadir    = "stratum_emit.scorers:CleanestNadir"
+prefer_bare_earth = "stratum_emit.scorers:PreferBareEarth"
+max_band_depth    = "stratum_emit.scorers:MaxBandDepth"
+
+[project.entry-points."stratum.masks"]
+edge_trim     = "stratum_emit.masks:EdgeTrim"
+slit_dust     = "stratum_emit.masks:SlitDust"
+l2a_standard  = "stratum_emit.masks:L2AStandard"
+soil_fraction = "stratum_emit.masks:SoilFraction"
+
+[project.entry-points."stratum.readers"]
+EMITL2BMIN   = "stratum_emit.readers:L2BMin"
+EMITL1BOBS   = "stratum_emit.readers:L1BObs"
+EMITL2AMASK  = "stratum_emit.readers:L2AMask"
+EMITL2BFRCOV = "stratum_emit.readers:L2BFrcov"
+
+[project.entry-points."stratum.sources"]
+cmr   = "stratum.access.sources:CMRSource"
+local = "stratum.access.sources:LocalSource"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/stratum", "src/stratum_emit"]
+
+# ---- environment: pixi / conda-forge (ADR-0001 section 2) ----
+[tool.pixi.workspace]
+channels = ["conda-forge"]
+platforms = ["osx-arm64", "linux-64"]
+
+[tool.pixi.dependencies]
+python = "3.11.*"
+gdal = "*"
+netcdf4 = "<1.7.1"
+rasterio = "*"
+rioxarray = "*"
+xarray = "*"
+numpy = "*"
+scipy = "*"
+pyarrow = "*"
+pandas = "*"
+shapely = "*"
+duckdb = "*"
+pydantic = ">=2.5"
+click = "*"
+pyyaml = "*"
+affine = "*"
+earthaccess = "*"
+pytest = "*"
+ruff = "*"
+
+[tool.pixi.pypi-dependencies]
+stratum = { path = ".", editable = true }
+# The KD-tree regrid is wrapped, not forked (spec 03 section 4). The submodule pins the
+# commit; editable because upstream's non-editable build drops its subpackages.
+spectral-util = { path = "vendor/SpectralUtil", editable = true }
+
+[tool.pixi.tasks]
+test = "pytest"
+lint = "ruff check src tests"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = ["trial_data: needs granules under trial-data/ or STRATUM_TRIAL_DATA"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"

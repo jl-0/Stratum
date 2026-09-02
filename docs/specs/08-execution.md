@@ -42,7 +42,31 @@ Consequences worth stating:
 - `stratum exec --plan … --stage … --index N` is the single worker entrypoint. A SLURM array task
   and a Lambda invocation both reduce to it, which is what keeps the three paths from diverging.
 - Storage is a URI or a path. `{root}/cache/...` is a directory or an `s3://` prefix; layout and
-  keys are identical.
+  keys are identical. `{root}` is `outputs.bucket`; locally that is a path relative to the
+  manifest, and `cache/`, `runs/{run_id}/` and `products/{run_id}/` hang off it exactly as they
+  would in a bucket ([06 §4](06-caching.md)).
+
+### The `local` executor as built
+
+`stratum/executors/local.py` is the only executor in the first slice; `slurm` and `aws` are
+refused by name with this section cited.
+
+| Property | Contract |
+|---|---|
+| Unit of work | `exec_item(run_dir, stage, index)` — the same function `stratum exec` calls; the plan is loaded once per process |
+| Pool | `--workers 1` runs every item in-process (debuggable); more uses a **spawn**-context `ProcessPoolExecutor`, because netCDF4/HDF5 are not fork-safe and a reader context is not picklable |
+| Outcomes | `work/{stage}.results.jsonl`, one line per item: `index`, `ok`, the key or the error plus traceback, `hit`, `seconds` — written whether or not the stage succeeded, so `stratum status` can say what happened |
+| Failure | All-or-nothing: any failed item raises after the stage completes, listing the failures. §4's tolerated percentage is a later slice |
+| Order | regrid → resolve → reduce → publish, then Finalize: the STAC collection, `provenance.json` ([10 §2](10-provenance.md)) and an execution section appended to `report.md` |
+| Budget gate | Runs before the first stage ([09 §4](09-run-manifest.md)): over budget refuses unless `on_exceed: warn`; `require_approval` refuses too, naming `stratum approve` as the later slice (§3) |
+| Exit codes | `0` ok; `1` invalid or failed; `2` valid but over budget — from both `plan` and `run` |
+
+Every handler recomputes the content-addressed keys of its inputs exactly as the producing stage
+did, so a missing input is a clear error and a present one is a hit whoever wrote it; a re-run of
+a finished run reports every regrid, resolve and reduce item as a hit and rewrites publish, which
+is run-prefixed and never a hit. A spawn pool costs about 2.5 s per stage even when every item is
+a hit, so a fully cached local re-run is ~11 s on the trial tile
+([notes/heritage.md](../notes/heritage.md), "First measurements").
 
 ### SLURM
 
@@ -209,3 +233,11 @@ versus experimentation, or a different region — never for an experiment.
    goes (§2).
 4. ~~Is `ToleratedFailurePercentage` acceptable for a delivered product, or must delivery runs be
    all-or-nothing?~~ **Resolved:** tolerate in experiments; delivery runs are all-or-nothing.
+5. The router in §2 needs per-stage constants, and the budget's `max_vcpu_hours` is reported as
+   "not estimated" until they exist. The first measurements are in
+   [notes/heritage.md](../notes/heritage.md): regrid scales with a granule's coverage of the tile
+   (3–19 s per granule single-threaded), resolve and reduce are ~0.5 s per 720 × 720 block with up
+   to 14 candidates, publish ~1.6 s per tile. Turning those into an estimate is the next step.
+6. The local executor's regrid items run the KD-tree query single-threaded inside a pool that
+   already fills the node. A SLURM task should set `n_workers` from `$SLURM_CPUS_PER_TASK`
+   ([03 §3](03-regrid-glt.md)); the local pool may want fewer, fatter regrid workers.

@@ -136,10 +136,53 @@ that upstream now ships. Do not repeat that.
 
 ---
 
-## 7. Related documents
+## 7. First measurements
+
+**2026-09-02**, the first-slice trial (`examples/trial-nevada/`): tile (−118, 41), June 2026,
+`MinViewZenith`, 14 L2B MIN + 14 L1B OBS granules staged locally, one arcsecond, `block: 720`.
+Apple Silicon laptop, 18 CPUs, local disk, pixi environment. Wall-clock unless noted.
+
+| Step | Measurement |
+|---|---|
+| OBS fetch (earthaccess, 14 × ~108 MB, 4 threads) | 42.7 s |
+| Index build over `trial-data/` (1293 files, header reads only) | 4.1 s standalone; `stratum plan` end to end incl. the implicit build, asset check, class-table inspection, freeze, work lists, report: 5.4 s |
+| First full `stratum run` (18 spawn workers) | 39.7 s = plan ~5 s + regrid 27.7 s (14 items, 4.3–25.0 s each, median 17.0 s, 203 s CPU under 14-way contention) + resolve 4.2 s (25 blocks, median 0.51 s) + reduce 3.9 s (median 0.52 s) + publish 1.6 s |
+| Isolated regrid, no contention | granule covering 49 % of the tile: 19.3 s with `n_workers=1`, 11.3 s with 4; granule covering 0.7 %: 3.2 s / 1.9 s. KD-tree query ≈ 60 % of it |
+| Re-run of the finished run | 11.4 s; regrid/resolve/reduce all hits at 2.4–2.9 s per stage (the spawn pool's floor), publish 1.6 s (never a hit) |
+| Parity variant (same GLT keys, `pixel_mask: []`, `ignore: []`) | 15.6 s; regrid 14/14 hits |
+| `build_obs_nc` over the same grid, 14 OBS files, `n_cores 4` | 84.9 s (loads the whole 70 MB `obs` cube per file); gather through the fused GLT 0.4 s |
+| Cache footprint after both runs | GLT 35 MB (14), snapshot 27 MB per run, product 5.3 MB per run; products 7 MB per run; 166 MB total |
+
+**Parity.** `parity.py` builds the fused GLT with `spectral_util.mosaic.mosaic.build_obs_nc`
+over exactly the trial grid (its `target_extent_ul_lr` are cell *centres*, so the corners are
+offset by half a cell), `criteria_band 2` (to-sensor zenith, as stored), `criteria_mode min`,
+`max_distance 0.000589256` (1.5 × the diagonal), the file list in granule-id order — the same
+order resolve's candidate loop uses, both strict comparisons so the earliest wins a tie. Result on
+12,957,415 valid cells (0.9998 of the tile): fused-only 0, Stratum-only 0, fused hits landing on
+a fill MIN pixel 0, `mineral_1` agreement **1.000000**, view zenith identical to < 10⁻⁴ °. An
+independent scipy KDTree check per granule (nearest within `max_distance`, minimum zenith,
+earliest wins) on 3000 random valid cells: 3000/3000. The one structural difference —
+`build_obs_nc` runs a second `remove_negatives` over the *fused* GLT, Stratum only per granule —
+zeroed nothing here. With `edge_trim` on (the main run) 4,723 cells seen only by a swath's outer
+seven columns become nodata; otherwise the main run equals the parity run wherever valid.
+
+**Findings worth carrying.** (1) The delivered L2B is one gzip chunk per variable, so every
+observation read decodes the full 1664 × 1242 array — cheap at int16, but it is why prepared
+assets (12 §4) matter before a fan-out. (2) `ignore: [none]` over one epoch delivers 73.5 % of
+observed cells as nodata (13 §7). (3) The granule's `/mineral_metadata` has eleven duplicate
+names; `classes: source` suffixes the later one `#id`. (4) Products and GLTs fail GDAL's COG
+validator (no `LAYOUT=COG`, no overviews) while the STAC media type claims COG (03 §6). (5) CMR
+has no `EMITL1BOBS` short name; OBS is the second asset of `EMITL1BRAD.001` (12 §8).
+
+---
+
+## 8. Related documents
 
 - [`2026-08-28-cloud-mosaic-proposal.html`](2026-08-28-cloud-mosaic-proposal.html) — the original
   research write-up, with the full service-limit analysis. Archived; superseded by the specs.
 - [`2026-08-28-mines-tagup.md`](2026-08-28-mines-tagup.md) — external group building the same thing;
   source of the detector-edge numbers, FRCOV as an input, and the bare-earth scorer.
 - [`../specs/`](../specs/) — the specs carry these citations inline where a contract depends on one.
+- [`2026-09-02-first-slice-plan.md`](2026-09-02-first-slice-plan.md) — the build contract the
+  first slice was written against; §5 lists the decisions made while building and the spec each
+  landed in.

@@ -24,8 +24,9 @@
 
 <div class="gen">
   <span class="label">Generated later</span>
-  <p>Field lists are hand-written for now and will be extracted from the source once the package
-  exists. For how to use these types, see <a href="../guide/plugins.html">Writing plugins</a>.</p>
+  <p>Field lists are hand-written against <code>src/stratum/types.py</code>, which is
+  authoritative, and will be extracted from it. For how to use these types, see
+  <a href="../guide/plugins.html">Writing plugins</a>.</p>
 </div>
 
 <h2 id="stability">Stability</h2>
@@ -45,11 +46,11 @@ against. <span class="chip chip-draft">open</span> means a field may still be ad
 <tr><td><code>ObsWindow</code></td><td>In <code>Scorer.score()</code>, <code>PixelMask.valid()</code></td><td><span class="chip chip-locked">locked</span></td></tr>
 <tr><td><code>AuxAccessor</code></td><td>In every hook</td><td><span class="chip chip-locked">locked</span></td></tr>
 <tr><td><code>SnapshotStack</code></td><td>In <code>Reducer.reduce()</code></td><td><span class="chip chip-locked">locked</span></td></tr>
-<tr><td><code>SnapshotSchema</code>, <code>LayerSpec</code></td><td>Via <code>snaps.schema</code>; you declare them in the manifest</td><td><span class="chip chip-draft">open</span> — new in spec 13</td></tr>
+<tr><td><code>SnapshotSchema</code>, <code>LayerSpec</code></td><td>Via <code>snaps.schema</code>; you declare them in the manifest</td><td><span class="chip chip-locked">locked</span></td></tr>
 <tr><td><code>BandStack</code></td><td>In <code>OutputMapper.render()</code></td><td><span class="chip chip-locked">locked</span></td></tr>
 <tr><td><code>BandSpec</code></td><td>You declare these</td><td><span class="chip chip-locked">locked</span></td></tr>
-<tr><td><code>GLT</code></td><td>Only if you work with geometry directly</td><td><span class="chip chip-locked">locked</span></td></tr>
-<tr><td><code>ClassTable</code></td><td>Via the class-table API</td><td><span class="chip chip-draft">open</span> — backing container undecided</td></tr>
+<tr><td><code>GLT</code>, <code>EmbeddedGLT</code></td><td>Only if you work with geometry directly</td><td><span class="chip chip-locked">locked</span></td></tr>
+<tr><td><code>ClassTable</code></td><td>Via the class-table API</td><td><span class="chip chip-locked">locked</span> — backed by <code>pyarrow.Table</code></td></tr>
 </tbody>
 </table>
 </div>
@@ -74,9 +75,11 @@ one axis.</p>
     granule: GranuleRef | <span class="k">None</span>    <span class="c"># None in stack mode</span>
     granules: Sequence[GranuleRef]
     epoch: Epoch                  <span class="c"># the epoch being resolved</span>
+    sensor_shape: tuple[int, int] | <span class="k">None</span>   <span class="c"># FULL (downtrack, crosstrack) of the variable; sensor space only</span>
+    band_attrs: Mapping[str, Mapping[str, Sequence]]   <span class="c"># per role/alias, what the reader reported per band</span>
 
     <span class="k">def</span> __getitem__(self, alias: str) -&gt; np.ndarray:
-        <span class="c">"""Band by alias. (H, W) streaming, (N, H, W) stacked."""</span>
+        <span class="c">"""Band by alias. (H, W) streaming, (N, H, W) stacked; (H, W, B) for a multi-band role."""</span>
 
     @property
     <span class="k">def</span> coords(self) -&gt; Coords:
@@ -113,6 +116,13 @@ its own geometry against a declared vector source.</p>
 <p>Address bands by alias, never index. Aliases are declared in the manifest per collection, so an
 alias-based plugin runs against a different instrument unchanged. An alias the manifest does not
 define is a plan-time error.</p>
+
+<p>Two fields exist for sensor-space masks. <code>sensor_shape</code> is the full extent of the
+sensor array, not the window's: <code>sensor_window</code> says where your window starts, and
+only the full shape says where the detector ends, which is what an edge trim needs.
+<code>band_attrs</code> carries whatever the reader reported per band — names, wavelengths —
+so a mask can pick "Cloud flag" by name rather than by position. In sensor space bands are masked
+arrays; in block space they are plain arrays and <code>valid</code> is beside them.</p>
 
 <h2 id="aux">AuxAccessor</h2>
 
@@ -169,7 +179,7 @@ scorer, mask, reducer or mapper never sees one. See
     <span class="k">def</span> variables(self, ctx) -&gt; Mapping[str, VarSpec]: ...
     <span class="k">def</span> read(self, ctx, var: str, window: SensorWindow | <span class="k">None</span> = <span class="k">None</span>) -&gt; MaskedArray: ...
     <span class="k">def</span> geolocation(self, ctx) -&gt; LocArray | <span class="k">None</span>: ...
-    <span class="k">def</span> glt(self, ctx) -&gt; GLT | <span class="k">None</span>: ...      <span class="c"># the product's own lookup table, if it ships one</span>
+    <span class="k">def</span> glt(self, ctx) -&gt; GLT | EmbeddedGLT | <span class="k">None</span>: ...   <span class="c"># the product's own lookup table, if it ships one</span>
     <span class="k">def</span> class_table(self, ctx, path, key, attributes) -&gt; ClassTable | <span class="k">None</span>: ...
 
 <span class="k">class</span> GranuleSource(Protocol):
@@ -264,7 +274,8 @@ scorer, mask, reducer or mapper never sees one. See
     collection_version: str       <span class="c"># "001"     the collection's version</span>
     cloud_fraction: float | <span class="k">None</span>
     day_night: str | <span class="k">None</span>       <span class="c"># "Day"        [observed]</span>
-    attributes: Mapping[str, str] <span class="c"># the source's remaining fields, verbatim</span></code></pre>
+    attributes: Mapping[str, str] <span class="c"># the source's remaining fields, verbatim</span>
+    checksums: Mapping[str, str]  <span class="c"># asset name -&gt; catalogue checksum; empty for a directory source</span></code></pre>
 
 <p><code>GranuleFrame</code> is the plural form — a dataframe with these as columns, which is what
 <code>GranuleFilter.keep()</code> receives. Operate on it vectorized.</p>
@@ -294,10 +305,11 @@ Filters take an explicit <code>on_missing</code> policy rather than guessing.</p
     name: str
     kind: Literal[<span class="k">"categorical"</span>, <span class="k">"continuous"</span>]
     source: str                           <span class="c"># role or band alias - one namespace</span>
-    dtype: str
-    bands: tuple[int, ...] | <span class="k">None</span>         <span class="c"># subset of a multi-band source; None = all</span>
-    classes: ClassTable | <span class="k">None</span>            <span class="c"># the enumeration; categorical only</span>
     aggregate: Aggregation                <span class="c"># method + params</span>
+    dtype: str | <span class="k">None</span>                     <span class="c"># filled from the source band at plan time; categorical -&gt; uint16</span>
+    bands: tuple[int, ...] | <span class="k">None</span>         <span class="c"># subset of a multi-band source; None = all</span>
+    classes: ClassTable | <span class="k">None</span>            <span class="c"># the enumeration's product table; categorical only</span>
+    lumping: str | <span class="k">None</span>                   <span class="c"># fingerprint of the whole enumeration document; in layers_hash</span>
 
 @dataclass(frozen=<span class="k">True</span>)
 <span class="k">class</span> SnapshotSchema:
@@ -317,6 +329,7 @@ Filters take an explicit <code>on_missing</code> policy rather than guessing.</p
     description: str
     units: str = <span class="k">"unitless"</span>
     nodata: float | int | <span class="k">None</span> = <span class="k">None</span>
+    bands: int = 1                        <span class="c"># &gt;1 when the band keeps a layer's band axis</span>
 
 <span class="k">class</span> SnapshotStack:
     <span class="c">"""Reducer input. Epoch-major."""</span>
@@ -347,6 +360,12 @@ observation over a pixel must not count toward an agreement fraction, and
 <p><code>snaps.score</code> carries the score that won each cell in each epoch, so an aggregation
 can weight by confidence instead of treating every epoch equally.</p>
 
+<p><code>lumping</code> is why re-lumping an enumeration — changing which raw classes a product
+id gathers, with every id and name unchanged — still invalidates snapshots: the members decide
+the values a snapshot holds. <code>BandSpec.bands</code> exists because the schema alone cannot
+know the width of a <code>bands: None</code> source; the planner records it from the reader and
+the reducer's <code>band_counts()</code> can produce it from a real stack.</p>
+
 <h2 id="glt">GLT</h2>
 
 <p>You only touch this if you work with geometry directly; ordinary plugins never see one.</p>
@@ -374,8 +393,24 @@ can weight by confidence instead of treating every epoch equally.</p>
 interpolated cell — one whose nearest source pixel lay beyond <code>max_distance</code>. Take the
 absolute value to index, and check the sign when you care whether the data was reached for.</p>
 
-<p><code>score</code> is typed optional only because a GLT written by an older tool will not carry
-one. Stratum always writes it.</p>
+<p><code>score</code> is <code>None</code> for every GLT Stratum writes: a per-granule GLT is
+built before any selection, so there is no winning score to carry. The score that won each cell
+is in the epoch snapshot (<code>snaps.score</code>) instead. The field exists so a fused GLT
+written by another tool can carry the score it has.</p>
+
+<h3 id="embedded-glt">EmbeddedGLT</h3>
+
+<pre><code>@dataclass
+<span class="k">class</span> EmbeddedGLT:
+    data: np.ndarray              <span class="c"># (H, W, 3) int32: GLT X, GLT Y, hit</span>
+    transform: Affine             <span class="c"># the product's own ortho grid</span>
+    crs: str                      <span class="c"># WKT, as the file carries it</span></code></pre>
+
+<p>What <code>GranuleReader.glt()</code> returns: the lookup table a product ships on its
+<em>own</em> ortho grid, with its own georeferencing. It is not on any run grid — no
+<code>grid</code>, <code>tile</code> or <code>granule</code> — and is what the
+<code>warp_embedded</code> regrid method (not yet built) warps onto a tile. Band 3 is <code>1</code>
+wherever bands 1&ndash;2 are set, mirroring the file-index band of a Stratum GLT.</p>
 
 <h2 id="classtable">ClassTable</h2>
 
@@ -396,7 +431,8 @@ it.</p>
 different vintages. Refer to classes by <strong>attribute</strong> wherever you name one, and
 Stratum resolves attributes to integers per granule at plan time. It also fingerprints every
 contributing table and fails if they disagree, unless a cross-vintage remap is explicitly
-permitted.</p>
+permitted. Product ids run <code>1…65534</code>; <code>0</code> is reserved for <code>none</code>
+and <code>65535</code> is the delivered nodata.</p>
 
 <p>Products publish their own class table: after lumping, a mosaic's classes are not its inputs'
 classes.</p>
@@ -411,7 +447,8 @@ classes.</p>
 <tbody>
 <tr><td>Sensor grid</td><td>1664 &times; 1242 <code>(downtrack, crosstrack)</code></td></tr>
 <tr><td>Granule ortho grid</td><td>2363 &times; 2309</td></tr>
-<tr><td>Class table</td><td><code>/mineral_metadata</code>, 294 entries, columns <code>index, record, name, library, group, url</code></td></tr>
+<tr><td>Class table</td><td><code>/mineral_metadata</code>, 294 entries, columns <code>index, record, name, library, group, url</code>. Eleven names appear twice; <code>classes: source</code> suffixes the later one <code>#index</code></td></tr>
+<tr><td>L1B OBS bands (0-based)</td><td>0 path length, 1 to-sensor azimuth, <strong>2 to-sensor zenith</strong>, 3 to-sun azimuth, <strong>4 to-sun zenith</strong>, 5 phase, 6 slope, 7 aspect, 8 cosine i, 9 UTC time, 10 earth&ndash;sun distance</td></tr>
 <tr><td>Mineral groups present</td><td>Two — <code>group_1_*</code> and <code>group_2_*</code></td></tr>
 <tr><td>Band depth range</td><td>0.0 &ndash; 0.5</td></tr>
 <tr><td>Conventions</td><td><code>CF-1.13</code> / <code>NCEI_NetCDF_Swath_Template_v2.0</code></td></tr>

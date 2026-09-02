@@ -319,6 +319,21 @@ class PreferBareEarth:
         return s
 ```
 
+```python
+class MaxBandDepth:
+    """The strongest absorption feature wins. Needs only the L2B depth role, so it
+    runs over a directory of L2B files with no L1B OBS companion. Not nadir-preferring."""
+    capability = "streaming"
+    required_roles = ("mineral_depth",)
+
+    def score(self, obs, aux):
+        return obs["mineral_depth"]
+```
+
+`MaxBandDepth` exists because the most common local situation is a directory of L2B granules and
+nothing else. It is shipped as `max_band_depth` and is a trial scorer, not a product one: it
+prefers the deeper feature over the more nadir look, which is the wrong bias for a base map.
+
 The two thresholds are deliberate. `hard_floor=0.65` is V002's cutoff, chosen because grain-size
 retrieval "completely falls apart" below it; `min_soil=0.80` is the higher bar recommended for
 mosaicking. Keeping them separate lets the scorer *rank* between 0.65 and 0.80 rather than
