@@ -103,6 +103,10 @@ class BlockRef:
     def transform(self) -> Affine: ...
 ```
 
+A tile is the cells whose centres fall inside its nominal bounds, so `TileRef.shape` may differ by
+one cell between neighbours when `tile_size` is not a whole number of cells, and `bounds` is the
+lattice rectangle rather than the nominal one ([01 §1](01-grid-tiling.md)).
+
 Two windows, deliberately. Plugins compute over `window`; the framework writes only `core_window`.
 That is the whole halo mechanism ([01 §4](01-grid-tiling.md)), and keeping it in the type rather
 than in caller code is what stops a plugin author getting it wrong.

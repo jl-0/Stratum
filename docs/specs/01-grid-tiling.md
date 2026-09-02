@@ -16,18 +16,26 @@ Consequently any tile derived from a grid aligns with any other tile from the sa
 ```yaml
 grid:
   crs: EPSG:4326
-  resolution: [0.0003, -0.0003]    # x positive, y negative
+  resolution: [0.000277778, -0.000277778]   # one arcsecond, 1/3600; x positive, y negative
   origin: [-180, -90]
   tile_size: 1.0
-  block: 512
+  block: 720                       # divides the 3600-cell tile exactly
 ```
 
-Cell edges are at `origin + n × resolution`. Deriving tile bounds from the grid rather than from
+Cell edges are at `origin + n × resolution`, and **a tile is the set of cells whose centres fall
+inside its nominal bounds**. When `tile_size` is a whole number of cells, as in the example, every
+tile is the same shape and its edges sit exactly on the nominal lines. When it is not — 1° at
+0.0003° is 3333.33 cells — tiles are still cut on the one lattice, so neighbours never overlap and
+never gap, but they differ by one cell in size and their edges miss the nominal line by under a
+cell. That is the difference from V002 and AMD, which cut each tile from its own corner and overlap
+by a fraction of a cell. Deriving tile bounds from the grid rather than from
 data extents is what makes GLTs shareable between runs and between projects — a GLT computed for
 Critical Minerals is byte-identical to one computed for AMD over the same ground at the same grid.
 
 Precedent: V002 uses 0.00055° (~60 m) with 5° cells; EMIT-AMD uses 0.0003° (~30 m) with 1° bins.
-Neither is inherited by default. **Grid choice is a manifest decision**, and blocks make tile size
+Neither is inherited by default. Both are expressible; neither divides its tile into whole cells.
+The example grid is one arcsecond — 3600 cells per degree, about 31 m at the equator — chosen so
+that it does. **Grid choice is a manifest decision**, and blocks make tile size
 much less load-bearing than it was for either.
 
 ### Guard rails
@@ -35,6 +43,8 @@ much less load-bearing than it was for either.
 Carried over from `build_obs_nc`, which already refuses the classic mistake:
 
 - reject a positive `y` resolution unless explicitly forced — it is almost always an error;
+- warn when `tile_size` is not a whole number of cells: the run is correct, but tiles will differ
+  by a cell and a tile's bounds will not be the round numbers its name suggests;
 - reject `resolution > 1` with a `4xxx` EPSG — metres and degrees confused;
 - warn when a tile at the configured resolution exceeds a cell count that will not fit a worker.
 
@@ -68,21 +78,21 @@ AMD asks Slurm for 32 GB, 4 CPUs and up to 24 h per 1° bin, because a materiali
 stack over a whole tile is enormous. Ported naively that is a large, long, expensive Batch job
 where one late failure discards everything.
 
-| Materialized stack | 1° tile | 512×512 block |
+| Materialized stack | 1° tile | 720×720 block |
 |---|---:|---:|
-| Cells | 11.1 M | 0.26 M |
-| × 100 obs × 10 bands × float32 | ~44 GB | ~1.0 GB |
+| Cells | 12.96 M | 0.52 M |
+| × 100 obs × 10 bands × float32 | ~52 GB | ~2.1 GB |
 | Observations intersecting the unit | all | a subset |
 | Fits a 10 GB Lambda | no | **yes** |
-| Blast radius of one failure | whole tile | 1/42 of a tile |
+| Blast radius of one failure | whole tile | 1/25 of a tile |
 
-Three things follow: the materialized reduction fits a serverless worker; parallelism rises ~40×,
+Three things follow: the materialized reduction fits a serverless worker; parallelism rises 25×,
 which matters against a 10,000-child Distributed Map; and retries get cheap enough to make Spot
 safe.
 
-**Blocks clip to the AOI, like tiles.** A 1° tile at 0.0003° is ⌈3334/512⌉² = 49 blocks if fully
+**Blocks clip to the AOI, like tiles.** A 1° tile at one arcsecond is (3600/720)² = 25 blocks if fully
 covered, but the planner emits work items only for blocks that intersect the AOI, so a real tile
-usually carries fewer. The ratios above are areas — one block is 1/42 of a tile's *area* — and are
+usually carries fewer. The ratios above are areas — one block is 1/25 of a tile's *area* — and are
 not a work-item count.
 
 A second argument, independent of the stack: `write_cog` materializes the full array plus a GDAL
@@ -119,7 +129,7 @@ The framework materializes `halo` extra pixels around each block, runs the plugi
 before writing. A plugin needing a genuinely global view declares `capability = "tile"` and routes
 to Batch, giving up block parallelism honestly rather than corrupting results quietly.
 
-Halo cost is `(1 + 2h/B)²`: at `B=512`, a 1-pixel halo costs 0.8%, a 32-pixel halo 13%.
+Halo cost is `(1 + 2h/B)²`: at `B=720`, a 1-pixel halo costs 0.6%, a 32-pixel halo 19%.
 
 ---
 
@@ -135,8 +145,9 @@ Not a product decision, so tune it freely:
 | Parallelism and retry granularity | smaller |
 | Source chunk alignment (COG internal tiling, typically 512) | align to it |
 
-Default **512**, aligned with typical COG internal tiling so windowed reads do not straddle
-chunks. Expect to revisit once a pilot zone has been measured.
+Default **512**, the usual COG internal tile. Prefer a size that divides the tile when one exists —
+720 for a 3600-cell tile — so there is no sliver at the edge; any multiple of 16 is a valid COG tile
+and Stratum writes its own COGs to match. Expect to revisit once a pilot zone has been measured.
 
 ---
 

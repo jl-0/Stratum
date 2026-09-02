@@ -33,11 +33,11 @@ description: Critical Minerals annual mineral ID, 4 pilot zones
 
 grid:
   crs: EPSG:4326
-  resolution: [0.0003, -0.0003]
+  resolution: [0.000277778, -0.000277778]   # one arcsecond
   tile_size: 1.0
   origin: [-180, -90]
-  block: 512
-  max_distance: 0.00064       # regrid cutoff; default 1.5 x the grid diagonal - see 03 section 3
+  block: 720                  # divides the 3600-cell tile exactly
+  max_distance: 0.00059       # regrid cutoff; default 1.5 x the grid diagonal - see 03 section 3
   regrid_method: kdtree       # kdtree | warp_embedded - see 03 section 3
   # force_positive_y: true    # only to defeat the guard rail in 01 section 1
 

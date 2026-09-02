@@ -95,10 +95,10 @@ cand = frozen_index.intersecting(block, epoch)
 
 <h3 id="window">Why step 2 is the whole trick</h3>
 
-<p>A 512 &times; 512 block at 0.0003&deg; spans 0.1536&deg; &mdash; about 17 km at the equator, or
-roughly 285 &times; 285 of a granule's 60 m pixels, and fewer in longitude as you move away from
+<p>A 720 &times; 720 block at one arcsecond spans 0.2&deg; &mdash; about 22 km at the equator, or
+roughly 370 &times; 370 of a granule's 60 m pixels, and fewer in longitude as you move away from
 it. The granule itself is 1664 &times; 1242. Reading the whole scene for every block would read
-about twenty-five times more data than the block needs &mdash; and pay it again for every granule,
+about fifteen times more data than the block needs &mdash; and pay it again for every granule,
 in every epoch.</p>
 
 <div class="tw">
@@ -106,7 +106,7 @@ in every epoch.</p>
 <thead><tr><th>Approach</th><th>Read per block, per granule</th></tr></thead>
 <tbody>
 <tr><td>Open the granule, take what you need</td><td>The whole scene &mdash; ~2.1 M pixels per variable</td></tr>
-<tr><td>Window from the GLT first</td><td>~81 k pixels &mdash; under 4%</td></tr>
+<tr><td>Window from the GLT first</td><td>~137 k pixels &mdash; under 7%</td></tr>
 </tbody>
 </table>
 </div>

@@ -55,10 +55,10 @@ it.</p>
 
 grid:
   crs: EPSG:4326
-  resolution: [0.0003, -0.0003]
+  resolution: [0.000277778, -0.000277778]   <span class="c"># one arcsecond</span>
   origin: [-180, -90]
   tile_size: 1.0
-  block: 512
+  block: 720
 
 aoi:
   zones: [cuprite-nv]
@@ -136,7 +136,7 @@ fan-out — tiles &times; epochs &times; blocks &times; granules — before a wo
 <pre><code>$ stratum plan -m manifest.yaml
 
 Manifest      cuprite-2024  (sha256:9f2c1ab8…)
-Grid          EPSG:4326 @ 0.0003°, tile 1.0°, block 512        [emit30]
+Grid          EPSG:4326 @ 1 arcsec, tile 1.0°, block 720       [emit30]
 Area          1 zone → 2 tiles
 Time          2024-01-01 … 2024-12-31 → 1 epoch, 1 delivery period
 
@@ -145,7 +145,7 @@ Granules      1 284 candidates
               =  725  selected          class table: 1 fingerprint (sha256:4e1a…)
                                         builds: 010632, 010635
 
-Work          725 regrid · 84 resolve · 0 reduce · 2 publish
+Work          725 regrid · 46 resolve · 0 reduce · 2 publish
 Cache         GLT 681/725 hit (94%)  →  44 to build
 Estimate      3.1 GB read · ~11 vCPU-hours · ~28 min wall
 

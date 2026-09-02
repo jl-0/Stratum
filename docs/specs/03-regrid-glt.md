@@ -71,8 +71,8 @@ Unchanged from `SpectralUtil` — this is good code and we wrap rather than reim
 6. Clean contiguous interpolated regions — **a 3×3 `convolve2d`, and therefore a stencil**; see
    halos in [01 §4](01-grid-tiling.md).
 
-Cost is dominated by step 3: ~1.6 M granule points against ~11 M grid cells for a 1° tile at
-0.0003°. This is the expensive step, and the reason it is cached.
+Cost is dominated by step 3: ~1.6 M granule points against ~13 M grid cells for a 1° tile at
+one arcsecond. This is the expensive step, and the reason it is cached.
 
 ### Two methods
 

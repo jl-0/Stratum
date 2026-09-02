@@ -60,11 +60,11 @@
 
 <pre><code>grid:
   crs: EPSG:4326
-  resolution: [0.0003, -0.0003]
+  resolution: [0.000277778, -0.000277778]   <span class="c"># one arcsecond</span>
   origin: [-180, -90]
   tile_size: 1.0
-  block: 512
-  max_distance: 0.00064      # regrid cutoff; default 1.5 x the grid diagonal</code></pre>
+  block: 720
+  max_distance: 0.00059      # regrid cutoff; default 1.5 x the grid diagonal</code></pre>
 
 <div class="tw">
 <table>
@@ -73,8 +73,8 @@
 <tr><td><code>crs</code></td><td>string</td><td>—</td><td>Any CRS string GDAL accepts</td></tr>
 <tr><td><code>resolution</code></td><td>[float, float]</td><td>—</td><td><code>(x, y)</code>. <code>y</code> must be negative unless <code>force_positive_y</code> is set</td></tr>
 <tr><td><code>origin</code></td><td>[float, float]</td><td>—</td><td>Cell edges fall at <code>origin + n × resolution</code></td></tr>
-<tr><td><code>tile_size</code></td><td>float</td><td>—</td><td>In CRS units. The product unit.</td></tr>
-<tr><td><code>block</code></td><td>int</td><td><code>512</code></td><td>Cells per side. Cannot change output.</td></tr>
+<tr><td><code>tile_size</code></td><td>float</td><td>—</td><td>In CRS units. The product unit. Need not be a whole number of cells; when it is not, tiles are cut on the cell lattice and differ by one cell</td></tr>
+<tr><td><code>block</code></td><td>int</td><td><code>512</code></td><td>Cells per side. Cannot change output. Prefer a size that divides the tile, e.g. <code>720</code> for 3600 cells</td></tr>
 <tr><td><code>max_distance</code></td><td>float</td><td>1.5 &times; grid diagonal</td><td>Beyond it a regridded cell is marked interpolated. Enters the GLT cache key.</td></tr>
 <tr><td><code>regrid_method</code></td><td>enum</td><td><code>kdtree</code></td><td><code>kdtree</code> | <code>warp_embedded</code> — the latter warps the product's own lookup table, handed over by the reader. Enters the GLT cache key.</td></tr>
 <tr><td><code>force_positive_y</code></td><td>bool</td><td><code>false</code></td><td>Defeats the positive-<code>y</code> guard rail. Almost always the wrong thing to set.</td></tr>

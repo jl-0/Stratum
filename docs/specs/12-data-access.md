@@ -73,10 +73,10 @@ Six things here are load-bearing.
 **Step 6 is a windowed read, not a file read.** GLTs are written as COGs whose internal tile size
 divides the block size, so a block fetches only the bytes covering its own window.
 
-**Step 10 is the whole point of this spec.** A 512 × 512 block at 0.0003° spans 0.1536°, which is
-about 17 km at the equator, or roughly 285 × 285 of a granule's 60 m pixels — fewer in longitude
-toward the poles. The granule is 1664 × 1242 ([11 §1](11-types.md)), so the block needs under 4% of
-it. Reading the whole scene once per block would be a **~25× read amplification** at the equator and
+**Step 10 is the whole point of this spec.** A 720 × 720 block at one arcsecond spans 0.2°, which is
+about 22 km at the equator, or roughly 370 × 370 of a granule's 60 m pixels — fewer in longitude
+toward the poles. The granule is 1664 × 1242 ([11 §1](11-types.md)), so the block needs under 7% of
+it. Reading the whole scene once per block would be a **~15× read amplification** at the equator and
 more at mid-latitudes, paid on every block, of every granule, in every epoch.
 `SensorWindow.covering` takes the min and max of the GLT's X and Y bands across the block and reads
 that rectangle alone.
@@ -86,7 +86,7 @@ that rectangle alone.
 1664 × 1242 array ([11 §11](11-types.md)). HDF5 decompresses a chunk whole, so a windowed read of
 one of those variables decodes the entire scene however small the window: the window bounds
 memory, not bytes. `location/lat` and `lon` are contiguous and uncompressed, so their windows are
-real, and so are windows into Stratum's own COGs. The 25× is therefore what the read path *can*
+real, and so are windows into Stratum's own COGs. The 15× is therefore what the read path *can*
 save, and the way to collect it is a one-time transcode per asset — prepared assets, §4.
 
 **The window carries its origin, not just its shape.** `SensorWindow` is

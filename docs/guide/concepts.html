@@ -63,8 +63,8 @@ systems.</p>
 
 <div class="warn">
   <span class="label">The mistake that bites</span>
-  <p>In <code>EPSG:4326</code>, <code>resolution: 0.0003</code> means 0.0003 <em>degrees</em> —
-  roughly 33 m at the equator. In a metre-based projected CRS the same number would mean 0.3 mm.
+  <p>In <code>EPSG:4326</code>, <code>resolution: 0.000277778</code> means that many <em>degrees</em> — one
+  arcsecond, roughly 31 m at the equator. In a metre-based projected CRS the same number would mean 0.3 mm.
   Confusing the two is the most common configuration error in this system, which is why Stratum
   rejects the obvious cases below.</p>
 </div>
@@ -95,7 +95,7 @@ reports. Geographic CRSs occupy the <code>4xxx</code> range, which is what the g
 keys on.</p>
 
 <p>One more consequence worth knowing: a cell in a geographic CRS is not a constant size on the
-ground. 0.0003° of longitude is about 33 m at the equator and about 24 m at 45° latitude. That is
+ground. One arcsecond of longitude is about 31 m at the equator and about 22 m at 45° latitude. That is
 workable here because the source products are themselves distributed on a geographic grid, but it
 matters before you read a cell count as an area.</p>
 
@@ -119,11 +119,11 @@ matters before you read a cell count as an area.</p>
   crs: EPSG:4326
 
   <span class="c"># Cell size as [x_step, y_step], in the CRS's units - here, degrees.</span>
-  <span class="c">#   0.0003 deg is about 33 m at the equator, less toward the poles.</span>
+  <span class="c">#   1/3600 deg, one arcsecond, is about 31 m at the equator, less toward the poles.</span>
   <span class="c">#   y is NEGATIVE because raster rows run north to south, so moving</span>
   <span class="c">#   one row down decreases latitude. Positive y is nearly always a</span>
   <span class="c">#   mistake, and Stratum rejects it unless you force it.</span>
-  resolution: [0.0003, -0.0003]
+  resolution: [0.000277778, -0.000277778]
 
   <span class="c"># The anchor cell edges are measured from: edges fall at</span>
   <span class="c">#   origin + n * resolution. This fixes the grid's phase.</span>
@@ -139,10 +139,10 @@ matters before you read a cell count as an area.</p>
   <span class="c"># Edge length of one compute block, in CELLS (not CRS units).</span>
   <span class="c">#   An ENGINEERING decision: what one worker handles. Invisible in</span>
   <span class="c">#   the output, and cannot change your result.</span>
-  block: 512</code></pre>
+  block: 720</code></pre>
 
-<p>So this grid puts cell edges every 0.0003° starting from (−180°, −90°), groups them into 1°
-tiles of roughly 3334 × 3334 cells, and hands workers 512 × 512 pieces of those tiles.</p>
+<p>So this grid puts cell edges every arcsecond starting from (−180°, −90°), groups them into 1°
+tiles of exactly 3600 × 3600 cells, and hands workers 720 × 720 pieces of those tiles.</p>
 
 <p>Stratum refuses three configurations at plan time because they are almost always mistakes:</p>
 
@@ -199,8 +199,8 @@ boundaries.</p>
     halo = 1        <span class="c"># pixels of overlap needed on every side</span></code></pre>
 
 <p>Stratum materializes <code>halo</code> extra pixels around the block, runs your plugin, and
-trims before writing. Halo cost is <code>(1 + 2h/B)&sup2;</code> — at <code>block: 512</code>, a
-one-pixel halo costs 0.8% and a 32-pixel halo 13%.</p>
+trims before writing. Halo cost is <code>(1 + 2h/B)&sup2;</code> — at <code>block: 720</code>, a
+one-pixel halo costs 0.6% and a 32-pixel halo 19%.</p>
 
 <p>A plugin that genuinely needs the whole tile at once declares
 <code>capability = "tile"</code> instead. That gives up block parallelism and routes the work to

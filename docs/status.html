@@ -77,6 +77,7 @@
 <tr><td>Legend</td><td>STAC <code>classification</code> is authoritative; the COG colour table and JSON sidecar derive from it. Data COGs ship single-band with a colour table <em>and</em> an RGBA rendering</td></tr>
 <tr><td>Prepared assets</td><td>Every asset is transcoded once on first touch into tiled per-variable COGs, keyed on its checksum and shared by every run. A node-local asset cache fills by atomic rename and never locks</td></tr>
 <tr><td>GLT</td><td>One per granule. Band 3 stays <code>1</code> so existing tooling opens the file; <code>granule_id</code> is in the metadata. Regrid by KD-tree, or by warping the product's own lookup table through the reader (<code>regrid_method</code>)</td></tr>
+<tr><td>Example grid</td><td>One arcsecond, 3600 cells per degree, 1&deg; tiles, <code>block: 720</code>. Tiles are cut on the cell lattice by cell-centre containment, so any resolution aligns; one that divides the tile keeps every tile the same shape</td></tr>
 <tr><td>Plan routing</td><td>The plan is routed like any work item, by manifest-implied size, and checkpoints per-tile work lists</td></tr>
 <tr><td>Execution</td><td>Step Functions + Lambda control plane, Batch on Spot data plane, routed per work item</td></tr>
 <tr><td>Packaging</td><td>Container image Lambdas with a shared CLI entrypoint; not zip layers</td></tr>

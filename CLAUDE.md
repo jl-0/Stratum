@@ -107,6 +107,11 @@ Established by reading code and data. Do not re-derive; do not assume the opposi
   and exposed before download (verified 2026-09-01), but `EMITL2BMIN.001` already spans eight
   builds with no Tetracorder change. The vintage check is the embedded class-table fingerprint;
   build version is filterable and reported — see [`02-granule-index.md` §3](docs/specs/02-granule-index.md).
+- **A tile is the cells whose centres fall inside its nominal bounds.** So any resolution tiles
+  without overlap or gap; when `tile_size` is not a whole number of cells (1° at 0.0003° is 3333.33)
+  tiles differ by one cell and their bounds miss the round number by under a cell. The example grid
+  is one arcsecond, 3600 cells per degree, `block: 720`, which has neither wrinkle. V002 and AMD cut
+  each tile from its own corner and overlap.
 - **Masks run in resolve, not regrid.** Regrid reads `loc` only and the GLT key has no mask term.
   Sensor-space masks apply to the sensor window before the gather, map-space masks to the block
   after it — [`03` §5](docs/specs/03-regrid-glt.md), [`12` §2](docs/specs/12-data-access.md).
@@ -140,6 +145,10 @@ several agree. Everything domain-specific lives in `stratum_emit`. If you find y
 ## Repo layout
 
 ```
+src/stratum/       the framework - no EMIT, Tetracorder or mineral knowledge, ever
+src/stratum_emit/  the EMIT plugin package: readers, instrument masks, mineral scorers
+tests/             pytest; fixtures resolve from STRATUM_TRIAL_DATA / STRATUM_FIXTURE_URL
+examples/          example manifests and classes files - configuration, not core
 docs/index.html    site landing page (GitHub Pages serves docs/)
 docs/guide/        concepts, running, reading-data, plugins, caching, scaling  <- how to use it
 docs/reference/    manifest, types, cli                             <- field/API reference
@@ -367,7 +376,9 @@ ignored; the reference granule in `refs/` goes once trial data exists.
 
 ## Inspecting the reference granule
 
-There is no project environment yet. To read the NetCDF:
+The project environment is pixi (`pixi install`, `pixi run test`) per ADR-0001; `pixi` is not yet
+on this machine (`brew install pixi`). Until then a `uv venv --python 3.11` with the pure-Python
+dependencies runs the tests. To read the NetCDF without either:
 
 ```bash
 export MAMBA_ROOT_PREFIX="$HOME/micromamba"

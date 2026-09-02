@@ -110,7 +110,7 @@ pick a winner per cell. Masking happens here, in the read path, not in regrid
 declares, with raw classes resolved into the product's own enumeration ([13](13-snapshot-schema.md)).
 
 Applying a GLT is also what makes the read cheap. The GLT names exactly which sensor pixels this
-block touches — under 4% of a granule's 1664 × 1242 — so only that rectangle need be read, not the
+block touches — under 7% of a granule's 1664 × 1242 — so only that rectangle need be read, not the
 scene ([12 §2](12-data-access.md)) — once the asset is in a windowable layout, which the delivered
 L2B is not until it is prepared ([12 §4](12-data-access.md)).
 
