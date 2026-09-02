@@ -139,7 +139,7 @@ matters before you read a cell count as an area.</p>
   <span class="c"># Edge length of one compute block, in CELLS (not CRS units).</span>
   <span class="c">#   An ENGINEERING decision: what one worker handles. Invisible in</span>
   <span class="c">#   the output, and cannot change your result.</span>
-  block: 720</code></pre>
+  block_size: 720</code></pre>
 
 <p>So this grid puts cell edges every arcsecond starting from (−180°, −90°), groups them into 1°
 tiles of exactly 3600 × 3600 cells, and hands workers 720 × 720 pieces of those tiles.</p>
@@ -163,7 +163,7 @@ degrees confused;</li>
 <tbody>
 <tr><th>Is</th><td>The unit you download</td><td>The unit a worker processes</td></tr>
 <tr><th>Appears in</th><td>Filenames, STAC items, the catalogue</td><td>Nothing user-visible</td></tr>
-<tr><th>Set by</th><td><code>grid.tile_size</code></td><td><code>grid.block</code></td></tr>
+<tr><th>Set by</th><td><code>grid.tile_size</code></td><td><code>grid.block_size</code></td></tr>
 <tr><th>Changing it</th><td>Changes the product you deliver</td><td><strong>Changes nothing about the output</strong></td></tr>
 <tr><th>Typical</th><td>1&deg;</td><td>512 &times; 512 cells</td></tr>
 </tbody>
@@ -173,7 +173,7 @@ degrees confused;</li>
 <div class="key">
   <span class="label">Guarantee</span>
   <p>Block-wise output is <strong>bit-identical</strong> to tile-wise output. Tune
-  <code>grid.block</code> freely for memory and parallelism; it cannot change your result.</p>
+  <code>grid.block_size</code> freely for memory and parallelism; it cannot change your result.</p>
 </div>
 
 <p>Tiles are named by their grid indices, so a tile name is a position:</p>
@@ -199,7 +199,7 @@ boundaries.</p>
     halo = 1        <span class="c"># pixels of overlap needed on every side</span></code></pre>
 
 <p>Stratum materializes <code>halo</code> extra pixels around the block, runs your plugin, and
-trims before writing. Halo cost is <code>(1 + 2h/B)&sup2;</code> — at <code>block: 720</code>, a
+trims before writing. Halo cost is <code>(1 + 2h/B)&sup2;</code> — at <code>block_size: 720</code>, a
 one-pixel halo costs 0.6% and a 32-pixel halo 19%.</p>
 
 <p>A plugin that genuinely needs the whole tile at once declares

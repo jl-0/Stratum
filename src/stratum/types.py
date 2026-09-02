@@ -58,13 +58,13 @@ class GridDef:
     resolution: tuple[float, float]  # (x, y); y negative
     origin: tuple[float, float]      # (x0, y0); cell edges at origin + n * res
     tile_size: float
-    block: int = 512
+    block_size: int = 512
 
     def __post_init__(self) -> None:
         rx, ry = self.resolution
         if rx <= 0 or ry >= 0:
             raise ValueError("resolution must be (positive x, negative y) (01 section 1 guard rail)")
-        if self.tile_size <= 0 or self.block <= 0:
+        if self.tile_size <= 0 or self.block_size <= 0:
             raise ValueError("tile_size and block must be positive")
 
     @property
@@ -153,7 +153,7 @@ class TileRef:
     def blocks(self) -> list[BlockRef]:
         """Every block of a fully covered tile; the planner clips to the AOI (01 section 3)."""
         rows, cols = self.shape
-        b = self.grid.block
+        b = self.grid.block_size
         return [BlockRef(self, bx, by)
                 for by in range(math.ceil(rows / b)) for bx in range(math.ceil(cols / b))]
 
@@ -169,7 +169,7 @@ class BlockRef:
 
     @property
     def core_window(self) -> Window:
-        b = self.tile.grid.block
+        b = self.tile.grid.block_size
         rows, cols = self.tile.shape
         r0, c0 = self.by * b, self.bx * b
         return Window(r0, c0, min(b, rows - r0), min(b, cols - c0))

@@ -114,6 +114,9 @@ def build_index(source: GranuleSource, *, collections: Sequence[str],
     return table_from_rows(rows)
 
 
+INDEX_FILE = "granules.parquet"   # the fixed file name inside `inputs.index_location` (12 section 6)
+
+
 def write_index(table: pa.Table, path: Path) -> Path:
     """Parquet with the GeoParquet `geo` metadata (02 section 2). Sorted by (collection,
     granule_id) so identical inputs give identical bytes."""

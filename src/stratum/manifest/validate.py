@@ -74,9 +74,9 @@ def validate_static(m: Manifest) -> list[str]:
     if scorer is not None:
         _roles_and_aux(scorer, f"scorer {m.scorer.ref}", m, problems)
         halo = getattr(scorer, "halo", 0)
-        if isinstance(halo, int) and halo * 2 >= m.grid.block:
+        if isinstance(halo, int) and halo * 2 >= m.grid.block_size:
             problems.append(f"scorer {m.scorer.ref}: halo {halo} is not consistent with block "
-                            f"{m.grid.block}")
+                            f"{m.grid.block_size}")
         if getattr(scorer, "capability", "streaming") != "streaming":
             problems.append(f"scorer {m.scorer.ref}: capability "
                             f"{scorer.capability!r} is a later slice (plan section 1)")

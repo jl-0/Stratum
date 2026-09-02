@@ -36,7 +36,7 @@ from stratum.types import GridDef, TileRef
 # tile_size 0.05 at 0.001 deg -> a 50 x 50 tile; block 25 -> four blocks. Tile (-2360, 820)
 # is lon [-118, -117.95), lat [41, 41.05): negative tile indices are exercised on purpose.
 RES = 0.001
-GRID = GridDef("EPSG:4326", (RES, -RES), (-180.0, -90.0), 0.05, block=25)
+GRID = GridDef("EPSG:4326", (RES, -RES), (-180.0, -90.0), 0.05, block_size=25)
 TILE = TileRef(GRID, -2360, 820)
 
 FILL_INT = -9999
@@ -199,7 +199,7 @@ def write_scenes(directory: Path, scenes: Sequence[Scene] | None = None) -> list
 
 
 def manifest_doc(*, granules: str = "./granules", bucket: str = "./out", run_label: str = "e2e",
-                 block: int = 25, scorer: Mapping[str, Any] | None = None,
+                 block_size: int = 25, scorer: Mapping[str, Any] | None = None,
                  mineral_aggregate: Mapping[str, Any] | None = None,
                  budget: Mapping[str, Any] | None = None,
                  time: Mapping[str, Any] | None = None,
@@ -212,12 +212,12 @@ def manifest_doc(*, granules: str = "./granules", bucket: str = "./out", run_lab
         "description": "synthetic end-to-end run",
         "grid": {"crs": tile.grid.crs, "resolution": list(tile.grid.resolution),
                  "origin": list(tile.grid.origin), "tile_size": tile.grid.tile_size,
-                 "block": block},
+                 "block_size": block_size},
         "aoi": {"tiles": [[tile.tx, tile.ty]]},
         "time": dict(time or {"start": "2026-06-01", "end": "2026-08-01", "epoch": "P1M",
                               "deliver": "P2M"}),
         "inputs": {
-            "index": "./index.parquet",
+            "index_location": "./index",
             "source": {"kind": "local", "root": granules,
                        "patterns": {"EMITL2BMIN": {"MIN": MIN_GLOB},
                                     "EMITL1BOBS": {"OBS": OBS_GLOB}}},

@@ -481,7 +481,7 @@ def test_halo_window_reads_past_the_tile_edge(pair_plan: PlanContext) -> None:
 def test_non_lonlat_grid_gets_lon_lat_coords(tmp_path: Path) -> None:
     from stratum.resolve import block_coords
 
-    grid = GridDef("EPSG:32611", (30.0, -30.0), (500000.0, 4600000.0), 3000.0, block=100)
+    grid = GridDef("EPSG:32611", (30.0, -30.0), (500000.0, 4600000.0), 3000.0, block_size=100)
     block = BlockRef(TileRef(grid, 167, 1534), 0, 0)      # tile names are CRS positions
     t = block.transform
     c = block_coords(t, (2, 2), grid.crs)
@@ -513,7 +513,7 @@ def test_reference_granule_read_path(ref_granule: Path, tmp_path: Path) -> None:
     hdr = read_header(ref_granule)
     w, e = float(hdr["westernmost_longitude"]), float(hdr["easternmost_longitude"])
     s, n = float(hdr["southernmost_latitude"]), float(hdr["northernmost_latitude"])
-    grid = GridDef("EPSG:4326", (0.005, -0.005), (-180.0, -90.0), 1.0, block=100)   # 200 x 200
+    grid = GridDef("EPSG:4326", (0.005, -0.005), (-180.0, -90.0), 1.0, block_size=100)   # 200 x 200
     tile = TileRef(grid, int(np.floor((w + e) / 2)), int(np.floor((s + n) / 2)))
     uri = to_uri(ref_granule)
     gid = "ref"

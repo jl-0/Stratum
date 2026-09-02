@@ -462,7 +462,7 @@ Without it, the archive changes underneath a stable query and nothing says so.
 
 ```yaml
 inputs:
-  index: ./index.parquet        # built here by `stratum plan` when absent
+  index_location: ./index       # a directory; `stratum plan` writes granules.parquet here when absent
   source:
     kind: local
     root: ../../trial-data      # relative to the manifest
@@ -495,7 +495,7 @@ The contracts `stratum/access/sources.py` fixes:
 | `checksums` | Empty. There is no catalogue checksum for a local file, and a size/mtime stand-in would leak locality into cache keys, which §4 forbids. `build_index` calls `source.checksums(record)` only when the source defines it |
 
 `stratum index build -m manifest.yaml` is the explicit build and the only path that takes
-`--since` / `--collection`. `stratum plan` builds `inputs.index` implicitly when the file is
+`--since` / `--collection`. `stratum plan` builds `inputs.index_location` implicitly when the file is
 absent **and** the source is local, indexing every collection in `patterns`, so a laptop run is
 one command. `LocalSource` understands NetCDF headers with ACDD names only; an ENVI or other
 local source would need a header-reader hook (question 8).
@@ -506,7 +506,7 @@ local source would need a header-reader hook (question 8).
 
 ```yaml
 inputs:
-  index: ./index/emit-granules.parquet   # what a RUN reads
+  index_location: ./index/               # what a RUN reads - a directory; the file name inside is fixed
   source:                                # how that index is BUILT
     kind: cmr                            # cmr | stac | local | parquet
     provider: LPCLOUD

@@ -150,7 +150,7 @@ def test_index_build_cli(root: Path) -> None:
     manifest = write_manifest(root / "m.yaml")
     r = CliRunner().invoke(main, ["index", "build", "-m", str(manifest)])
     assert r.exit_code == 0 and "6 row(s), 3 granule(s)" in r.output, r.output
-    assert (root / "index.parquet").is_file()
+    assert (root / "index" / "granules.parquet").is_file()
     assert len(default_scenes()) == 3
 
 

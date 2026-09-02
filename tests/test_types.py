@@ -21,11 +21,11 @@ from stratum.types import (
 # One arcsecond: 3600 cells per degree, block 720 divides it exactly (01 section 1).
 ARC = 1 / 3600
 GRID = GridDef(crs="EPSG:4326", resolution=(ARC, -ARC), origin=(-180.0, -90.0),
-               tile_size=1.0, block=720)
+               tile_size=1.0, block_size=720)
 
 
 def test_grid_id_is_stable_and_ignores_block():  # 01 section 3: block never changes output
-    same = GridDef("EPSG:4326", (ARC, -ARC), (-180.0, -90.0), 1.0, block=512)
+    same = GridDef("EPSG:4326", (ARC, -ARC), (-180.0, -90.0), 1.0, block_size=512)
     assert GRID.id == same.id and len(GRID.id) == 16
 
 
@@ -44,7 +44,7 @@ def test_tile_is_named_by_position_and_divides_cleanly():  # 01 section 2
 
 
 def test_non_dividing_grid_still_tiles_without_overlap_or_gap():  # 01 section 1
-    amd = GridDef("EPSG:4326", (0.0003, -0.0003), (-180.0, -90.0), 1.0, block=512)
+    amd = GridDef("EPSG:4326", (0.0003, -0.0003), (-180.0, -90.0), 1.0, block_size=512)
     assert not amd.divides
     a, b = TileRef(amd, -111, 32), TileRef(amd, -110, 32)
     assert a.col_range[1] == b.col_range[0]              # shared edge, on the lattice
@@ -56,7 +56,7 @@ def test_non_dividing_grid_still_tiles_without_overlap_or_gap():  # 01 section 1
 
 def test_tile_block_count_and_edge_blocks_clip():  # 01 section 3
     assert len(TileRef(GRID, 0, 0).blocks()) == 25          # 720 divides 3600: no sliver
-    g512 = GridDef("EPSG:4326", (ARC, -ARC), (-180.0, -90.0), 1.0, block=512)
+    g512 = GridDef("EPSG:4326", (ARC, -ARC), (-180.0, -90.0), 1.0, block_size=512)
     blocks = TileRef(g512, 0, 0).blocks()
     assert len(blocks) == 64                                # 8 x 8, the last one 16 cells wide
     assert blocks[-1].core_window.width == 3600 - 7 * 512

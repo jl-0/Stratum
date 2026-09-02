@@ -46,7 +46,7 @@ Corollaries:
 concurrent. The manifest is reviewable in isolation and hashable into provenance. Infrastructure
 changes are rare and therefore safe to gate carefully.
 
-**Costs.** Two configuration systems to learn. Some genuinely ambiguous cases — is `block: 512` a
+**Costs.** Two configuration systems to learn. Some genuinely ambiguous cases — is `block_size: 512` a
 platform tuning knob or a run parameter? We put it in the manifest because it must be recorded in
 provenance and may need to vary per workload, accepting that most users will never touch it.
 

@@ -27,6 +27,7 @@ from stratum.cache import CacheRoot
 from stratum.classes import Enumeration, EnumerationError, Remap, identity_enumeration
 from stratum.filters import FilterReport, apply_filters, build_filters
 from stratum.index import (
+    INDEX_FILE,
     build_index,
     freeze_index,
     granule_refs,
@@ -153,7 +154,7 @@ def local_source(m: Manifest) -> LocalSource:
 
 def build_index_from_manifest(m: Manifest, *, collections: Sequence[str] | None = None,
                               since: datetime | None = None, path: Path | None = None) -> Path:
-    """`stratum index build`: populate `inputs.index` from `inputs.source`. Only the `local`
+    """`stratum index build`: populate `inputs.index_location` from `inputs.source`. Only the `local`
     kind exists in this slice. `plan_run` calls this implicitly when the index file is absent
     and the source is local, so a laptop run is one command."""
     source = local_source(m)
@@ -170,9 +171,12 @@ def build_index_from_manifest(m: Manifest, *, collections: Sequence[str] | None 
 
 
 def index_path(m: Manifest) -> Path:
-    if m.inputs.index is None:
-        raise PlanError("inputs.index is not set; a run reads a frozen index (02 section 6)")
-    return resolve_local(m, m.inputs.index, "inputs.index")
+    """`inputs.index_location` is a directory; the index file inside has a fixed name
+    (INDEX_FILE), so nobody names or renames it by hand (12 section 6)."""
+    if m.inputs.index_location is None:
+        raise PlanError("inputs.index_location is not set; a run reads a frozen index "
+                        "(02 section 6)")
+    return resolve_local(m, m.inputs.index_location, "inputs.index_location") / INDEX_FILE
 
 
 def pin_versions(m: Manifest, frame: pd.DataFrame) -> pd.DataFrame:

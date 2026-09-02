@@ -56,7 +56,7 @@ from stratum.types import (
 
 ND = CATEGORICAL_NODATA
 GRID = GridDef(crs="EPSG:4326", resolution=(0.01, -0.01), origin=(-180.0, -90.0),
-               tile_size=0.32, block=16)
+               tile_size=0.32, block_size=16)
 TILE = TileRef(GRID, 100, 400)                      # 32 x 32 cells, four blocks
 PERIOD = Epoch(datetime(2026, 6, 1, tzinfo=UTC), datetime(2026, 7, 1, tzinfo=UTC))
 RUN_ID = "trial-deadbeef"

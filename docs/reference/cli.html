@@ -86,7 +86,7 @@ the run directory: <code>manifest.merged.yaml</code>, the frozen <code>index.par
 <code>plan.json</code>, <code>work/{stage}.jsonl</code> and <code>report.md</code>. Provisions
 nothing and reads no pixels — headers, variable lists and class tables only.</p>
 
-<p>If <code>inputs.index</code> does not exist and <code>inputs.source</code> is
+<p>If the index under <code>inputs.index_location</code> does not exist and <code>inputs.source</code> is
 <code>kind: local</code>, the index is built first, so a laptop run is one command.</p>
 
 <div class="tw">
@@ -248,7 +248,7 @@ stratum index verify -m MANIFEST</code></pre>
 <table>
 <thead><tr><th>Subcommand</th><th>Does</th><th>Status</th></tr></thead>
 <tbody>
-<tr><td><code>build</code></td><td>Populates <code>inputs.index</code> from <code>inputs.source</code>. A directory (<code>kind: local</code>) today; a catalogue later. Prints the row and granule counts</td><td><span class="chip chip-locked">built</span> local</td></tr>
+<tr><td><code>build</code></td><td>Populates <code>inputs.index_location</code> (a directory; the file is <code>granules.parquet</code>) from <code>inputs.source</code>. A directory (<code>kind: local</code>) today; a catalogue later. Prints the row and granule counts</td><td><span class="chip chip-locked">built</span> local</td></tr>
 <tr><td><code>query</code></td><td>Ad-hoc query against a built index: a count and the first rows, with each granule's time, bbox and build</td><td><span class="chip chip-locked">built</span></td></tr>
 <tr><td><code>verify</code></td><td>Checks asset URIs resolve and reports rows not seen since the last build</td><td><span class="chip chip-open">not yet</span></td></tr>
 </tbody>

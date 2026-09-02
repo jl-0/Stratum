@@ -56,7 +56,7 @@ from stratum.types import (
 )
 
 # tile_size 0.02 at 0.001 -> a 20 x 20 tile; block 10 -> four 10 x 10 blocks
-GRID = GridDef("EPSG:4326", (0.001, -0.001), (0.0, 0.0), 0.02, block=10)
+GRID = GridDef("EPSG:4326", (0.001, -0.001), (0.0, 0.0), 0.02, block_size=10)
 TILE = TileRef(GRID, 0, 0)
 EPOCH = Epoch(datetime(2026, 6, 1, tzinfo=UTC), datetime(2026, 7, 1, tzinfo=UTC))
 COLLECTION = "FAKE"
@@ -352,7 +352,7 @@ def build_plan(root: Path, observations: Sequence[SyntheticObservation], *, scor
 def with_block(plan: PlanContext, block: int) -> PlanContext:
     """The same plan on the same lattice cut into `block`-sized blocks. `GridDef.block` is not
     in `grid.id` or in any key (01 section 3 invariant), so GLTs and snapshots are shared."""
-    return replace(plan, grid=replace(plan.grid, block=block))
+    return replace(plan, grid=replace(plan.grid, block_size=block))
 
 
 def item(tile: TileRef, epoch: Epoch, bx: int, by: int) -> dict[str, Any]:

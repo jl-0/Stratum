@@ -189,7 +189,7 @@ cheaper path when it can.</p>
 <h3 id="local">From a directory</h3>
 
 <pre><code>inputs:
-  index: ./index.parquet                 <span class="c"># what a RUN reads</span>
+  index_location: ./index                <span class="c"># what a RUN reads: a directory</span>
   source:                                <span class="c"># how that index is BUILT</span>
     kind: local
     root: ./granules                     <span class="c"># relative to the manifest</span>
@@ -215,7 +215,7 @@ refuses everything) and a catalogue checksum (none is recorded). <code>--since</
 <h3 id="cmr">From NASA's archive</h3>
 
 <pre><code>inputs:
-  index: s3://emit-l3/index/emit-granules.parquet
+  index_location: s3://emit-l3/index/
   source:
     kind: cmr
     provider: LPCLOUD      <span class="c"># the DAAC that distributes EMIT</span>

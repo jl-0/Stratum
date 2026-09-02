@@ -84,7 +84,7 @@
 <tr><td>Legend</td><td>STAC <code>classification</code> is authoritative; the COG colour table and JSON sidecar derive from it. Data COGs ship single-band with a colour table <em>and</em> an RGBA rendering; a GeoTIFF colour table carries no alpha, so the data COG's only transparency is its nodata value</td></tr>
 <tr><td>Prepared assets</td><td>Every asset is transcoded once on first touch into tiled per-variable COGs, keyed on its checksum and shared by every run. A node-local asset cache fills by atomic rename and never locks. Not yet built</td></tr>
 <tr><td>GLT</td><td>One per granule. Band 3 stays <code>1</code> so existing tooling opens the file; <code>granule_id</code> is in the metadata; a granule that misses the tile writes an all-zero GLT. Regrid by KD-tree, or by warping the product's own lookup table through the reader (<code>regrid_method</code>)</td></tr>
-<tr><td>Example grid</td><td>One arcsecond, 3600 cells per degree, 1&deg; tiles, <code>block: 720</code>. Tiles are cut on the cell lattice by cell-centre containment, so any resolution aligns; one that divides the tile keeps every tile the same shape</td></tr>
+<tr><td>Example grid</td><td>One arcsecond, 3600 cells per degree, 1&deg; tiles, <code>block_size: 720</code>. Tiles are cut on the cell lattice by cell-centre containment, so any resolution aligns; one that divides the tile keeps every tile the same shape</td></tr>
 <tr><td>Band aliases</td><td><code>band:</code> is a 0-based index, validated against the reader at plan time; <code>match:</code> selects by a reader-reported attribute. EMIT L1B OBS view zenith is band 2, solar zenith band 4</td></tr>
 <tr><td>Plan routing</td><td>The plan is routed like any work item, by manifest-implied size, and checkpoints per-tile work lists</td></tr>
 <tr><td>Execution</td><td>Step Functions + Lambda control plane, Batch on Spot data plane, routed per work item</td></tr>
@@ -119,7 +119,7 @@ available locally, so the first slice was validated against the next best thing 
 <table>
 <thead><tr><th>Trial</th><th>Result</th></tr></thead>
 <tbody>
-<tr><td>Tile (&minus;118, 41), June 2026, 14 granules, one arcsecond, <code>block: 720</code></td><td>Plan through publish in 40 s on a laptop; a fully cached re-run in 11 s</td></tr>
+<tr><td>Tile (&minus;118, 41), June 2026, 14 granules, one arcsecond, <code>block_size: 720</code></td><td>Plan through publish in 40 s on a laptop; a fully cached re-run in 11 s</td></tr>
 <tr><td>Cell-wise agreement with the fused mosaic (mineral id, view zenith)</td><td><strong>1.000000</strong> on 12,957,415 valid cells; zero cells valid in one and not the other; view zenith identical to &lt;10<sup>&minus;4</sup>&deg;</td></tr>
 <tr><td>Independent check, no shared code (per-granule KD-tree, nearest within <code>max_distance</code>, minimum zenith, earliest wins)</td><td>3000 / 3000 sampled cells match</td></tr>
 <tr><td>Seam equivalence and key sensitivity</td><td>Pass, in the suite</td></tr>
@@ -168,12 +168,10 @@ open-questions list.</p>
 </div>
 
 <p>Two implicit choices should still become ADRs — listed under
-<a href="decisions/index.html#pending">Not yet recorded</a>. One packaging fix is pending and is
-a dependency change, so it waits for a deliberate commit: <code>netCDF4</code> is imported by the
-core package but is only a pixi dependency, not a <code>[project]</code> dependency, so a
-pip/wheel install would fail at import; the proposed diff adds
-<code>netCDF4&gt;=1.6,&lt;1.7.1</code> to <code>pyproject.toml</code> and the dependency row of
-ADR-0001.</p>
+<a href="decisions/index.html#pending">Not yet recorded</a>. <code>netCDF4</code> is now a
+<code>[project]</code> dependency as well as a pixi one, so an import outside the pixi
+environment no longer fails on it; SpectralUtil itself still cannot be a package dependency
+(ADR-0001 section 3).</p>
 
 <h2 id="planned">Planned enhancements</h2>
 

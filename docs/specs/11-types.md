@@ -80,7 +80,7 @@ class GridDef:
     resolution: tuple[float, float]   # (x, y); y negative
     origin: tuple[float, float]       # (x0, y0) - cell edges at origin + n*res
     tile_size: float
-    block: int = 512
+    block_size: int = 512
 
     @property
     def id(self) -> str: ...      # short stable hash; part of every cache key

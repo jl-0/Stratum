@@ -36,7 +36,7 @@ grid:
   resolution: [0.000277778, -0.000277778]   # one arcsecond
   tile_size: 1.0
   origin: [-180, -90]
-  block: 720                  # divides the 3600-cell tile exactly
+  block_size: 720                  # divides the 3600-cell tile exactly
   max_distance: 0.00059       # regrid cutoff; default 1.5 x the grid diagonal - see 03 section 3
   regrid_method: kdtree       # kdtree | warp_embedded - see 03 section 3
   # force_positive_y: true    # only to defeat the guard rail in 01 section 1
@@ -58,7 +58,7 @@ time:
 #   deliver: {every: P1M, window: P13M, align: center}
 
 inputs:
-  index: s3://emit-l3/index/emit-granules.parquet   # what a RUN reads
+  index_location: s3://emit-l3/index/   # what a RUN reads: a directory; the file inside is Stratum's
   source:                                           # how that index is BUILT - see 12
     kind: cmr
     provider: LPCLOUD
@@ -175,7 +175,7 @@ misspelt key is an error with a location. Choices the build settled:
 | `time.deliver` | Normalised to the long form at load, so `P1Y` and `{every: P1Y, window: P1Y, align: exact}` produce the same merged document and the same hash; `window` defaults to `every`, and `deliver` itself defaults to the epoch. The rules in §5 are checked by the model |
 | `time.align` | `start` (default) or `calendar`: `calendar` anchors the epoch lattice on the epoch's calendar unit and truncates the first epoch at `start`. Month arithmetic is computed from `start` in one step and clamps to month end (31 Jan + 2 × P1M = 31 Mar); month- and day-based durations are incommensurable. `center` places surplus epochs half before and half after, the odd one after; windows clip to `[start, end)` |
 | `inputs.geolocation` | The role regrid takes `loc` from; defaults to the first sensor-space role in `inputs.roles` order ([03 §3](03-regrid-glt.md)). Must name a role |
-| `inputs.index` / `inputs.source` | Both optional, at least one required. `source` for `kind: local` takes `root` plus either one `pattern` (honoured only when every role reads one collection) or `patterns` ([12 §5](12-data-access.md)) |
+| `inputs.index_location` / `inputs.source` | Both optional, at least one required. `index_location` is a **directory**; the index file inside has a fixed name (`granules.parquet`), so a user never names it. `source` for `kind: local` takes `root` plus either one `pattern` (honoured only when every role reads one collection) or `patterns` ([12 §5](12-data-access.md)) |
 | `band_aliases` | `band:` is a **0-based** index, validated against the reader's band count at plan time; `match:` selects the single band whose reported attribute equals the value (string comparison, or within `tolerance`) and fails unless exactly one matches ([11 §5](11-types.md)). EMIT L1B OBS: 0 path length, 1 to-sensor azimuth, **2 to-sensor zenith**, 3 to-sun azimuth, **4 to-sun zenith**, 5 phase, 6 slope, 7 aspect, 8 cosine i, 9 UTC time, 10 earth–sun distance |
 | `granule_filter` | The four built-ins plus `product_version`, `collection_version` and `day_night`. `on_missing` is `reject \| keep \| fail`, `fail` when omitted — so `{max_solar_zenith: 70}` is valid and means `fail`; `on_missing` on `month_in` is a schema error, since nothing can be missing. A `{ref, params}` entry resolves a `GranuleFilter` plugin |
 | `snapshot.layers.*.aggregate` | Parameters are validated per `(kind, method)`: `vote` takes `min_count` / `ignore` / `tie_break`; `percentile` requires `p` in `[0, 100]`; `inverse_variance` requires `unc`; `conditional_on` and `spread` apply to any delivered continuous method and not to `none`. A parameter a method does not take is an error ([13 §4](13-snapshot-schema.md)) |
@@ -243,7 +243,7 @@ Everything below fails in the plan stage, loudly, while it is cheap:
   ([05 §5](05-ancillary-data.md));
 - aux sources exist and are readable;
 - `kind`/`resampling` consistent for each aux source;
-- `capability` and `halo` consistent with `block`;
+- `capability` and `halo` consistent with `block_size`;
 - `deliver.every` and `deliver.window` are whole multiples of `epoch`, and
   `window >= every`; `deliver.align` is `exact` only when `window == every`;
 - the snapshot schema resolves: every layer `source` names a role or alias, every categorical
@@ -267,7 +267,7 @@ Three layers, in the order a manifest meets them:
 | Layer | Checks | Reports |
 |---|---|---|
 | **Models** (`stratum/manifest/models.py`) | The shape of one block: types, enumerated values, which fields go together, aux `kind`/`resampling` agreement, the time rules, a categorical layer needing `classes`, `mixed_vintage_reason` | The first failure, with a location |
-| **`validate_static`** (`stratum/manifest/validate.py`; `stratum validate`) | Every cross-block reference, with no data: role/alias collision; `alias.role` and `geolocation` declared; scorer/mask/filter/mapper refs resolve and accept their params; `required_roles` in roles or aliases; `required_aux` in `aux`; scorer `halo` vs `block`; layer `source` in the namespace; a categorical source role declares a `class_table` whose attributes cover `match_on`; `conditional_on` names another *delivered* categorical layer and `unc` another continuous one; `ignore`/`colors` name enumeration classes; render targets a delivered layer of the right kind; `alpha_from` names a band the reducer actually delivers; zones resolve | Every problem, as a list |
+| **`validate_static`** (`stratum/manifest/validate.py`; `stratum validate`) | Every cross-block reference, with no data: role/alias collision; `alias.role` and `geolocation` declared; scorer/mask/filter/mapper refs resolve and accept their params; `required_roles` in roles or aliases; `required_aux` in `aux`; scorer `halo` vs `block_size`; layer `source` in the namespace; a categorical source role declares a `class_table` whose attributes cover `match_on`; `conditional_on` names another *delivered* categorical layer and `unc` another continuous one; `ignore`/`colors` name enumeration classes; render targets a delivered layer of the right kind; `alpha_from` names a band the reducer actually delivers; zones resolve | Every problem, as a list |
 | **Planner** (`stratum/plan/run.py`) | What needs data: the collection resolves to one reader; `var` exists in its `variables()`; band aliases resolve against a real granule's `VarSpec`; per-granule enumeration resolution and fingerprint agreement; a collection under several `collection_version`s is pinned; every granule provides an asset for every role that will be read | `PlanError` |
 
 `validate_static` instantiates the scorer and masks with their params to read `required_roles`,

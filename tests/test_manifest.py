@@ -43,7 +43,7 @@ def base_doc() -> dict[str, Any]:
     return {
         "run_id": "trial",
         "grid": {"crs": "EPSG:4326", "resolution": [ARC, -ARC], "origin": [-180, -90],
-                 "tile_size": 1.0, "block": 720},
+                 "tile_size": 1.0, "block_size": 720},
         "aoi": {"bbox": [-117.9, 41.1, -117.2, 41.8]},
         "time": {"start": "2026-06-01", "end": "2026-07-01", "epoch": "P1M"},
         "inputs": {

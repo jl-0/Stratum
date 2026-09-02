@@ -16,7 +16,7 @@ from stratum.cache import (
 )
 from stratum.types import GridDef, TileRef, canonical_hash
 
-GRID = GridDef("EPSG:4326", (0.001, -0.001), (0.0, 0.0), 0.01, block=512)
+GRID = GridDef("EPSG:4326", (0.001, -0.001), (0.0, 0.0), 0.01, block_size=512)
 TILE = TileRef(GRID, 3, -2)
 
 
@@ -55,7 +55,7 @@ def test_unknown_artifact_refused(root: CacheRoot) -> None:
 
 # -------------------------------------------------------------------------------- sensitivity
 def test_glt_key_ignores_block_size(root: CacheRoot) -> None:
-    small = GridDef(GRID.crs, GRID.resolution, GRID.origin, GRID.tile_size, block=256)
+    small = GridDef(GRID.crs, GRID.resolution, GRID.origin, GRID.tile_size, block_size=256)
     assert small.id == GRID.id
     assert _glt_key(root, GRID).path == _glt_key(root, small).path
     assert "block" not in grid_def_fields(GRID)

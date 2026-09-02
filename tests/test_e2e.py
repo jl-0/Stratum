@@ -52,7 +52,7 @@ def test_plan_counts_and_files(e2e: tuple[Path, PlanResult]) -> None:
     assert result.run_dir == root / "out" / "runs" / result.run_id
     for name in ("manifest.merged.yaml", "index.parquet", "plan.json", "report.md"):
         assert (result.run_dir / name).is_file(), name
-    assert (root / "index.parquet").is_file(), "plan built the index for the local source"
+    assert (root / "index" / "granules.parquet").is_file(), "plan built the index for the local source"
     assert result.document["index"]["built"] is True
     reduce_items = read_work(result.run_dir, "reduce")
     assert all(len(it["epochs"]) == 2 for it in reduce_items)
@@ -179,7 +179,7 @@ def test_cli_surface(e2e: tuple[Path, PlanResult]) -> None:
                                           "regrid", "--index", "1"]).output)["key"]
     r = runner.invoke(main, ["cache", "explain", glt])
     assert r.exit_code == 0 and json.loads(r.output)["artifact_type"] == "glt"
-    r = runner.invoke(main, ["index", "query", "--index", str(root / "index.parquet"),
+    r = runner.invoke(main, ["index", "query", "--index", str(root / "index"),
                              "--bbox", "-118,41,-117.95,41.05"])
     assert r.exit_code == 0 and r.output.startswith("6 row(s), 3 granule(s)"), r.output
     r = runner.invoke(main, ["approve", "--run", "x"])

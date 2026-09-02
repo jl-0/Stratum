@@ -61,7 +61,7 @@ grid:
   resolution: [0.000277778, -0.000277778]   <span class="c"># one arcsecond</span>
   origin: [-180, -90]
   tile_size: 1.0
-  block: 720
+  block_size: 720
 
 aoi:
   zones: [cuprite-nv]
@@ -74,7 +74,7 @@ time:
   deliver: P1Y              <span class="c"># so no temporal reduction happens at all</span>
 
 inputs:
-  index: ./index.parquet    <span class="c"># built here by `stratum plan` if it does not exist</span>
+  index_location: ./index   <span class="c"># a directory; `stratum plan` writes granules.parquet here if absent</span>
   source:                   <span class="c"># how the index is built; never read by a run</span>
     kind: local
     root: ./granules
@@ -138,7 +138,7 @@ single epoch every aggregation is the identity, so this run is a plain mosaic; s
 
 <p>The full field list is in the <a href="../reference/manifest.html">manifest reference</a>.</p>
 
-<p><code>inputs.index</code> is the only input a run touches. <code>inputs.source</code> says how
+<p><code>inputs.index_location</code> is the only input a run touches: a directory whose index file has a fixed name, <code>granules.parquet</code>. <code>inputs.source</code> says how
 that index is built — here from a directory of files you already have, which is what makes this
 manifest runnable with no network and no Earthdata account. Point it at NASA's archive instead and
 nothing else in the document changes; see <a href="reading-data.html">Reading data</a>.</p>

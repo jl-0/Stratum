@@ -153,7 +153,7 @@ def write_glt(path: Path, glt: np.ndarray, tile: TileRef, *, granule_id: str,
     rows, cols = tile.shape
     if glt.shape != (rows, cols, 3):
         raise ValueError(f"GLT shape {glt.shape} does not match tile shape {(rows, cols, 3)}")
-    bs = internal_tile_size(tile.grid.block)
+    bs = internal_tile_size(tile.grid.block_size)
     profile = {"driver": "GTiff", "height": rows, "width": cols, "count": 3, "dtype": "int32",
                "nodata": 0, "crs": tile.grid.crs, "transform": tile.transform, "tiled": True,
                "blockxsize": bs, "blockysize": bs, "compress": "deflate"}

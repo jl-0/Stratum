@@ -19,7 +19,7 @@ grid:
   resolution: [0.000277778, -0.000277778]   # one arcsecond, 1/3600; x positive, y negative
   origin: [-180, -90]
   tile_size: 1.0
-  block: 720                       # divides the 3600-cell tile exactly
+  block_size: 720                       # divides the 3600-cell tile exactly
 ```
 
 Cell edges are at `origin + n × resolution`, and **a tile is the set of cells whose centres fall

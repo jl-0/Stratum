@@ -64,7 +64,7 @@
   resolution: [0.000277778, -0.000277778]   <span class="c"># one arcsecond</span>
   origin: [-180, -90]
   tile_size: 1.0
-  block: 720
+  block_size: 720
   max_distance: 0.00059      # regrid cutoff; default 1.5 x the grid diagonal</code></pre>
 
 <div class="tw">
@@ -153,7 +153,7 @@ in the plan report.</p>
 <h2 id="inputs">inputs</h2>
 
 <pre><code>inputs:
-  index: s3://emit-l3/index/emit-granules.parquet   <span class="c"># what a RUN reads</span>
+  index_location: s3://emit-l3/index/   <span class="c"># what a RUN reads: a directory (granules.parquet inside)</span>
   source:                                           <span class="c"># how that index is BUILT</span>
     kind: cmr
     provider: LPCLOUD
@@ -515,7 +515,7 @@ is refused.</p>
 <li>every plugin's <code>required_aux</code> is declared in <code>aux</code>, and those sources
 exist and are readable;</li>
 <li><code>kind</code> and <code>resampling</code> agree for every aux source;</li>
-<li><code>capability</code> and <code>halo</code> are consistent with <code>grid.block</code>;</li>
+<li><code>capability</code> and <code>halo</code> are consistent with <code>grid.block_size</code>;</li>
 <li><code>epoch</code> divides <code>deliver</code> evenly;</li>
 <li>the snapshot schema resolves: every layer <code>source</code> is a role or alias, every enumeration member matches exactly one class-table row per granule, and every class a colour table names exists in the enumeration;</li>
 <li>contributing granules' class tables agree by fingerprint &mdash; the vintage check &mdash; or a remap is explicitly permitted;</li>

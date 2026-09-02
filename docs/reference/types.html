@@ -207,7 +207,7 @@ scorer, mask, reducer or mapper never sees one. See
     resolution: tuple[float, float]   <span class="c"># (x, y); y negative</span>
     origin: tuple[float, float]       <span class="c"># cell edges at origin + n*res</span>
     tile_size: float
-    block: int = 512
+    block_size: int = 512
 
     @property
     <span class="k">def</span> id(self) -&gt; str: ...      <span class="c"># short stable hash; part of every cache key</span>

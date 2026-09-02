@@ -1,7 +1,7 @@
 # Stratum — working notes for Claude
 
 Cost-function-driven mosaic engine for imaging spectroscopy. **The first slice exists** (built
-2026-09-02, `src/stratum` + `src/stratum_emit`, 241 tests): a local run over staged granules,
+2026-09-02, `src/stratum` + `src/stratum_emit`, 242 tests): a local run over staged granules,
 plan through publish. `docs/specs/` is still the contract; the build contract it was written
 against is [`docs/notes/2026-09-02-first-slice-plan.md`](docs/notes/2026-09-02-first-slice-plan.md).
 
@@ -113,7 +113,7 @@ Established by reading code and data. Do not re-derive; do not assume the opposi
 - **A tile is the cells whose centres fall inside its nominal bounds.** So any resolution tiles
   without overlap or gap; when `tile_size` is not a whole number of cells (1° at 0.0003° is 3333.33)
   tiles differ by one cell and their bounds miss the round number by under a cell. The example grid
-  is one arcsecond, 3600 cells per degree, `block: 720`, which has neither wrinkle. V002 and AMD cut
+  is one arcsecond, 3600 cells per degree, `block_size: 720`, which has neither wrinkle. V002 and AMD cut
   each tile from its own corner and overlap.
 - **Masks run in resolve, not regrid.** Regrid reads `loc` only and the GLT key has no mask term.
   Sensor-space masks apply to the sensor window before the gather, map-space masks to the block
@@ -396,10 +396,6 @@ import netCDF4 as nc
 d = nc.Dataset('refs/EMIT_L2B_MIN_001_20260825T151308_2623710_050.nc')
 print(d.groups['mineral_metadata'].variables.keys())"
 ```
-
-`netCDF4` is a pixi dependency but not yet a `[project]` dependency in `pyproject.toml`, so the
-package only imports inside the pixi environment (see the pending pyproject diff in
-[`docs/status.html`](docs/status.html)).
 
 ---
 

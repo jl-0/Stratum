@@ -252,7 +252,7 @@ def index() -> None:
 @click.option("--since", type=click.DateTime(), default=None,
               help="Only rows updated since this instant (a local source: file mtime).")
 def index_build(manifest: str, collection: tuple[str, ...], since: datetime | None) -> None:
-    """Populate inputs.index from inputs.source (a local directory in this slice)."""
+    """Populate inputs.index_location from inputs.source (a local directory in this slice)."""
     from stratum.manifest import load_manifest
     from stratum.plan import build_index_from_manifest
 
@@ -265,7 +265,8 @@ def index_build(manifest: str, collection: tuple[str, ...], since: datetime | No
 
 
 @index.command("query")
-@click.option("--index", "index_path", required=True, type=click.Path(exists=True))
+@click.option("--index", "index_path", required=True, type=click.Path(exists=True),
+              help="An inputs.index_location directory, or a parquet file.")
 @click.option("--bbox", default=None, help="W,S,E,N in degrees.")
 @click.option("--start", type=click.DateTime(), default=None)
 @click.option("--end", type=click.DateTime(), default=None)
@@ -282,7 +283,14 @@ def index_query(index_path: str, bbox: str | None, start: datetime | None, end: 
         if len(parts) != 4:
             raise click.UsageError("--bbox is W,S,E,N")
         box = (parts[0], parts[1], parts[2], parts[3])
-    frame = query_index(read_index(index_path), bbox=box, start=start, end=end,
+    from pathlib import Path as _P
+
+    from stratum.index import INDEX_FILE
+
+    target = _P(index_path)
+    if target.is_dir():
+        target = target / INDEX_FILE
+    frame = query_index(read_index(target), bbox=box, start=start, end=end,
                         collections=collection or None)
     click.echo(f"{len(frame)} row(s), {frame['granule_id'].nunique()} granule(s)")
     for _, row in frame.head(limit).iterrows():

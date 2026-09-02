@@ -92,7 +92,7 @@ class GridSpec(Strict):
     resolution: tuple[float, float]
     origin: tuple[float, float]
     tile_size: PositiveFloat
-    block: PositiveInt = 512
+    block_size: PositiveInt = 512
     max_distance: PositiveFloat | None = None
     regrid_method: Literal["kdtree", "warp_embedded"] = "kdtree"
     force_positive_y: bool = False
@@ -115,7 +115,7 @@ class GridSpec(Strict):
             raise NotImplementedError("force_positive_y: GridDef does not accept a positive y "
                                       "resolution yet (01 section 1)")
         return GridDef(crs=self.crs, resolution=self.resolution, origin=self.origin,
-                       tile_size=self.tile_size, block=self.block)
+                       tile_size=self.tile_size, block_size=self.block_size)
 
 
 # ------------------------------------------------------------------------------------------- aoi
@@ -249,7 +249,7 @@ class SourceSpec(Strict):
 
 
 class InputsSpec(Strict):
-    index: str | None = None
+    index_location: str | None = None   # a DIRECTORY; the file inside is Stratum's (12 section 6)
     source: SourceSpec | None = None
     readers: dict[str, str] = Field(default_factory=dict)
     roles: dict[str, RoleSpec]
@@ -260,8 +260,8 @@ class InputsSpec(Strict):
     def _shape(self) -> InputsSpec:
         if not self.roles:
             raise ValueError("inputs.roles is empty")
-        if self.index is None and self.source is None:
-            raise ValueError("inputs needs an index to read or a source to build one from")
+        if self.index_location is None and self.source is None:
+            raise ValueError("inputs needs an index_location to read or a source to build one from")
         return self
 
     @property

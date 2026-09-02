@@ -139,7 +139,7 @@ that upstream now ships. Do not repeat that.
 ## 7. First measurements
 
 **2026-09-02**, the first-slice trial (`examples/trial-nevada/`): tile (−118, 41), June 2026,
-`MinViewZenith`, 14 L2B MIN + 14 L1B OBS granules staged locally, one arcsecond, `block: 720`.
+`MinViewZenith`, 14 L2B MIN + 14 L1B OBS granules staged locally, one arcsecond, `block_size: 720`.
 Apple Silicon laptop, 18 CPUs, local disk, pixi environment. Wall-clock unless noted.
 
 | Step | Measurement |

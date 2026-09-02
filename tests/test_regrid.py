@@ -26,7 +26,7 @@ from stratum.regrid.__main__ import main as regrid_main
 from stratum.types import GridDef, LocArray, TileRef, Window
 
 # tile_size 0.01 at 0.001 -> a 10 x 10 tile; cell diagonal 0.001414, default max_distance 0.00212
-GRID = GridDef("EPSG:4326", (0.001, -0.001), (0.0, 0.0), 0.01, block=512)
+GRID = GridDef("EPSG:4326", (0.001, -0.001), (0.0, 0.0), 0.01, block_size=512)
 TILE = TileRef(GRID, 0, 0)
 ANCHORS = (1, 3, 5, 7)   # tile rows/cols that carry a sensor pixel; sensor (i, j) -> cell (A[i], A[j])
 
@@ -206,7 +206,7 @@ def test_regrid_key_sensitivity(tmp_path: Path) -> None:
     b = regrid_granule_tile(cache, TILE, "g1", anchor_loc, max_distance=0.002)
     assert a.path != b.path
     assert cache.diff(a, b) == {"max_distance": (resolve_max_distance(GRID, None), 0.002)}
-    small = TileRef(GridDef(GRID.crs, GRID.resolution, GRID.origin, GRID.tile_size, block=16), 0, 0)
+    small = TileRef(GridDef(GRID.crs, GRID.resolution, GRID.origin, GRID.tile_size, block_size=16), 0, 0)
     c = regrid_granule_tile(cache, small, "g1", anchor_loc, max_distance=None)
     assert c.path == a.path                         # block size is not in the key
     with rasterio.open(a.path) as src:

@@ -36,8 +36,8 @@ def _bands(products_dir: Path) -> dict[str, np.ndarray]:
 def test_seam_equivalence_block_wise_equals_tile_wise(granules: Path) -> None:
     """Invariant 1 (00 section 5): four 25-cell blocks and one 50-cell block deliver
     bit-identical product bands. The two runs share one root, so the GLTs are reused."""
-    quarters = plan_run(write_manifest(granules / "b25.yaml", run_label="b25", block=25))
-    whole = plan_run(write_manifest(granules / "b50.yaml", run_label="b50", block=50))
+    quarters = plan_run(write_manifest(granules / "b25.yaml", run_label="b25", block_size=25))
+    whole = plan_run(write_manifest(granules / "b50.yaml", run_label="b50", block_size=50))
     assert quarters.counts["blocks"] == 4 and whole.counts["blocks"] == 1
     run_all(quarters.run_dir, workers=1)
     whole_exec = run_all(whole.run_dir, workers=1)

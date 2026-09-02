@@ -196,12 +196,12 @@ def plugin_from_doc(kind: str, doc: Mapping[str, Any]) -> PluginBinding:
 
 def grid_to_doc(grid: GridDef) -> dict[str, Any]:
     return {"crs": grid.crs, "resolution": list(grid.resolution), "origin": list(grid.origin),
-            "tile_size": grid.tile_size, "block": grid.block}
+            "tile_size": grid.tile_size, "block_size": grid.block_size}
 
 
 def grid_from_doc(doc: Mapping[str, Any]) -> GridDef:
     return GridDef(crs=doc["crs"], resolution=tuple(doc["resolution"]),
-                   origin=tuple(doc["origin"]), tile_size=doc["tile_size"], block=doc["block"])
+                   origin=tuple(doc["origin"]), tile_size=doc["tile_size"], block_size=doc["block_size"])
 
 
 def context_to_doc(ctx: PlanContext) -> dict[str, Any]:
