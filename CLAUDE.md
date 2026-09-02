@@ -3,7 +3,7 @@
 Cost-function-driven mosaic engine for imaging spectroscopy. **The first slice exists** (built
 2026-09-02, `src/stratum` + `src/stratum_emit`, 285 tests): a local run over staged granules,
 plan through publish, and — the same day — a run from NASA's CMR catalogue with granules
-downloaded over HTTPS on first touch (`examples/nevada-cmr/`). `docs/specs/` is still the
+downloaded over HTTPS on first touch (`examples/emit-cmr-nevada/`). `docs/specs/` is still the
 contract; the build contract it was written against is
 [`docs/notes/2026-09-02-first-slice-plan.md`](docs/notes/2026-09-02-first-slice-plan.md).
 
@@ -197,7 +197,7 @@ refs/              verbatim external artifacts - do not edit
 trial-data/        local granules for trial runs - git-ignored, never committed
 ```
 
-`examples/nevada-cmr/` is the worked example in the repository: tile (-118, 41) from CMR,
+`examples/emit-cmr-nevada/` is the worked example in the repository: tile (-118, 41) from CMR,
 January-August 2026, monthly votes, granules downloaded on first touch. Its `README.md` carries
 the credentials walk-through and the measured download volume and timings; its `index/`, `out/`
 (5 GB of assets after a run) are git-ignored. `examples/zones.yaml` is the AOI zone registry.
@@ -450,7 +450,7 @@ readers, KD-tree regrid wrapping SpectralUtil, streaming resolve with sensor- an
 the schema-driven reducer, publish (data COGs, categorical/continuous mappers, legends, STAC,
 provenance), the `local` executor and the CLI. Added the same day, beyond the contract:
 `CMRSource`, HTTPS assets behind Earthdata Login staged into a node-local asset cache, and the
-`examples/nevada-cmr` run ([12 §4–5](docs/specs/12-data-access.md)). Still out, refused with the
+`examples/emit-cmr-nevada` run ([12 §4–5](docs/specs/12-data-access.md)). Still out, refused with the
 spec section named: S3 assets, prepared assets, aux data, `stack`/`tile` scorers, `Reducer`
 plugins, `threshold`/`composite` mappers, `stratum render`, patches, `approve`, `slurm`/`aws`.
 No V002 output was available locally; a SpectralUtil `build_obs_nc` parity run stands in and

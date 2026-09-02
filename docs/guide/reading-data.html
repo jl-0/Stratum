@@ -254,7 +254,7 @@ version and an unpinned one records whatever the catalogue returns.</p>
 catalogue matches your area against the granule's footprint <em>polygon</em>, where a directory
 build has only the header bounding box. An archive index can therefore hold slightly fewer
 granules over the same tile; the extras touch the box and not the footprint, and contribute no
-pixels. A worked example with measured sizes and times is <code>examples/nevada-cmr/</code> in
+pixels. A worked example with measured sizes and times is <code>examples/emit-cmr-nevada/</code> in
 the repository.</p>
 
 <details class="explainer">
@@ -455,7 +455,7 @@ and not when the index is built. Each worker process logs in for itself. A downl
 refusal fails the item with the URL and both status codes. <strong>No credential is ever written
 down</strong> &mdash; not in a log, the plan, the report, provenance or an error message; a failed
 login names the strategies it tried and nothing more. The setup walk-through is in
-<code>examples/nevada-cmr/README.md</code>.</p>
+<code>examples/emit-cmr-nevada/README.md</code>.</p>
 
 <p>Direct S3 access to the archive works only from inside the same AWS region the data lives in
 (<code>us-west-2</code>). From elsewhere it fails in a way that reads like a permissions error, so

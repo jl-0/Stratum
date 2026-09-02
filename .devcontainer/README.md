@@ -49,12 +49,12 @@ re-run of step 5 picks up where it stopped.
 | `scripts/setup-env.sh` | pixi, the SpectralUtil submodule, `pixi install`; runs at create time and in prebuilds |
 | `scripts/install-welcome.sh`, `scripts/welcome.sh` | The banner, added to `~/.bashrc` once |
 | `scripts/login.sh` | Earthdata Login via earthaccess; secrets, `~/.netrc`, or an interactive prompt that writes `~/.netrc` |
-| `scripts/build-index.sh`, `plan.sh`, `run.sh` | Thin wrappers over `stratum index build`, `stratum plan`, `stratum run` on `examples/nevada-cmr/manifest.yaml` |
+| `scripts/build-index.sh`, `plan.sh`, `run.sh` | Thin wrappers over `stratum index build`, `stratum plan`, `stratum run` on `examples/emit-cmr-nevada/manifest.yaml` |
 | `scripts/show-results.sh`, `tools/make_site.py` | Render the products as PNGs and serve a small page on port 8080 |
 | `scripts/watch.sh`, `scripts/reset.sh` | Follow a run started elsewhere; clear runs and products but keep the downloads and cache |
 | `../.vscode/tasks.json` | Opens the walkthrough terminal on folder open (`task.allowAutomaticTasks` is set in `devcontainer.json`) |
 
-Everything the demo writes lands under `examples/nevada-cmr/` (`index/`, `out/`), which that
+Everything the demo writes lands under `examples/emit-cmr-nevada/` (`index/`, `out/`), which that
 directory's `.gitignore` excludes. Point the scripts at another manifest with
 `STRATUM_DEMO_MANIFEST=path/to/manifest.yaml`.
 
@@ -68,6 +68,14 @@ Nothing has to be published. Two optional conveniences:
 2. **Secrets for yourself.** [Codespaces user secrets](https://github.com/settings/codespaces)
    `EARTHDATA_USERNAME` and `EARTHDATA_PASSWORD`, granted to this repository, make step 2
    automatic for your own codespaces. Visitors without them get the interactive prompt.
+
+## Cost
+
+If you are not already paying for Codespaces, this demo stays well inside the free monthly
+allowance of a personal GitHub account (120 core-hours and 15 GB-months of storage at the time
+of writing). A full walkthrough is roughly half an hour on the 4-core machine, about 2
+core-hours, and the codespace holds around 10 GB while it exists. Storage is billed for as long
+as the codespace exists, so delete it when you are done rather than leaving it stopped.
 
 ## Sizing
 

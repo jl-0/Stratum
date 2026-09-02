@@ -166,7 +166,7 @@ earliest wins) on 3000 random valid cells: 3000/3000. The one structural differe
 zeroed nothing here. With `edge_trim` on (the main run) 4,723 cells seen only by a swath's outer
 seven columns become nodata; otherwise the main run equals the parity run wherever valid.
 
-**2026-09-02, the archive run** (`examples/nevada-cmr/`): the same tile from CMR, January–August
+**2026-09-02, the archive run** (`examples/emit-cmr-nevada/`): the same tile from CMR, January–August
 2026, `P1M` epochs, `min_count: 2`, `max_cloud_fraction: 0.8`; nothing staged by hand. Same
 laptop, home connection.
 

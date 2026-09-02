@@ -25,7 +25,7 @@ flowchart LR
 Three things worth noticing as it runs:
 
 - **The index holds no pixels.** Building it is one catalogue query. Granules are downloaded only
-  when a stage first needs one, into `examples/nevada-cmr/out/assets/`, and each file is checked
+  when a stage first needs one, into `examples/emit-cmr-nevada/out/assets/`, and each file is checked
   against the SHA-512 the catalogue published for it.
 - **Regridding is geometry, not science.** It depends only on where the granule's pixels fall on
   the grid, so its result is cached by content and never rebuilt. Change the scoring rule and the
@@ -55,5 +55,8 @@ each does before doing it. The full run downloads about 5.6 GB and takes around 
 four-core codespace; most of that is the download and the geometry. Read `report.md` at the plan
 step before spending the bandwidth.
 
+> On a personal GitHub account this fits comfortably inside the free monthly Codespaces
+> allowance; delete the codespace when you are done, since storage counts while it exists.
+>
 > Stopping a codespace terminates running processes but keeps every file. A run interrupted half
 > way is normal rather than broken: run the step again and the cache picks up where it stopped.

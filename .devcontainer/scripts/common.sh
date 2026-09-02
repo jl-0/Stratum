@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 # Shared settings for the demo scripts. Sourced from the repository root.
 #
-# Everything the demo produces lives under examples/nevada-cmr/ -- the manifest
+# Everything the demo produces lives under examples/emit-cmr-nevada/ -- the manifest
 # puts its storage root at ./out and its index at ./index, both git-ignored
 # there -- so the walkthrough's idea of "done" is simply whether those files
 # exist. Nothing is kept outside the repository and nothing is tracked.
 
-MANIFEST="${STRATUM_DEMO_MANIFEST:-examples/nevada-cmr/manifest.yaml}"
+MANIFEST="${STRATUM_DEMO_MANIFEST:-examples/emit-cmr-nevada/manifest.yaml}"
 EXAMPLE_DIR="$(dirname "$MANIFEST")"
 INDEX_DIR="$EXAMPLE_DIR/index"
 OUT_DIR="$EXAMPLE_DIR/out"

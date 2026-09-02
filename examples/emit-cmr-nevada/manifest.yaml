@@ -1,14 +1,14 @@
 # Stratum example: one tile of northern Nevada, January-August 2026, granules discovered in
 # NASA's CMR catalogue and downloaded from LP DAAC on first touch. Run from the repo root:
 #
-#     pixi run stratum index build -m examples/nevada-cmr/manifest.yaml   # metadata only
-#     pixi run stratum plan        -m examples/nevada-cmr/manifest.yaml   # read report.md
-#     pixi run stratum run         -m examples/nevada-cmr/manifest.yaml
+#     pixi run stratum index build -m examples/emit-cmr-nevada/manifest.yaml   # metadata only
+#     pixi run stratum plan        -m examples/emit-cmr-nevada/manifest.yaml   # read report.md
+#     pixi run stratum run         -m examples/emit-cmr-nevada/manifest.yaml
 #
 # Every path below is relative to this file. README.md walks through credentials, what each
 # stage downloads, and the sizes and times measured on the first run.
 
-run_id: nevada-cmr              # the run label; the run id is this plus a hash of the manifest
+run_id: emit-cmr-nevada              # the run label; the run id is this plus a hash of the manifest
 description: Nevada pilot tile from CMR - Jan-Aug 2026, most-nadir look wins, monthly votes
 
 grid:
@@ -73,7 +73,7 @@ scorer:
   ref: min_view_zenith            # within a month, the observation closest to nadir wins each cell
 
 snapshot:                         # what one month's snapshot holds, and how months are combined
-  name: nevada-cmr-v1
+  name: emit-cmr-nevada-v1
   layers:
     mineral_1:
       kind: categorical

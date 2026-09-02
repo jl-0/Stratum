@@ -52,7 +52,7 @@ it.</p>
 
 <p>Enough to produce a single-epoch mosaic of one area from granules you already have on disk,
 preferring the most nadir look. The repository's worked example,
-<code>examples/nevada-cmr/manifest.yaml</code>, is this same shape with a catalogue source in
+<code>examples/emit-cmr-nevada/manifest.yaml</code>, is this same shape with a catalogue source in
 place of the directory:</p>
 
 <pre><code>run_id: cuprite-2024
@@ -165,7 +165,7 @@ above are unchanged. What changes is where the time goes:</p>
 <code>STRATUM_ASSET_CACHE</code> says otherwise, are verified against the catalogue checksum, and
 are reused by every later run. The plan report's <em>Assets staged at plan time</em> section says
 how many files and bytes the plan fetched; a cloud filter is meaningful here because the
-catalogue carries cloud cover for every granule. <code>examples/nevada-cmr/</code> in the
+catalogue carries cloud cover for every granule. <code>examples/emit-cmr-nevada/</code> in the
 repository is this run over one tile and eight months, with its README recording the measured
 sizes and times. See <a href="reading-data.html#cmr">From NASA's archive</a> and
 <a href="reading-data.html#asset-cache">The asset cache</a>.</p>

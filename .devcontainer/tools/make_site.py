@@ -92,6 +92,7 @@ figcaption{{font-size:.9rem;color:#555;margin-top:.4rem}}
 table{{border-collapse:collapse}} td,th{{padding:.25rem .75rem;text-align:left;border-bottom:1px solid #e5e5e5}}
 td.n{{text-align:right;font-variant-numeric:tabular-nums}} .sw{{display:inline-block;width:1em;height:1em;border:1px solid #999;vertical-align:middle}}
 code{{background:#eee;padding:.1em .3em;border-radius:3px}}
+.bar{{height:10px;margin:.5rem 0 .15rem;border:1px solid #bbb}} .ticks{{display:flex;justify-content:space-between;font-size:.8rem;color:#555}}
 </style>
 <h1>Stratum demo — tile (−118, 41), EMIT 2026</h1>
 <p>Products from <code>{html.escape(str(prod))}</code>. Each image is one degree of northern
@@ -99,13 +100,38 @@ Nevada at one arcsecond, downsampled for the page.</p>
 <table>{stat_rows}</table>
 <div class="grid">
 <figure><img src="mineral_1.png" alt="mineral map"><figcaption><b>Mineral map</b> — the modal
-group-1 mineral across the monthly epochs; faded where agreement is low, transparent where no
-mineral was identified.</figcaption></figure>
-<figure><img src="agreement.png" alt="agreement"><figcaption><b>Agreement</b> — the winning
-class's share of the epochs that observed the cell (white = 1.0).</figcaption></figure>
-<figure><img src="n_epochs.png" alt="epochs"><figcaption><b>Epochs observed</b> — how many
-monthly snapshots had an observation of the cell (white = most).</figcaption></figure>
+group-1 mineral across the monthly epochs, coloured by class (table below); faded where
+agreement is low, transparent where no mineral was identified.</figcaption></figure>
+<figure><img src="agreement.png" alt="agreement">
+<div class="bar" style="background:linear-gradient(to right,#000,#fff)"></div>
+<div class="ticks"><span>0.0 — no epoch agreed</span><span>1.0 — every epoch agreed</span></div>
+<figcaption><b>Agreement</b> — the winning class's share of the months that observed the cell.
+Transparent where no month observed it at all.</figcaption></figure>
+<figure><img src="n_epochs.png" alt="epochs">
+<div class="bar" style="background:linear-gradient(to right,#000,#fff)"></div>
+<div class="ticks"><span>1 month</span><span>{int(n.max())} months</span></div>
+<figcaption><b>Epochs observed</b> — how many monthly snapshots held an observation of the
+cell. Transparent where none did.</figcaption></figure>
 </div>
+
+<h2>What agreement means</h2>
+<p>Each month is one <em>epoch</em>: every observation of a cell in that month is scored and the
+best one becomes the month's snapshot, so a densely revisited month gets one vote like any other.
+The reducer then tallies the snapshots' classes. The class with the most votes wins;
+<b>agreement</b> is that class's vote count divided by the number of months that observed the
+cell at all. Ten months, goethite in five, is 0.5; five months, goethite in five, is 1.0.</p>
+<p>Two details explain the dark cells in the agreement image. Months whose snapshot found
+<em>no mineral</em> still count as having observed the cell, but they are excluded from the tally
+(<code>ignore: [none]</code>), so a cell seen six times with a mineral in only two of them has
+agreement 0.33 even if both found the same one. A cell where every month found nothing has no
+winner: it is nodata in the mineral map and 0.0 here, black rather than transparent, because it
+<em>was</em> observed. That is the distinction Stratum keeps everywhere between "looked and found
+nothing" and "never looked", and it is why a support count ships beside every product.</p>
+<p>These are not demo extras: the reducer writes <code>mineral_1_agreement</code> and
+<code>n_epochs</code> beside the map for every voted layer, and the map's own rendering fades
+with agreement (<code>alpha_from</code> in the manifest). A cell is suppressed to nodata when
+its winner has fewer than <code>min_count</code> votes — here 2 — which is the other lever
+that keeps a single lucky month from asserting a mineral on its own.</p>
 <h2>Classes present</h2>
 <p>Top 15 by cell count; names are the granules' own class table (<code>classes.json</code>).</p>
 <table><tr><th></th><th>class</th><th>cells</th><th>share</th></tr>{''.join(rows)}</table>

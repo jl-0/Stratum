@@ -1,3 +1,6 @@
+# DESIGN TARGET, not yet runnable. This is the full Critical Minerals product as designed
+# (spec 09 is written around it). `stratum validate` lists what the framework does not build
+# yet - that list is the roadmap. The runnable subset is ../emit-cmr-nevada/. See README.md here.
 run_id: cm-zones-2026-annual-r3
 description: Critical Minerals annual mineral ID, 4 pilot zones
 

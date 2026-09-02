@@ -193,7 +193,7 @@ def test_local_patterns_match_the_shipped_manifest_globs():
     the GLT key term - with one built from the example manifests, so the globs are the same."""
     import yaml
 
-    doc = yaml.safe_load(Path("examples/nevada-cmr/manifest.yaml").read_text())
+    doc = yaml.safe_load(Path("examples/emit-cmr-nevada/manifest.yaml").read_text())
     shipped = doc["inputs"]["source"]["patterns"]
     for collection, assets in shipped.items():
         assert LOCAL_PATTERNS[collection] == assets

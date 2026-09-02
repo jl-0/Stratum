@@ -309,7 +309,7 @@ plan stages **one geometry asset** (the sample-asset check) and **every contribu
 class-table asset** (the vintage check reads the embedded table, which lives only in the file).
 Those bytes land in the same node-local cache the workers use and are hits for the run, so the
 total download volume is unchanged; the first plan is simply where that share of it happens
-(measured on `examples/nevada-cmr`: 1.55 GB at plan, 3.5 GB in regrid, 5.0 GB total for 33
+(measured on `examples/emit-cmr-nevada`: 1.55 GB at plan, 3.5 GB in regrid, 5.0 GB total for 33
 granules). Deferring the fingerprint check to the workers was rejected as the "fails in four
 thousand workers" anti-pattern.
 
@@ -456,7 +456,7 @@ from 2022 through August 2026). The earlier guess that `PGEVersionClass.PGEVersi
 build was wrong, which is why those rows were marked unverified rather than asserted. The
 as-built column was exercised on 2026-09-02 against `EMITL2BMIN.001`, `EMITL1BRAD.001` and
 `EMITL2AMASK.002` records (`tests/fixtures/umm/`) and by a live build over the Nevada pilot tile
-(`examples/nevada-cmr`). `GranuleRecord.raw` is the UMM-G document.
+(`examples/emit-cmr-nevada`). `GranuleRecord.raw` is the UMM-G document.
 
 > **`collection_version` is not a vintage.** Every granule in `EMITL2BMIN.001` reports
 > `CollectionReference.Version = 001`, so the field is constant across the collection and cannot

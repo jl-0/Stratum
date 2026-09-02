@@ -9,7 +9,7 @@ NASA's archive — see [`.devcontainer/README.md`](.devcontainer/README.md).
 > **Status: first slice built (2026-09-02).** A local run — staged granules, one grid, the
 > streaming scorer, the built-in reducer, published COGs with STAC and provenance — exists and is
 > tested, and so does a run from NASA's CMR catalogue with granules downloaded on first touch:
-> see [`examples/nevada-cmr/README.md`](examples/nevada-cmr/README.md) for the credentials setup
+> see [`examples/emit-cmr-nevada/README.md`](examples/emit-cmr-nevada/README.md) for the credentials setup
 > and the measured sizes and times. The cloud and cluster paths are specified but not built. See
 > [`docs/status.html`](docs/status.html). "Stratum" is a working name.
 

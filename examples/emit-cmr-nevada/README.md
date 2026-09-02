@@ -1,9 +1,18 @@
-# nevada-cmr: one tile from the archive
+# emit-cmr-nevada: one tile from the archive
 
 A Stratum run over one degree of northern Nevada (tile `-118, 41`), January to August 2026,
 with the granules found in NASA's CMR catalogue and downloaded from LP DAAC as they are needed.
 Nothing has to be staged by hand. `manifest.yaml` is annotated line by line; this page is what
 happens when you run it, and what it costs.
+
+**What it is.** The runnable subset of the Critical Minerals manifest in
+[`../emit-critical-minerals/`](../emit-critical-minerals/README.md), which is the full product
+as designed. This one keeps the same grid, the same collections and source block, the same
+class-table check and the same monthly vote, and drops what the framework does not build yet:
+the terrain and snow auxiliaries and the scorer that needs them, the cloud and soil masks, the
+curated lumping file, NetCDF output, the S3 root and the approval gate. The scorer is the
+simplest defensible one, *the most nadir look wins*, and the class table is the granules' own.
+Everything it produces is produced the same way the full product will be.
 
 All commands run from the repository root through pixi.
 
@@ -73,21 +82,21 @@ Building the index (step 1 below) needs no login at all: a CMR search is anonymo
 
 ```bash
 # 1. metadata only, a few seconds
-pixi run stratum index build -m examples/nevada-cmr/manifest.yaml
+pixi run stratum index build -m examples/emit-cmr-nevada/manifest.yaml
 
 # 2. select, validate against real granules, write the work lists
-pixi run stratum plan -m examples/nevada-cmr/manifest.yaml
-cat examples/nevada-cmr/out/runs/nevada-cmr-*/report.md      # read this before running
+pixi run stratum plan -m examples/emit-cmr-nevada/manifest.yaml
+cat examples/emit-cmr-nevada/out/runs/emit-cmr-nevada-*/report.md      # read this before running
 
 # 3. the run (re-plans first; the plan's downloads are cache hits)
-pixi run stratum run -m examples/nevada-cmr/manifest.yaml
+pixi run stratum run -m examples/emit-cmr-nevada/manifest.yaml
 
 # progress and the report, at any time
-pixi run stratum status --run nevada-cmr-<hash> --root examples/nevada-cmr/out
-pixi run stratum report --run nevada-cmr-<hash> --root examples/nevada-cmr/out
+pixi run stratum status --run emit-cmr-nevada-<hash> --root examples/emit-cmr-nevada/out
+pixi run stratum report --run emit-cmr-nevada-<hash> --root examples/emit-cmr-nevada/out
 
 # run it again: everything is a cache hit
-pixi run stratum run -m examples/nevada-cmr/manifest.yaml
+pixi run stratum run -m examples/emit-cmr-nevada/manifest.yaml
 ```
 
 `stratum run` builds the index itself when `index/granules.parquet` is absent, so step 1 is
@@ -150,7 +159,7 @@ polygon, which is what CMR searches on.
 ## 6. Where things are
 
 ```
-examples/nevada-cmr/
+examples/emit-cmr-nevada/
   manifest.yaml                 the run definition
   index/granules.parquet        the CMR index: URLs, checksums, footprints, cloud cover
   out/assets/                   downloaded granules, named by checksum; delete to re-download
