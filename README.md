@@ -34,7 +34,7 @@ The load-bearing idea is the split between 2 and 3. Regridding is expensive and 
 geometry; scoring is cheap and changes hourly. Content-addressing the GLT means changing a cost
 function re-reads cached geometry instead of rebuilding it.
 
-## Five plugin hooks
+## Five science hooks
 
 | Hook | Stage | Decides |
 |------|-------|---------|
@@ -44,6 +44,19 @@ function re-reads cached geometry instead of rebuilding it.
 | `Reducer` | reduce | How epochs collapse through time — mode, median, spread |
 | `OutputMapper` | publish | What the result looks like — enum→colour, ramps, confidence alpha |
 
+## Two access hooks
+
+A separate tier, because they add a data source rather than change an answer. Keeping them apart is
+what stops the science hook count drifting upward every time a format is added.
+
+| Hook | Runs | Decides |
+|------|------|---------|
+| `GranuleSource` | index build | Where the catalogue of granules comes from — a directory, CMR, a STAC API |
+| `GranuleReader` | every worker | How one product family's bytes become arrays |
+
+A new instrument is a reader; a new archive is a source. See
+[`12 — Data access`](docs/specs/12-data-access.md).
+
 ## Documentation
 
 **Start at [`docs/index.html`](docs/index.html)** — how the tool works and how to use it. Open it
@@ -51,8 +64,8 @@ locally or browse it on GitHub Pages.
 
 | | |
 |---|---|
-| [`docs/index.html`](docs/index.html) | The documentation site — concepts, running a mosaic, writing plugins, deployment, reference |
-| [`docs/specs/`](docs/specs/) | Component specifications. **Authoritative** — contracts, invariants, citations |
+| [`docs/index.html`](docs/index.html) | The documentation site — concepts, running a mosaic, reading data, writing plugins, scaling, reference |
+| [`docs/specs/`](docs/specs/) | Component specifications, `00`–`12`. **Authoritative** — contracts, invariants, citations |
 | [`docs/decisions/`](docs/decisions/) | Architecture decision records |
 | [`docs/notes/heritage.md`](docs/notes/heritage.md) | Internal: prior art, where the historical code lives, why choices were made |
 | [`refs/`](refs/) | Reference material from the existing pipelines, kept verbatim |

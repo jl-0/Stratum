@@ -101,8 +101,8 @@ For each (tile, epoch, block): gather the granules intersecting this block in th
 their GLTs, and run the `Scorer` to pick a winner per cell.
 
 Applying a GLT is also what makes the read cheap. The GLT names exactly which sensor pixels this
-block touches — roughly 170 × 170 of a granule's 1664 × 1242 — so only that rectangle is read, not
-the scene ([12 §2](12-data-access.md)).
+block touches — under 4% of a granule's 1664 × 1242 — so only that rectangle is read, not the scene
+([12 §2](12-data-access.md)).
 
 Two execution modes, chosen by the scorer's declared capability:
 

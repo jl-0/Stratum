@@ -132,8 +132,8 @@ running single-threaded wastes three of them for the whole regrid phase.</p>
 
 <h2 id="aws">AWS</h2>
 
-<p>For runs where the fan-out is the point. Serverless is right for three of the five stages and
-wrong for the two that matter most, so the answer is a split rather than a choice.</p>
+<p>For runs where the fan-out is the point. Serverless is right for the two cheap stages and wrong
+for the three that carry the data, so the answer is a split rather than a choice.</p>
 
 <div class="tw">
 <table>
@@ -287,8 +287,8 @@ any scheduler.</p>
 <p>The index is a GeoParquet dataset queried with DuckDB, over range requests from S3 or straight
 from a local file. There is no database to operate in any of the three cases.</p>
 
-<pre><code>stratum index build  --collection EMITL2BMIN --since 2026-08-01
-stratum index verify --collection EMITL2BMIN</code></pre>
+<pre><code>stratum index build  -m manifest.yaml --collection EMITL2BMIN --since 2026-08-01
+stratum index verify -m manifest.yaml --collection EMITL2BMIN</code></pre>
 
 <p>Building it is a separate periodic job, deliberately: a run never depends on an upstream catalogue
 being reachable, and stage 1 freezes the granule set it selected into the run prefix so the same

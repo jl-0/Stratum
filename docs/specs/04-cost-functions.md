@@ -162,6 +162,7 @@ class Scorer(Protocol):
 
     def score(self, obs: ObsWindow, aux: AuxAccessor) -> FloatArray:
         """Higher wins. NaN marks a cell this observation may not occupy."""
+```
 
 ### The snapshot is a multi-band intermediate
 
@@ -543,6 +544,7 @@ Every failure below is detected in stage 1, before compute is provisioned:
 
 1. Does `Scorer` need to see the *previous* epoch's snapshot? Would enable temporal smoothing but
    breaks epoch independence and therefore parallelism. Currently: no.
-2. Should `Reducer` see per-epoch scores as well as values? Would let it weight by confidence.
-   Cheap to add now, awkward later — leaning yes.
+2. ~~Should `Reducer` see per-epoch scores as well as values?~~ **Resolved: yes.**
+   `SnapshotStack.score` is `(n_epochs, H, W)` and always populated ([11 §8](11-types.md)).
+   `tie_break: highest_score` depends on it, and a winner-take-all reducer is expressible from it.
 3. Is `tile` capability worth supporting in v1, or should it be deferred until something needs it?

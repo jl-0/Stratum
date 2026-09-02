@@ -36,6 +36,8 @@
 <tr><td><strong>Delivery period</strong></td><td>One output product, e.g. a year. Reduced from the epochs in its <em>window</em>, which need not equal the period.</td></tr>
 <tr><td><strong>GLT</strong></td><td>Geographic lookup table. Maps a grid cell to (granule, raw row, raw col).</td></tr>
 <tr><td><strong>Role</strong></td><td>A logical input name — <code>geometry</code>, <code>mineral</code>, <code>mask</code> — resolved to a collection and variable per run.</td></tr>
+<tr><td><strong>Asset</strong></td><td>One file a granule resolves to for one role. What a reader opens.</td></tr>
+<tr><td><strong>Source</strong></td><td>Where the index comes from &mdash; a catalogue, or a directory. Never queried by a run.</td></tr>
 <tr><td><strong>Observation</strong></td><td>One granule's contribution to one block, after regrid and masking.</td></tr>
 <tr><td><strong>Snapshot</strong></td><td>The winning value per cell for one epoch. What a <code>Scorer</code> produces.</td></tr>
 <tr><td><strong>Product</strong></td><td>The reduced result per tile, plus its rendering.</td></tr>

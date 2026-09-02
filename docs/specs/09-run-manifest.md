@@ -37,6 +37,8 @@ grid:
   tile_size: 1.0
   origin: [-180, -90]
   block: 512
+  max_distance: 0.00064       # regrid cutoff; default 1.5 x the grid diagonal - see 03 section 3
+  # force_positive_y: true    # only to defeat the guard rail in 01 section 1
 
 aoi:
   zones: [bingham-canyon, cuprite-nv, leadville-co, south-central-az]
@@ -81,6 +83,8 @@ aux:
   snow:  {uri: "s3://.../snow/{date}.tif", kind: categorical, resampling: nearest,
           temporal: nearest, max_age: P3D}
 
+# allow_mixed_vintage: true           # top level; requires a documented reason - see section 5
+
 granule_filter:
   - {build_version: b0107_v02}          # REQUIRED - see 02 section 3
   - {max_cloud_fraction: 0.5, on_missing: fail}
@@ -120,6 +124,14 @@ budget:
   max_vcpu_hours: 400
   on_exceed: require_approval
 ```
+
+### Three fields that exist only to defeat a default
+
+`grid.max_distance`, `grid.force_positive_y` and top-level `allow_mixed_vintage` are all overrides
+of something the framework would otherwise decide or refuse. They are named here rather than left
+implicit because `max_distance` enters the GLT cache key ([06 §2](06-caching.md)) — an input that
+determines an artifact must be settable — and because the other two are the documented escape
+hatches for guard rails in [01 §1](01-grid-tiling.md) and [02 §3](02-granule-index.md).
 
 ---
 
@@ -177,8 +189,9 @@ Everything below fails in stage 1, loudly, while it is cheap:
 - the contributing granules' class tables **agree by fingerprint**, or a cross-vintage remap is
   explicitly permitted ([11 §9](11-types.md));
 - filter `on_missing` policy explicit;
-- **a vintage is pinned**, and the frozen index does not span multiple vintages unless explicitly
-  permitted ([02 §3](02-granule-index.md));
+- **a vintage is pinned** on a granule-level field (`build_version` / `product_version`, never
+  `collection_version`), and the frozen index does not span multiple vintages unless
+  `allow_mixed_vintage: true` is set with a documented reason ([02 §3](02-granule-index.md));
 - budget present and non-infinite.
 
 ---

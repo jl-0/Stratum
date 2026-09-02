@@ -69,10 +69,11 @@ the better shape and fail more cheaply. Set `--cpus-per-task` to match what the 
 
 Credential expiry (~1 h) argues for short array tasks here just as it argues for Lambda on AWS.
 
+---
+
 ## 2. AWS split plane
 
-
-Serverless is right for three of the five stages and wrong for the two that matter most. The
+Serverless is right for the two cheap stages and wrong for the three that carry the data. The
 honest answer is a split, not a choice.
 
 | Plane | Service | Stages | Why |

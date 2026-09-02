@@ -51,6 +51,7 @@
 <tr><td><a href="#outputs"><code>outputs</code></a></td><td>yes</td><td>Destination, formats, rendering</td></tr>
 <tr><td><a href="#plugins"><code>plugins</code></a></td><td>no</td><td>Plugin wheel to fetch at cold start</td></tr>
 <tr><td><a href="#budget"><code>budget</code></a></td><td>yes</td><td>Fan-out ceilings and what to do when exceeded</td></tr>
+<tr><td><code>allow_mixed_vintage</code></td><td>no</td><td>Permits a frozen index spanning more than one vintage. Requires a documented reason</td></tr>
 </tbody>
 </table>
 </div>
@@ -62,7 +63,8 @@
   resolution: [0.0003, -0.0003]
   origin: [-180, -90]
   tile_size: 1.0
-  block: 512</code></pre>
+  block: 512
+  max_distance: 0.00064      # regrid cutoff; default 1.5 x the grid diagonal</code></pre>
 
 <div class="tw">
 <table>
@@ -73,6 +75,8 @@
 <tr><td><code>origin</code></td><td>[float, float]</td><td>—</td><td>Cell edges fall at <code>origin + n × resolution</code></td></tr>
 <tr><td><code>tile_size</code></td><td>float</td><td>—</td><td>In CRS units. The product unit.</td></tr>
 <tr><td><code>block</code></td><td>int</td><td><code>512</code></td><td>Cells per side. Cannot change output.</td></tr>
+<tr><td><code>max_distance</code></td><td>float</td><td>1.5 &times; grid diagonal</td><td>Beyond it a regridded cell is marked interpolated. Enters the GLT cache key.</td></tr>
+<tr><td><code>force_positive_y</code></td><td>bool</td><td><code>false</code></td><td>Defeats the positive-<code>y</code> guard rail. Almost always the wrong thing to set.</td></tr>
 </tbody>
 </table>
 </div>
@@ -277,7 +281,8 @@ before compute is provisioned, and plugins may only read aliases declared here.<
 <thead><tr><th>Predicate</th><th>Effect</th></tr></thead>
 <tbody>
 <tr><td><code>build_version</code></td><td>Pins a product vintage. <strong>Required</strong> — see below.</td></tr>
-<tr><td><code>product_version</code></td><td>Pins a collection version</td></tr>
+<tr><td><code>product_version</code></td><td>Pins the granule's own product stamp, e.g. <code>V001</code></td></tr>
+<tr><td><code>collection_version</code></td><td>Pins the collection's version, e.g. <code>001</code>. Constant within a collection, so it is <strong>not</strong> a vintage predicate</td></tr>
 <tr><td><code>max_cloud_fraction</code></td><td>Upper bound on reported cloud fraction</td></tr>
 <tr><td><code>max_solar_zenith</code></td><td>Upper bound on solar zenith angle</td></tr>
 <tr><td><code>month_in</code></td><td>Recurring seasonal window, as month numbers</td></tr>
@@ -446,7 +451,10 @@ exist and are readable;</li>
 in a colour table exists after lumping;</li>
 <li>contributing granules' class tables agree by fingerprint, or a remap is explicitly permitted;</li>
 <li>every filter's <code>on_missing</code> policy is explicit;</li>
-<li>a vintage is pinned and the frozen index does not span several;</li>
+<li>every role's <code>collection</code> resolves to exactly one registered <code>GranuleReader</code>, and its <code>var</code> exists in that reader's variables;</li>
+<li>every asset URI scheme is supported and credentials for it are obtainable now;</li>
+<li>readers agree on space &mdash; an ortho-native role is not being asked for a regrid;</li>
+<li>a vintage is pinned on a granule-level field and the frozen index does not span several;</li>
 <li><code>budget</code> is present and finite.</li>
 </ul>
 

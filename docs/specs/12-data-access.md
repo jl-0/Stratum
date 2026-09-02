@@ -72,11 +72,13 @@ Five things here are load-bearing.
 **Step 6 is a windowed read, not a file read.** GLTs are written as COGs whose internal tile size
 divides the block size, so a block fetches only the bytes covering its own window.
 
-**Step 10 is the whole point of this spec.** A 512 × 512 block at 0.0003° spans about 0.15°, which
-is roughly 170 × 170 of a granule's 60 m pixels. The granule is 1664 × 1242
-([11 §1](11-types.md)). Reading the whole scene once per block would be a ~50× read amplification,
-paid on every block, of every granule, in every epoch. `SensorWindow.covering` takes the min and
-max of the GLT's X and Y bands across the block and reads that rectangle alone.
+**Step 10 is the whole point of this spec.** A 512 × 512 block at 0.0003° spans 0.1536°, which is
+about 17 km at the equator, or roughly 285 × 285 of a granule's 60 m pixels — fewer in longitude
+toward the poles. The granule is 1664 × 1242 ([11 §1](11-types.md)), so the block needs under 4% of
+it. Reading the whole scene once per block would be a **~25× read amplification** at the equator and
+more at mid-latitudes, paid on every block, of every granule, in every epoch.
+`SensorWindow.covering` takes the min and max of the GLT's X and Y bands across the block and reads
+that rectangle alone.
 
 **The window carries its origin, not just its shape.** `SensorWindow` is
 `(row0, col0, height, width)` against the *full* sensor array. A sensor-space `PixelMask` such as
@@ -185,7 +187,7 @@ Schemes: `file://`, `s3://`, and `https://` behind Earthdata Login.
 | Mode | How | When |
 |---|---|---|
 | **Stage-in** | The worker copies that one asset to its own scratch and gets a path back | Default. Works with any code that takes a filename, including unmodified `SpectralUtil` |
-| **Stream** | `/vsis3/` or fsspec; reads become HTTP range requests | Once the reader supports windowed reads. A block touching 170 × 170 of 1664 × 1242 fetches ~1% of the file |
+| **Stream** | `/vsis3/` or fsspec; reads become HTTP range requests | Once the reader supports windowed reads. A block touching ~285 × 285 of 1664 × 1242 fetches under 4% of the file |
 
 The sequencing is deliberate and already the plan in [03 §4](03-regrid-glt.md): **stage-in first**,
 because it works immediately against code that exists; **streaming second**, because that is where
@@ -307,11 +309,22 @@ things have to happen between that and a row in our index:
 | `bbox` | derived from `geometry` | Denormalized for cheap prefilter |
 | `cloud_fraction` | `AdditionalAttributes` — **attribute name to confirm** | **`None` when absent** |
 | `assets` | `RelatedUrls[]`, `Type` in `GET DATA` / `GET DATA VIA DIRECT ACCESS` | The direct-access entry is the `s3://` URI |
-| `build_version` | `PGEVersionClass.PGEVersion` — **candidate, unverified** | See below |
-| `product_version` | `CollectionReference.Version` | Collection-level (`001`), not the granule's `V001` attribute |
+| `build_version` | `PGEVersionClass.PGEVersion` — **candidate, unverified** | Granule-level. See below |
+| `product_version` | granule-level; UMM-G location **unverified** | The granule's own `V001` stamp. May require a header scan — see below |
+| `collection_version` | `CollectionReference.Version` | The collection's version (`001`). Identical for every granule in the collection, so **never** a vintage predicate |
+| `day_night` | `DataGranule.DayNightFlag` | |
+| `last_seen` | set by the index build, not from UMM-G | The refresh timestamp — see paging below |
 
-Two rows are marked unverified on purpose. They are the concrete thing to check first against a
+Three rows are marked unverified on purpose. They are the concrete thing to check first against a
 real query, and guessing them in a spec would be worse than naming them as open.
+
+> **`collection_version` is not a vintage.** Every granule in `EMITL2BMIN.001` reports
+> `CollectionReference.Version = 001`, so the field is constant across the collection and cannot
+> tell a reprocessed granule from an original one. If a reprocessing campaign is published as a new
+> collection it becomes visible as a *different collection*; if granules are re-delivered in place
+> under the same collection — which is the case this design must survive — only the granule-level
+> fields move. That is why the index carries all three ([02 §2](02-granule-index.md)) and why the
+> vintage predicate is `build_version` / `product_version`, never `collection_version`.
 
 ### The vintage question is answered here or nowhere
 

@@ -100,6 +100,10 @@ Established by reading code and data. Do not re-derive; do not assume the opposi
   everything. Both are reductions over an observation stack; that unification is the core idea.
 - **`-9999` ≠ `0`.** In a mineral ID, `-9999` is "not observed" and `0` is "observed, nothing
   identified". Conflating them fabricates agreement.
+- **A collection version is not a vintage.** `CollectionReference.Version` is constant for every
+  granule in a CMR collection, so it can never distinguish a reprocessed granule from an original.
+  Vintage predicates use the granule-level `build_version` / `product_version`. The index carries
+  all three separately — see [`02-granule-index.md` §2](docs/specs/02-granule-index.md).
 - **Products carry their own class tables; use them.** The L2B granule embeds `/mineral_metadata`
   (294 entries). Read the table from the granule being processed rather than a checked-in CSV — it
   cannot drift from the pixels it describes. Raw values are positional and differ between vintages
@@ -124,12 +128,12 @@ several agree. Everything domain-specific lives in `stratum_emit`. If you find y
 
 ```
 docs/index.html    site landing page (GitHub Pages serves docs/)
-docs/guide/        concepts, running, plugins, caching, deployment  <- how to use it
+docs/guide/        concepts, running, reading-data, plugins, caching, scaling  <- how to use it
 docs/reference/    manifest, types, cli                             <- field/API reference
 docs/decisions/    ADR digest (HTML) + the ADRs themselves (Markdown)
 docs/status.html   what is implemented, what is open
 docs/assets/       stratum.css, stratum.js - the only shared chrome
-docs/specs/        00-11, numbered by dependency order   <- authoritative
+docs/specs/        00-12, numbered by dependency order   <- authoritative
 docs/notes/        heritage.md, meeting notes, archived proposal    <- internal
 refs/              verbatim external artifacts - do not edit
 ```

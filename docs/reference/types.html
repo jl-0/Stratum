@@ -44,7 +44,7 @@ against. <span class="chip chip-draft">open</span> means a field may still be ad
 <tr><td><code>GranuleFrame</code></td><td>In <code>GranuleFilter.keep()</code></td><td><span class="chip chip-locked">locked</span></td></tr>
 <tr><td><code>ObsWindow</code></td><td>In <code>Scorer.score()</code>, <code>PixelMask.valid()</code></td><td><span class="chip chip-locked">locked</span></td></tr>
 <tr><td><code>AuxAccessor</code></td><td>In every hook</td><td><span class="chip chip-locked">locked</span></td></tr>
-<tr><td><code>SnapshotStack</code></td><td>In <code>Reducer.reduce()</code></td><td><span class="chip chip-draft">open</span> — whether per-epoch scores stay exposed</td></tr>
+<tr><td><code>SnapshotStack</code></td><td>In <code>Reducer.reduce()</code></td><td><span class="chip chip-locked">locked</span></td></tr>
 <tr><td><code>BandStack</code></td><td>In <code>OutputMapper.render()</code></td><td><span class="chip chip-locked">locked</span></td></tr>
 <tr><td><code>BandSpec</code></td><td>You declare these</td><td><span class="chip chip-locked">locked</span></td></tr>
 <tr><td><code>GLT</code></td><td>Only if you work with geometry directly</td><td><span class="chip chip-locked">locked</span></td></tr>
@@ -236,13 +236,19 @@ scorer, mask, reducer or mapper never sees one. See
     end_datetime: datetime
     bbox: tuple[float, float, float, float]
     assets: Mapping[str, str]     <span class="c"># role -&gt; URI</span>
-    build_version: str            <span class="c"># "010635"     [observed]</span>
-    product_version: str          <span class="c"># "V001"       [observed]</span>
+    build_version: str            <span class="c"># "010635"  granule build   [observed]</span>
+    product_version: str          <span class="c"># "V001"    granule stamp   [observed]</span>
+    collection_version: str       <span class="c"># "001"     the collection's version</span>
     cloud_fraction: float | <span class="k">None</span>
     day_night: str | <span class="k">None</span>       <span class="c"># "Day"        [observed]</span></code></pre>
 
 <p><code>GranuleFrame</code> is the plural form — a dataframe with these as columns, which is what
 <code>GranuleFilter.keep()</code> receives. Operate on it vectorized.</p>
+
+<p>Three version fields, deliberately. <code>build_version</code> and <code>product_version</code>
+are properties of <em>this granule</em>, read from its own attributes, and are what a vintage filter
+pins. <code>collection_version</code> is a property of the collection, so it is identical for every
+granule in it and can never tell a reprocessed granule from an original one.</p>
 
 <p><code>cloud_fraction</code> is nullable and the nullness is meaningful: <code>None</code> means
 the granule reports no cloud metadata, which is a different situation from reporting a high value.

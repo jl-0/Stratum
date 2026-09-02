@@ -41,7 +41,8 @@ it. **[observed]** unless noted.
 | `group_N_mineral_id` | `int16` | **`0`** | Processed, **no mineral identified** — *not* the same thing |
 | `group_N_band_depth` | `float32` | `_FillValue = -9999.0` | Range observed 0.0 – 0.5 |
 | `location/lat,lon,elev` | `float64` | `-9999.0` | |
-| `location/glt_x,glt_y` | `int32` | `0` | 1-based indices; observed range 1–1242, **no negatives** |
+| `location/glt_x` | `int32` | `0` | 1-based crosstrack index; observed range 1–1242, **no negatives** |
+| `location/glt_y` | `int32` | `0` | 1-based downtrack index; observed range 1–1664, **no negatives** |
 | Stratum GLT band 3 | `int32` | `0` | Granule index, 1-based |
 | Stratum GLT bands 1–2 | `int32` | `0` | **Negative = interpolated** (SpectralUtil convention; *not* used in delivered granules) |
 | `Scorer.score` | `float32` | `NaN` | This observation may not occupy this cell |
@@ -123,11 +124,20 @@ class GranuleRef:
     end_datetime: datetime
     bbox: tuple[float, float, float, float]
     assets: Mapping[str, str]     # role -> URI
-    build_version: str            # "010635"          [observed]
-    product_version: str          # "V001"            [observed]
+    build_version: str            # "010635"  granule software build   [observed]
+    product_version: str          # "V001"    granule product stamp    [observed]
+    collection_version: str       # "001"     the CMR collection's own version
     cloud_fraction: float | None  # None is meaningful - see 02 section 4
     day_night: str | None         # "Day"             [observed]
 ```
+
+**Three version fields, deliberately.** `build_version` and `product_version` are properties of
+*this granule*, read from its own global attributes. `collection_version` is a property of the
+**collection** it belongs to, so it is identical for every granule in that collection and can never
+discriminate between them. Vintage pinning ([02 §3](02-granule-index.md)) is therefore a predicate
+on the first two; `collection_version` exists only so a run can record which collection it read.
+Collapsing them into one field is how a "pinned" run silently spans a reprocessing boundary
+([12 §5](12-data-access.md)).
 
 `GranuleFrame` is the plural form: a dataframe with these as columns, which is what
 `GranuleFilter.keep()` receives. Filters are vectorized over it and never see individual granules.
@@ -262,7 +272,8 @@ Bands are `(GLT X, GLT Y, File Index)`, 1-based, `0` = nodata, negatives = inter
 It is typed optional only because a GLT read back from a V002-era file will not have one.
 
 > **[observed] The granule already ships a GLT.** `location/glt_x` and `location/glt_y`
-> (`int32`, `_FillValue = 0`, observed range 1–1242) map the granule's own ortho grid
+> (`int32`, `_FillValue = 0`; observed ranges 1–1242 crosstrack, 1–1664 downtrack) map the
+> granule's own ortho grid
 > (2363 × 2309) back to sensor space. This is *not* our tile grid — the origin is per-granule — so
 > it cannot substitute for the KD-tree regrid. It is worth knowing about for two reasons: it is
 > what `SpectralUtil`'s `load_data(..., load_glt=True)` returns, and it is a ready-made fixture
@@ -308,9 +319,9 @@ acquisition time, runner-up margin or per-candidate evidence costs `O(block × n
 streaming worker, independent of observation count. Storage is the real limit, not memory.
 
 `SnapshotStack.valid` is what keeps `min_count` honest: an epoch with no observation over a pixel
-must not count toward agreement. And exposing `score` lets a reducer weight by confidence rather
-than treating every epoch equally — the open question in [04 §9](04-cost-functions.md), left
-available in the type so it stays cheap to answer later.
+must not count toward agreement. `score` is always populated, so a reducer may weight by confidence
+rather than treating every epoch equally — `tie_break: highest_score` depends on it, and a
+winner-take-all reducer is expressible as an argmax over it ([04 §5](04-cost-functions.md)).
 
 ---
 
@@ -390,6 +401,9 @@ belongs in the core.
 A mosaic's classes are its own — post-lumping, they are not the input classes. Stage 5 therefore
 publishes a `ClassTable` for the product alongside it, which is the same requirement as the legend
 in [07 §2](07-output-mapping.md), reached from the other direction.
+
+---
+
 ## 10. Data access
 
 The types below sit *underneath* `ObsWindow` — the framework uses them to fill it, and no plugin
@@ -439,6 +453,42 @@ class AssetStore:
     def stage(self, uri: str) -> Path: ...
     def credentials_for(self, uri: str) -> Credentials: ...
 ```
+
+The supporting types those signatures name:
+
+```python
+@dataclass(frozen=True)
+class GranuleRecord:
+    """One catalogue answer, before it becomes an index row. Source-shaped, not schema-shaped."""
+    native_id: str                      # GranuleUR, or a path for LocalSource
+    collection: str
+    datetime: datetime
+    end_datetime: datetime
+    geometry: BaseGeometry              # footprint, EPSG:4326
+    attributes: Mapping[str, object]    # everything else the source returned, verbatim
+    raw: object                         # the untranslated record, for debugging a mapping
+
+class AssetHandle(Protocol):
+    """An openable asset. A reader never learns which mode produced it."""
+    uri: str
+    etag: str | None
+    def path(self) -> Path | None: ...  # a local path when staged, else None
+    def vsi(self) -> str: ...           # a GDAL/fsspec-openable string, always
+
+class ReaderContext(Protocol):
+    """Whatever a reader keeps between open() and read(). Opaque to the framework."""
+    asset: AssetHandle
+
+@dataclass(frozen=True)
+class Credentials:
+    kind: Literal["aws", "bearer", "netrc", "none"]
+    expires: datetime | None            # None when it does not expire
+    def as_env(self) -> Mapping[str, str]: ...
+```
+
+`LocArray` is the geolocation triple `geolocation()` returns — `lat`, `lon` and `elev`, each
+`(downtrack, crosstrack)` `float64` in sensor space with fills already masked. It is the KD-tree
+input and nothing else consumes it ([03 §3](03-regrid-glt.md)).
 
 Three properties are worth stating as type-level guarantees, because each has a failure mode that
 is invisible if it is left to convention:

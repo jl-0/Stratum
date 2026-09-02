@@ -88,17 +88,18 @@ cand = frozen_index.intersecting(block, epoch)
 
 <h3 id="window">Why step 2 is the whole trick</h3>
 
-<p>A 512 &times; 512 block at 0.0003&deg; spans about 0.15&deg;, which covers roughly 170 &times; 170
-of a granule's 60 m pixels. The granule itself is 1664 &times; 1242. Reading the whole scene for
-every block would read about fifty times more data than the block needs &mdash; and pay it again for
-every granule, in every epoch.</p>
+<p>A 512 &times; 512 block at 0.0003&deg; spans 0.1536&deg; &mdash; about 17 km at the equator, or
+roughly 285 &times; 285 of a granule's 60 m pixels, and fewer in longitude as you move away from
+it. The granule itself is 1664 &times; 1242. Reading the whole scene for every block would read
+about twenty-five times more data than the block needs &mdash; and pay it again for every granule,
+in every epoch.</p>
 
 <div class="tw">
 <table>
 <thead><tr><th>Approach</th><th>Read per block, per granule</th></tr></thead>
 <tbody>
 <tr><td>Open the granule, take what you need</td><td>The whole scene &mdash; ~2.1 M pixels per variable</td></tr>
-<tr><td>Window from the GLT first</td><td>~29 k pixels &mdash; about 1.4%</td></tr>
+<tr><td>Window from the GLT first</td><td>~81 k pixels &mdash; under 4%</td></tr>
 </tbody>
 </table>
 </div>
@@ -277,7 +278,7 @@ modes behind one interface:</p>
 <thead><tr><th>Mode</th><th>What happens</th><th>When</th></tr></thead>
 <tbody>
 <tr><td><strong>Stage in</strong></td><td>The worker copies that one asset to its own scratch and gets a path back</td><td>The default. Works with any code that expects a filename</td></tr>
-<tr><td><strong>Stream</strong></td><td>Reads become HTTP range requests; only the touched bytes move</td><td>Once a reader supports windowed reads &mdash; roughly 1% of a file for one block</td></tr>
+<tr><td><strong>Stream</strong></td><td>Reads become HTTP range requests; only the touched bytes move</td><td>Once a reader supports windowed reads &mdash; under 4% of a file for one block</td></tr>
 </tbody>
 </table>
 </div>

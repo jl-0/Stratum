@@ -43,9 +43,18 @@ GeoParquet, one row per granule per collection.
 | `geometry` | polygon | Footprint, EPSG:4326 |
 | `bbox` | float[4] | Denormalized for cheap prefilter |
 | `cloud_fraction` | float | Nullable — **nullness is meaningful**, see §4 |
-| `build_version` | string | e.g. `b0106_v01`; filterable, not hard-coded |
+| `build_version` | string | Granule software build, e.g. `010635`; filterable, not hard-coded |
+| `product_version` | string | Granule product stamp, e.g. `V001` |
+| `collection_version` | string | The **collection's** version, e.g. `001`. Same for every row in a collection |
+| `day_night` | string | Nullable; `Day` / `Night` |
+| `last_seen` | timestamp UTC | When the index build last observed this row — see §3 |
 | `assets` | map<string,string> | role → URI |
 | `quality_flags` | map<string,int> | Collection-specific |
+
+`build_version` and `product_version` are granule-level and are what a vintage predicate filters
+on. `collection_version` is collection-level and cannot discriminate between granules within a
+collection — it is recorded, never filtered for vintage ([11 §4](11-types.md),
+[12 §5](12-data-access.md)).
 
 Partitioned by `collection` and acquisition month — the two predicates every query uses.
 
@@ -82,8 +91,8 @@ Requirements:
 
 - `build_version` (and collection version) are **indexed, first-class columns**, never hard-coded
   as `convert_fids.py` does with `b0106_v01`;
-- the index records **when each row was last observed**, so a re-index after reprocessing is
-  detectable rather than silent;
+- the index records **when each row was last observed** in `last_seen`, so a re-index after
+  reprocessing is detectable rather than silent;
 - **plan-time validation fails** if a run's frozen index spans more than one vintage, unless the
   manifest explicitly opts in with a documented reason;
 - the run report states the vintage(s) selected, prominently.

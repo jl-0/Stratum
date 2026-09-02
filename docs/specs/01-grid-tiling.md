@@ -80,6 +80,11 @@ Three things follow: the materialized reduction fits a serverless worker; parall
 which matters against a 10,000-child Distributed Map; and retries get cheap enough to make Spot
 safe.
 
+**Blocks clip to the AOI, like tiles.** A 1° tile at 0.0003° is ⌈3334/512⌉² = 49 blocks if fully
+covered, but the planner emits work items only for blocks that intersect the AOI, so a real tile
+usually carries fewer. The ratios above are areas — one block is 1/42 of a tile's *area* — and are
+not a work-item count.
+
 A second argument, independent of the stack: `write_cog` materializes the full array plus a GDAL
 `MEM` copy plus overviews before writing, so **peak memory scales with tile area** regardless of
 observation count. Blocks attack the term that actually dominates.
