@@ -122,7 +122,8 @@ The product: a 3600 x 3600 grid in which every cell was observed in 3 to 6 of th
 32.9 % of cells received a mineral vote that met `min_count: 2` (the rest are `none` or a
 one-month singleton); the mean agreement over those cells is 0.60. The most common classes are
 cummingtonite, butlerite, weathered basalt and the nano-hematite group, the same leaders as the
-local June-only trial in `examples/trial-nevada/`. Of that trial's 14 June granules, CMR
+first trial over the same tile from a local directory (June only; not in the repository).
+Of that trial's 14 June granules, CMR
 returns 12: the other two touch the tile only with their bounding box, not with their footprint
 polygon, which is what CMR searches on.
 
