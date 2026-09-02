@@ -99,19 +99,21 @@ That makes "a framework, not an EMIT program" a present requirement rather than 
 Multi-instrument support is a design constraint from the start — which is also why input roles and
 band aliases are resolved per collection rather than hard-coded.
 
-## Open questions blocking design
+## Open questions
 
-1. **Is `freq-N` in EMIT-AMD a frequency rank or a time period?** Decides how much of
-   mode-through-time is new work. One question to James.
-2. **Mode over mineral ID directly, or over something continuous first?** For Phil — who has since
-   leaned toward *not* reducing over binarized labels. See
-   [04 §5](docs/specs/04-cost-functions.md).
-3. ~~**What does the vintage identifier look like in delivered metadata**, and is a reprocessed
-   granule distinguishable before download?~~ **Resolved** against CMR on 2026-09-01:
-   `SOFTWARE_BUILD_VERSION` is a granule-level attribute — and one collection already spans eight
-   of them, so the vintage check is the class-table fingerprint, not a build pin
-   ([02 §3](docs/specs/02-granule-index.md)).
-4. **AWS account, quota and Earthdata credential path.** The long pole.
+None of these blocks the local run; the rolling list, with every spec's open questions, is
+[`docs/status.html`](docs/status.html).
+
+1. **Is `freq-N` in EMIT-AMD a frequency rank or a time period?** The `vote` reducer exists
+   (`min_count`, `ignore`, `tie_break`); the question is now whether AMD's stack is a
+   configuration of it or a different aggregation. One question to James.
+2. **Mode over mineral ID directly, or over something continuous first?** Both directions are
+   expressible today — `vote` over the class layer, continuous layers reduced conditionally on
+   it — except classify-last, which waits on scorer-computed snapshot layers
+   ([04 §4](docs/specs/04-cost-functions.md)). For Phil, who has leaned toward *not* reducing over
+   binarized labels.
+3. **AWS account, quota and Earthdata credential path.** The long pole for anything cloud;
+   nothing local waits on it.
 
 ## Time-critical context
 
