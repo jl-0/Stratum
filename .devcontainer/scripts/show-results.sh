@@ -11,14 +11,24 @@ pixi run python .devcontainer/tools/make_site.py "$prod" "$SITE_DIR"
 if port_listening; then
   echo "[results] a server is already listening on port $PORT"
 else
+  # The environment's own interpreter, like every other step: the base image
+  # carries no promise of a system python3, and a missing one used to leave the
+  # walkthrough claiming it had served a page that was never there.
+  py="$PWD/.pixi/envs/default/bin/python"
+  [ -x "$py" ] || py=$(command -v python3 || true)
+  [ -n "$py" ] || { echo "[results] no python to serve with" >&2; exit 1; }
+  log="$SITE_DIR/server.log"
   # setsid (util-linux) detaches the server from this terminal's session on Linux and
   # Codespaces; macOS has no setsid, and nohup alone is enough there.
-  if command -v setsid >/dev/null 2>&1; then
-    setsid nohup python3 -m http.server "$PORT" --bind 0.0.0.0 -d "$SITE_DIR" >"$SITE_DIR/server.log" 2>&1 < /dev/null &
-  else
-    nohup python3 -m http.server "$PORT" --bind 0.0.0.0 -d "$SITE_DIR" >"$SITE_DIR/server.log" 2>&1 < /dev/null &
-  fi
+  detach=(nohup)
+  command -v setsid >/dev/null 2>&1 && detach=(setsid nohup)
+  "${detach[@]}" "$py" -m http.server "$PORT" --bind 0.0.0.0 -d "$SITE_DIR" >"$log" 2>&1 < /dev/null &
   for _ in 1 2 3 4 5 6 7 8 9 10; do port_listening && break; sleep 0.5; done
+  if ! port_listening; then
+    echo "[results] nothing is listening on port $PORT; $log says:" >&2
+    tail -n 5 "$log" >&2 || true
+    exit 1
+  fi
   echo "[results] serving $SITE_DIR on port $PORT"
 fi
 if [ -n "${CODESPACE_NAME:-}" ]; then

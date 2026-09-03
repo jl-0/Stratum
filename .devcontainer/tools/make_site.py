@@ -12,16 +12,22 @@ from __future__ import annotations
 import html
 import json
 import sys
+import warnings
 from pathlib import Path
 
 import numpy as np
 import rasterio
+from rasterio.errors import NotGeoreferencedWarning
 
 
 def write_png(path: Path, rgba: np.ndarray) -> None:
+    """A plain browser PNG: no CRS, no transform - the GeoTIFFs next to it carry the geometry."""
     h, w, _ = rgba.shape
-    with rasterio.open(path, "w", driver="PNG", width=w, height=h, count=4, dtype="uint8") as dst:
-        dst.write(np.moveaxis(rgba, -1, 0))
+    with warnings.catch_warnings():             # a web page's PNG carries no georeferencing
+        warnings.simplefilter("ignore", NotGeoreferencedWarning)
+        with rasterio.open(path, "w", driver="PNG", width=w, height=h, count=4,
+                           dtype="uint8") as dst:
+            dst.write(np.moveaxis(rgba, -1, 0))
 
 
 def ramp(values: np.ndarray, lo: float, hi: float, nodata_mask: np.ndarray) -> np.ndarray:
