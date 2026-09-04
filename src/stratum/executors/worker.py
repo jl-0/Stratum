@@ -25,7 +25,7 @@ from stratum.publish import product_dir, publish_period, write_product_block
 from stratum.reduce import band_counts, delivered_bands, reduce_stack
 from stratum.regrid import REGRID_ALGO_VERSION, regrid_granule_tile
 from stratum.resolve import resolve_block, snapshot_key, stack_snapshots
-from stratum.types import BlockRef, Epoch, LocArray, TileRef
+from stratum.types import BlockRef, EmbeddedGLT, Epoch, LocArray, TileRef
 
 _RUNS: dict[Path, RunPlan] = {}
 
@@ -58,31 +58,45 @@ def regrid_item(item: Mapping[str, Any], run: RunPlan) -> tuple[CacheKey, bool]:
                         f"but this build is {REGRID_ALGO_VERSION}; re-plan (06 section 3 rule 2)")
     tile = _tile(run, item)
     gid = str(item["granule_id"])
+    adopting = ctx.regrid_method == "adopt"
+    # the geolocation asset's catalogue checksum, from the frozen GranuleRef (12 section 4);
+    # None for a local source, which the store accepts. Under `adopt` it also identifies the
+    # bytes the GLT was taken from, so it is a key term (06 section 2).
+    ref = ctx.granules.get(gid)
+    checksum = (ref.checksums.get(f"{item['collection']}/{item['asset']}")
+                if ref is not None else None)
     key = ctx.cache.key("glt", ctx.grid.id, tile, glt_inputs(
-        gid, ctx.grid, ctx.max_distance, ctx.regrid_method, ctx.regrid_algo_version))
+        gid, ctx.grid, None if adopting else ctx.max_distance, ctx.regrid_method,
+        ctx.regrid_algo_version, source=checksum))
     hit = ctx.cache.hit(key)
 
-    def loc() -> LocArray:
+    def _read(what: str) -> Any:
         reader = ctx.reader(str(item["collection"]))
-        # the geolocation asset's catalogue checksum, from the frozen GranuleRef (12 section 4);
-        # None for a local source, which the store accepts
-        ref = ctx.granules.get(gid)
-        checksum = (ref.checksums.get(f"{item['collection']}/{item['asset']}")
-                    if ref is not None else None)
         rctx = reader.open(ctx.store.open(str(item["uri"]), checksum=checksum))
         try:
-            arrays = reader.geolocation(rctx)
+            return getattr(reader, what)(rctx)
         finally:
             close = getattr(rctx, "close", None)
             if close is not None:
                 close()
+
+    def loc() -> LocArray:
+        arrays = _read("geolocation")
         if arrays is None:
             raise ValueError(f"granule {gid!r}: {item['uri']} has no geolocation; the "
                              "geolocation role must be sensor-space (03 section 3)")
         return arrays
 
+    def embedded() -> EmbeddedGLT:
+        glt = _read("glt")
+        if glt is None:
+            raise ValueError(f"granule {gid!r}: {item['uri']} ships no lookup table of its own, "
+                             "which regrid_method 'adopt' needs (03 section 3)")
+        return glt
+
     written = regrid_granule_tile(ctx.cache, tile, gid, loc, max_distance=ctx.max_distance,
-                                  regrid_method=ctx.regrid_method)
+                                  regrid_method=ctx.regrid_method, embedded=embedded,
+                                  source_id=checksum)
     if written.hash != key.hash:  # the two key derivations must agree, or resolve never hits
         raise PlanError(f"regrid wrote {written.path} but resolve would look for {key.path}")
     return key, hit

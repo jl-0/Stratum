@@ -69,7 +69,12 @@ from stratum.plan.document import (
 from stratum.plugins import resolve
 from stratum.publish import build_mappers, check_formats
 from stratum.reduce import validate_schema
-from stratum.regrid import REGRID_ALGO_VERSION, resolve_max_distance
+from stratum.regrid import (
+    REGRID_ALGO_VERSION,
+    LatticeMismatch,
+    lattice_offset,
+    resolve_max_distance,
+)
 from stratum.resolve import (
     AliasBinding,
     PlanContext,
@@ -494,6 +499,32 @@ def inspect_granules(m: Manifest, refs: Mapping[str, GranuleRef], readers: Mappi
                 problems.append(f"inputs.roles.{r}: collection {roles[r].collection!r} is "
                                 "ortho-native; reading an ortho role is not in this slice "
                                 "(12 section 2)")
+
+        # -- `adopt` needs the product's own lookup table, on this run's lattice (03 section 3).
+        # One header answers it for the whole run, so a grid that cannot be adopted fails here
+        # rather than on the first regrid work item, before any granule is downloaded.
+        if m.grid.regrid_method == "adopt" and geolocation_role in roles:
+            binding = RoleBinding.from_spec(roles[geolocation_role])
+            holder = next((g for g in order if role_uri(refs[g], binding) is not None), None)
+            if holder is None:
+                problems.append(f"grid.regrid_method: 'adopt' reads the lookup table from the "
+                                f"geolocation role {geolocation_role!r}, which no surviving "
+                                "granule provides")
+            else:
+                uri = role_uri(refs[holder], binding)
+                asset = role_asset(refs[holder], binding)
+                reader, gctx = opener.open(binding.collection, uri,
+                                           refs[holder].checksums.get(asset) if asset else None)
+                embedded = reader.glt(gctx) if hasattr(reader, "glt") else None
+                if embedded is None:
+                    problems.append(f"grid.regrid_method: 'adopt' needs the product's own lookup "
+                                    f"table, but {uri} ships none (03 section 3)")
+                else:
+                    try:
+                        lattice_offset(m.grid_def(), embedded.transform, embedded.crs)
+                    except LatticeMismatch as exc:
+                        problems.append(f"grid.regrid_method: 'adopt' cannot use {uri}: {exc}")
+
         if problems:
             raise PlanError("plan-time validation failed:\n  - " + "\n  - ".join(problems))
         sensor_shape = read_shapes.get(geolocation_role) or next(iter(read_shapes.values()))

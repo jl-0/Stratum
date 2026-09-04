@@ -117,6 +117,15 @@ Established by reading code and data. Do not re-derive; do not assume the opposi
   tiles differ by one cell and their bounds miss the round number by under a cell. The example grid
   is one arcsecond, 3600 cells per degree, `block_size: 720`, which has neither wrinkle. V002 and AMD cut
   each tile from its own corner and overlap.
+- **Every EMIT ortho grid is one lattice.** Measured over 1360 local granules across OBS, MIN and
+  MINUNCERT: one cell size (0.000542232520256367°), one CRS, origin phase constant to 2e-9 cell.
+  Only the *extent* is per-granule. That is what `regrid_method: adopt` rests on. But `adopt` and
+  `kdtree` pick the same sensor pixel for only 57.8 % of cells (always within one pixel,
+  one-sided). The cause is measured: a `kdtree` GLT is exactly centred on the cell (mean offset
+  0.000) while the product's table sits (-0.18, -0.37) cell off, varying by granule. Off-by-one,
+  half-cell and forward-scatter are each ruled out — do not re-propose them. Adopting is the
+  producer's registration, not a faster route to ours —
+  [`heritage.md`](docs/notes/heritage.md), "The EMIT ortho lattice".
 - **Masks run in resolve, not regrid.** Regrid reads `loc` only and the GLT key has no mask term.
   Sensor-space masks apply to the sensor window before the gather, map-space masks to the block
   after it — [`03` §5](docs/specs/03-regrid-glt.md), [`12` §2](docs/specs/12-data-access.md).
@@ -185,7 +194,8 @@ src/stratum_emit/  the EMIT plugin package: readers, instrument masks, mineral s
 tests/             pytest; fixtures resolve from STRATUM_TRIAL_DATA / STRATUM_FIXTURE_URL
 examples/          example manifests and classes files - configuration, not core
 docs/index.html    site landing page (GitHub Pages serves docs/)
-docs/guide/        concepts, running, reading-data, plugins, caching, scaling  <- how to use it
+docs/guide/        concepts, running, reading-data, algorithms, plugins, caching,
+                   scaling                                          <- how to use it
 docs/reference/    manifest, types, cli                             <- field/API reference
 docs/decisions/    ADR digest (HTML) + the ADRs themselves (Markdown)
 docs/status.html   what is implemented, what is open
@@ -215,6 +225,11 @@ CDN dependencies, relative links only.
 
 `docs/.nojekyll` is there on purpose. Without it GitHub Pages runs Jekyll, which would rewrite
 `specs/*.md` to `.html` and break every link from the site into the specs.
+
+**Code links on the site carry `data-sym`.** `guide/algorithms.html` links each step to the line
+that implements it, and a line number rots the moment code is inserted above it. Every
+`<a class="src">` records a fragment of the line it claims and `tests/test_docs_links.py` re-reads
+it, so a drifted link fails the suite. When it does, repoint the link; do not loosen the test.
 
 **The nav model lives in exactly one place** — `PAGES` in `docs/assets/stratum.js`. The sidebar,
 the active-page highlight and the prev/next pager all derive from it. Adding a page means one
@@ -377,9 +392,14 @@ them.
 | Worked examples | The code the example was derived from |
 | EMIT data facts a user needs (extents, fill values) | How those facts were established |
 
-Concretely: **no guide or reference page should name V002, EMIT-AMD, `pipeline.sh`, `watch.sh`,
-`SpectralUtil` or a cluster path.** If you are about to write "unlike the existing pipeline", stop
-— either state the rule on its own terms, or put the comparison in `heritage.md`.
+Concretely: **no guide or reference page should name V002, EMIT-AMD, `pipeline.sh`, `watch.sh`
+or a cluster path.** If you are about to write "unlike the existing pipeline", stop — either state
+the rule on its own terms, or put the comparison in `heritage.md`.
+
+**A library the code actually calls is a different thing, and may be named.** `SpectralUtil`
+performs the nearest-neighbour search a run depends on, so `guide/algorithms.html` says so and
+links the line. The test is tense, not vocabulary: *what the code does today* belongs on the site;
+*which prior pipeline taught us to do it that way* belongs in `heritage.md`.
 
 `status.html` is the one exception, and only for naming a **parity or validation target** ("the
 first slice must reproduce the existing V002 output"). That is a statement about project state,
@@ -394,6 +414,9 @@ The same rules as the specs, plus two:
 
 - **Write for someone doing the task**, not someone evaluating the design. Second person, present
   tense, concrete.
+- **No personal names anywhere a reader outside the team will see** — not on the site, not in the
+  specs, not in an ADR, not in `README.md`. Attribute to a role instead ("the science lead", "SDS
+  engineering"). Meeting notes under `docs/notes/` are records and keep their attribution.
 - **Status chips are load-bearing.** `locked` means someone may build on it. Do not mark something
   locked to look decisive.
 
@@ -487,7 +510,7 @@ under `src/stratum/regrid/` changes without `python -m stratum.regrid --record` 
 
 - **Catalog reprocessing** starts ~Sept 2026 and runs ~75 days, regenerating everything against
   Tetracorder 6. Mineral classes shift. The archive is mixed-vintage throughout, so vintage
-  pinning is mandatory. Phil has confirmed V002 only *adds* metadata, so designing against V001
+  pinning is mandatory. The science lead has confirmed V002 only *adds* metadata, so designing against V001
   fields is safe — but V001-keyed *class tables* are not forward-compatible.
 - **AWS access** is the long pole and blocks nothing in the first slice.
 - Open questions per spec are listed at the end of each; the ones that block design are in

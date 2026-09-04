@@ -120,16 +120,50 @@ cells whose centres fall outside the granule's outermost points are never assign
 more flagged cells in its 3 × 3, all three bands. On the trial tile the second removed nothing
 ([notes/heritage.md](../notes/heritage.md), "First measurements").
 
-### Two methods
+### Three methods
 
 `kdtree` above is the default and works for any product that ships a `loc` array. Some products
 also ship a lookup table on their own ortho grid — EMIT's L2B does ([11 §7](11-types.md)) — and
-`warp_embedded` uses it: the reader hands back the product's own GLT through
-`GranuleReader.glt()` ([12 §3](12-data-access.md)) and regrid nearest-warps its integer bands onto
-the tile grid, a raster operation over two small bands instead of a KD-tree over 1.6 M points.
-The two do not give identical results — the warp is nearest-of-nearest — so `regrid_method` is in
-the GLT cache key ([06 §2](06-caching.md)) and is a manifest field, `grid.regrid_method`, never a
-heuristic. Which is faster, and how far they differ, is a pilot measurement.
+two methods use it, differing in what they are allowed to assume about that grid.
+
+**`adopt`** takes the product's table as it stands. It is valid only when the product was gridded
+on the run's own lattice, which `lattice_offset` requires and refuses without: same CRS, same
+cell size, no rotation, and an origin an integer number of cells from `grid.origin`, within
+`LATTICE_TOLERANCE` = 1e-6 cell. Then no value is resampled and no index recomputed — the cells
+are already right and only move to their place in the tile (`adopt_glt`), so regrid becomes a
+crop. Two consequences follow from there being no search:
+
+- `max_distance` and the step-6 stencil have no meaning, and the key carries `max_distance: null`.
+  An adopted GLT inherits whatever fill decisions the producer made; **[observed]** EMIT's
+  `glt_x`/`glt_y` carry no negatives at all, so the interpolated marker is already resolved away.
+- The stencil is the only reason a GLT must be built per whole tile, so `adopt` alone could run
+  per block. It does not, for now, because nothing else needs it to.
+
+The key gains one term no other method has: `source_checksum`, the catalogue checksum of the
+asset the table came from ([06 §2](06-caching.md)). Under `adopt` the **producer's** pipeline
+determines the output, so a reprocessed granule must not hit a GLT adopted from the old one.
+
+**`warp_embedded`** drops the lattice precondition and nearest-warps the integer bands onto the
+tile grid instead — a raster operation over two small bands rather than a KD-tree over 1.6 M
+points, at the cost of being nearest-of-nearest. It is **not implemented**.
+
+`regrid_method` is in the GLT cache key ([06 §2](06-caching.md)) and is a manifest field,
+`grid.regrid_method`, never a heuristic — the methods do not agree, and the difference is not
+small. **[observed]** On tile (-234, 82) of a grid laid on EMIT's lattice, `adopt` and `kdtree`
+over the same granule hit the same cells (811,536; `adopt`'s hits are a strict subset) but choose
+the **same sensor pixel for only 57.8 % of them**. Every disagreement is at most one sensor pixel
+and one-sided: `adopt` picks the earlier row in 32 % of cells and the earlier column in 20 %,
+never the later one.
+
+The cause is a **sub-cell registration offset**. Measured from cell centre to the chosen pixel's
+own lat/lon, `kdtree` is exactly centred (mean dx −0.000, dy +0.000 cell — necessarily, for an
+inverse nearest query against cell centres) while the product's table sits at (−0.184, −0.372)
+cell, about 11 m west and 22 m south. The offset is constant within a granule and varies between
+granules, so it is geometry-dependent rather than a fixed convention. An off-by-one crop (±1.000
+cell), a half-cell corner-versus-centre convention, and a forward scatter are each ruled out by
+measurement ([notes/heritage.md](../notes/heritage.md), "The EMIT ortho lattice"). **So `adopt` is
+not a faster route to the same answer; it is the producer's answer.** Why their registration
+differs, and which is preferable, is open.
 
 ### Use the cores
 

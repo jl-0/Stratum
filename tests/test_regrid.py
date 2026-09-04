@@ -7,23 +7,28 @@ from pathlib import Path
 import numpy as np
 import pytest
 import rasterio
+from affine import Affine
 
 from stratum import regrid
 from stratum.cache import CacheRoot
 from stratum.regrid import (
+    LATTICE_TOLERANCE,
     REGRID_ALGO_VERSION,
+    LatticeMismatch,
+    adopt_glt,
     build_glt,
     build_glt_raw,
     check_recorded_hash,
     clean_contiguous,
     internal_tile_size,
+    lattice_offset,
     read_glt,
     regrid_granule_tile,
     resolve_max_distance,
     write_glt,
 )
 from stratum.regrid.__main__ import main as regrid_main
-from stratum.types import GridDef, LocArray, TileRef, Window
+from stratum.types import EmbeddedGLT, GridDef, LocArray, TileRef, Window
 
 # tile_size 0.01 at 0.001 -> a 10 x 10 tile; cell diagonal 0.001414, default max_distance 0.00212
 GRID = GridDef("EPSG:4326", (0.001, -0.001), (0.0, 0.0), 0.01, block_size=512)
@@ -250,3 +255,125 @@ def test_check_reports_which_step_was_skipped(tmp_path: Path, monkeypatch) -> No
     assert path.read_text().split() == [str(REGRID_ALGO_VERSION), regrid.module_content_hash()]
     assert regrid_main([]) == 0
     assert regrid_main(["--bogus"]) == 2
+
+
+# --------------------------------------------------------------------------------------- adopt
+# A product that was gridded on the run's lattice ships a lookup table we can take as it stands.
+# `embedded_at` puts a 4 x 4 table at whole-cell offset (row, col) of TILE.
+
+
+def embedded_at(row: int, col: int, *, shift: float = 0.0, res: float = 0.001,
+                crs: str = "EPSG:4326", n: int = 4) -> EmbeddedGLT:
+    rx, ry = TILE.grid.resolution
+    t = TILE.transform
+    data = np.zeros((n, n, 3), dtype=np.int32)
+    for i in range(n):
+        for j in range(n):
+            data[i, j] = (j + 1, i + 1, 1)          # sensor col, sensor row, hit
+    return EmbeddedGLT(data=data,
+                       transform=Affine(res, 0, t.c + col * rx + shift * rx,
+                                        0, -res, t.f + row * ry + shift * abs(ry)),
+                       crs=crs)
+
+
+def test_lattice_offset_counts_whole_cells() -> None:
+    """(kx, ky) are cells from the GRID origin, not from the tile: origin + k * res is the
+    raster's own origin back again."""
+    e = embedded_at(3, 2)
+    kx, ky = lattice_offset(GRID, e.transform, e.crs)
+    x0, y0 = GRID.origin
+    rx, ry = GRID.resolution
+    assert (x0 + kx * rx, y0 + ky * ry) == pytest.approx((e.transform.c, e.transform.f))
+
+
+@pytest.mark.parametrize("kwargs, message", [
+    ({"shift": 0.5}, "off the lattice"),
+    ({"shift": 10 * LATTICE_TOLERANCE}, "off the lattice"),
+    ({"res": 0.002}, "cell size"),
+    ({"crs": "EPSG:3857"}, "CRS"),
+])
+def test_lattice_offset_refuses_a_grid_it_cannot_adopt(kwargs, message) -> None:
+    e = embedded_at(3, 2, **kwargs)
+    with pytest.raises(LatticeMismatch, match=message):
+        lattice_offset(GRID, e.transform, e.crs)
+
+
+def test_lattice_offset_accepts_float_noise() -> None:
+    """The tolerance exists for float64 representation, not for a different grid."""
+    noisy = embedded_at(3, 2, shift=LATTICE_TOLERANCE / 10)
+    exact = embedded_at(3, 2)
+    assert (lattice_offset(GRID, noisy.transform, noisy.crs)
+            == lattice_offset(GRID, exact.transform, exact.crs))
+
+
+def test_adopt_places_the_table_and_changes_no_value() -> None:
+    glt = adopt_glt(embedded_at(3, 2), TILE)
+    assert glt.shape == (10, 10, 3) and glt.dtype == np.int32
+    assert np.array_equal(glt[3:7, 2:6, 0], np.tile(np.arange(1, 5, dtype=np.int32), (4, 1)))
+    assert np.array_equal(glt[3:7, 2:6, 1], np.tile(np.arange(1, 5, dtype=np.int32), (4, 1)).T)
+    assert glt[3:7, 2:6, 2].all()
+    covered = np.zeros((10, 10), dtype=bool)
+    covered[3:7, 2:6] = True
+    assert not glt[~covered].any()                  # everything else is nodata in all three bands
+
+
+def test_adopt_crops_at_the_tile_edge() -> None:
+    glt = adopt_glt(embedded_at(8, 8), TILE)        # 4 x 4 starting two cells from the corner
+    assert glt[8:10, 8:10, 2].all()
+    assert glt[:8].sum() == 0 and glt[:, :8].sum() == 0
+
+
+def test_adopt_of_a_product_that_misses_the_tile_is_all_zero() -> None:
+    assert not adopt_glt(embedded_at(40, 40), TILE).any()
+
+
+def test_adopt_zeroes_a_cell_either_band_left_as_nodata() -> None:
+    e = embedded_at(3, 2)
+    e.data[1, 1, 0] = 0                             # glt_x nodata, glt_y still set
+    glt = adopt_glt(e, TILE)
+    assert not glt[4, 3].any()
+
+
+def test_adopt_refuses_a_product_on_another_lattice() -> None:
+    with pytest.raises(LatticeMismatch):
+        adopt_glt(embedded_at(3, 2, shift=0.5), TILE)
+
+
+def test_adopt_through_the_stage_keys_on_the_source(tmp_path: Path) -> None:
+    """Two granules, same table, different source bytes -> different keys; and no `loc` is read."""
+    cache = CacheRoot(tmp_path)
+
+    def no_loc() -> LocArray:
+        raise AssertionError("adopt must not read the geolocation arrays")
+
+    keys = [regrid_granule_tile(cache, TILE, "g1", no_loc, max_distance=None,
+                                regrid_method="adopt", embedded=lambda: embedded_at(3, 2),
+                                source_id=src)
+            for src in ("sha512:aaa", "sha512:bbb")]
+    assert keys[0].hash != keys[1].hash
+    assert keys[0].inputs["source_checksum"] == "sha512:aaa"
+    assert keys[0].inputs["max_distance"] is None
+    glt = read_glt(keys[0].path)
+    assert np.array_equal(glt, adopt_glt(embedded_at(3, 2), TILE))
+    with rasterio.open(keys[0].path) as src:
+        assert src.tags()["regrid_method"] == "adopt"
+        assert src.tags()["glt_source"] == "sha512:aaa"
+
+
+def test_adopt_does_not_disturb_the_kdtree_key(tmp_path: Path) -> None:
+    """The `adopt` key term must not exist for `kdtree`, or every cached GLT is invalidated."""
+    key = regrid_granule_tile(CacheRoot(tmp_path), TILE, "g1", anchor_loc, max_distance=None)
+    assert "source_checksum" not in key.inputs
+    assert key.inputs["max_distance"] == pytest.approx(resolve_max_distance(GRID, None))
+
+
+def test_adopt_needs_an_embedded_glt(tmp_path: Path) -> None:
+    with pytest.raises(ValueError, match="adopt"):
+        regrid_granule_tile(CacheRoot(tmp_path), TILE, "g1", anchor_loc, max_distance=None,
+                            regrid_method="adopt")
+
+
+def test_warp_embedded_is_still_refused(tmp_path: Path) -> None:
+    with pytest.raises(NotImplementedError, match="warp_embedded"):
+        regrid_granule_tile(CacheRoot(tmp_path), TILE, "g1", anchor_loc, max_distance=None,
+                            regrid_method="warp_embedded")

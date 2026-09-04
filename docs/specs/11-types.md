@@ -358,14 +358,21 @@ lookup table a product ships on its *own* ortho grid — the **[observed]** `loc
 type is what stops a granule-ortho array being mistaken for a tile-grid one — the confusion §1
 warns about.
 
-> **[observed] The granule already ships a GLT.** `location/glt_x` and `location/glt_y`
-> (`int32`, `_FillValue = 0`; observed ranges 1–1242 crosstrack, 1–1664 downtrack) map the
-> granule's own ortho grid
-> (2363 × 2309) back to sensor space. This is *not* our tile grid — the origin is per-granule — so
-> it cannot substitute for the KD-tree regrid as-is. It is what `GranuleReader.glt()` returns and
-> what the `warp_embedded` regrid method warps onto the tile grid ([03 §3](03-regrid-glt.md)); it is
-> also what `SpectralUtil`'s `load_data(..., load_glt=True)` returns, and a ready-made fixture for
-> testing GLT application without building one.
+> **[observed] The granule already ships a GLT, and every granule's is on one lattice.**
+> `location/glt_x` and `location/glt_y` (`int32`, `_FillValue = 0`, no negatives; observed ranges
+> 1–1242 crosstrack, 1–1664 downtrack) map the granule's own ortho grid back to sensor space. Each
+> granule's raster has its own **extent** — the shapes and origins differ — but not its own
+> **lattice**: measured over 1360 local granules (`EMITL1BRAD` OBS, `EMITL2BMIN`, `EMITL2BMINUNCERT`;
+> 2026-01-29 to 2026-08-28; lon −121 to −45, lat −25 to +48) there is exactly one cell size
+> (0.000542232520256367°, one CRS) and the origins share a phase to 2 × 10⁻⁹ of a cell. Where two
+> products cover the same acquisition their tables are **bit-identical**, so it does not matter
+> which asset a GLT is taken from.
+>
+> It is therefore *not* our tile grid, but it can be made to be one: a run whose `grid` is laid on
+> that lattice can take the table as it stands (`adopt`), and one whose grid is not must warp it
+> (`warp_embedded`) or build its own ([03 §3](03-regrid-glt.md)). It is what `GranuleReader.glt()`
+> returns, what `SpectralUtil`'s `load_data(..., load_glt=True)` returns, and a ready-made fixture
+> for testing GLT application without building one.
 
 ---
 

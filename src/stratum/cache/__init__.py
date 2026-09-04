@@ -181,19 +181,31 @@ def _key_str(k: CacheKey | str) -> str:
     return k.hash if isinstance(k, CacheKey) else str(k)
 
 
-def glt_inputs(granule_id: str, grid: GridDef, max_distance: float, regrid_method: str,
-               regrid_algo_version: int) -> dict[str, Any]:
+def glt_inputs(granule_id: str, grid: GridDef, max_distance: float | None, regrid_method: str,
+               regrid_algo_version: int, source: str | None = None) -> dict[str, Any]:
     """GLT key: granule x grid x max_distance x method x algorithm version (06 section 2).
     No run, AOI, mask or scorer term - geometry does not depend on them (03 section 5,
-    06 section 4). `max_distance` is the number actually used, never None."""
-    return {
+    06 section 4). `max_distance` is the number actually used, and is null only for a method
+    that searches for nothing (`adopt`).
+
+    `adopt` also carries `source_checksum`, and it is the one key term that identifies code
+    outside this repository: the GLT is the product's, so the producer's pipeline determines the
+    output and a reprocessed granule must not hit a GLT built from the old one. `None` records
+    that the source could not be identified - a local granule with no catalogue checksum - which
+    is a real hole rather than a hidden one. The field is absent for every other method, so
+    existing keys are unchanged.
+    """
+    inputs = {
         "artifact_type": "glt",
         "granule_id": granule_id,
         "grid_def": grid_def_fields(grid),
-        "max_distance": float(max_distance),
+        "max_distance": None if max_distance is None else float(max_distance),
         "regrid_method": regrid_method,
         "regrid_algo_version": int(regrid_algo_version),
     }
+    if regrid_method == "adopt":
+        inputs["source_checksum"] = source
+    return inputs
 
 
 def snapshot_inputs(obs_keys: Sequence[CacheKey | str], aux_keys: Sequence[CacheKey | str],

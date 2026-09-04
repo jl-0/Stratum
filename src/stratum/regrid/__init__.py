@@ -27,11 +27,14 @@ from typing import Any
 
 import numpy as np
 import rasterio
+from affine import Affine
+from rasterio.crs import CRS
+from rasterio.errors import CRSError
 from rasterio.windows import Window as RioWindow
 from spectral_util.mosaic.mosaic import find_subgrid_locations, remove_negatives
 
 from stratum.cache import CacheKey, CacheRoot, glt_inputs
-from stratum.types import GridDef, LocArray, TileRef, Window
+from stratum.types import EmbeddedGLT, GridDef, LocArray, TileRef, Window
 
 REGRID_ALGO_VERSION = 1
 """Bump when GLT output changes; see the module docstring and 06 section 3."""
@@ -41,6 +44,14 @@ MAX_DISTANCE_FACTOR = 1.5
 
 GLT_BAND_NAMES = ("GLT X", "GLT Y", "File Index")
 ALGO_HASH_PATH = Path(__file__).with_name("ALGO_HASH")
+
+REGRID_METHODS = ("kdtree", "adopt")
+"""What `regrid_granule_tile` implements. `warp_embedded` (03 section 3) is a later slice."""
+
+LATTICE_TOLERANCE = 1e-6
+"""How far a product's own grid may sit off the run's lattice and still be adopted, in cells.
+Measured spread across 1360 EMIT granules (3 collections, 7 months, both hemispheres) is 2e-9
+cell, so this is three orders looser than the noise and six orders tighter than a cell."""
 
 
 # --------------------------------------------------------------------------------------- geometry
@@ -110,6 +121,80 @@ def build_glt_raw(loc: LocArray, tile: TileRef, *, max_distance: float | None,
     glt[r_ins, c_ins, 1] = sign * src_row
     glt[r_ins, c_ins, 2] = 1
     return glt
+
+
+class LatticeMismatch(ValueError):
+    """A product grid `adopt` cannot use: a different CRS, a different cell size, a rotation, or
+    an origin that does not fall on the run grid's lattice (03 section 3)."""
+
+
+def lattice_offset(grid: GridDef, transform: Affine, crs: str) -> tuple[int, int]:
+    """Where a raster with `transform` sits on `grid`'s lattice, as whole cells (kx, ky) east and
+    south of the grid origin. Raises `LatticeMismatch` when it does not sit on the lattice at all.
+
+    This is the whole precondition for `adopt`: same CRS, same cell size, and an origin an
+    integer number of cells from `grid.origin`. Nothing about extent - a product raster covers
+    its own granule and is cropped to the tile afterwards.
+    """
+    rx, ry = grid.resolution
+    try:
+        if CRS.from_user_input(crs) != CRS.from_user_input(grid.crs):
+            raise LatticeMismatch(f"CRS {crs!r} is not the grid's {grid.crs!r}")
+    except CRSError as exc:
+        raise LatticeMismatch(f"CRS {crs!r} cannot be compared with the grid's "
+                              f"{grid.crs!r}: {exc}") from None
+    if transform.b or transform.d:
+        raise LatticeMismatch(f"transform {transform!r} is rotated or sheared; a grid raster is "
+                              "north-up (01 section 1)")
+    for got, want, axis in ((transform.a, rx, "x"), (transform.e, ry, "y")):
+        if abs(got - want) > abs(want) * LATTICE_TOLERANCE:
+            raise LatticeMismatch(f"{axis} cell size {got!r} is not the grid's {want!r} "
+                                  f"(off by {abs(got - want) / abs(want):.3g} cell)")
+    x0, y0 = grid.origin
+    kx, ky = (transform.c - x0) / rx, (transform.f - y0) / ry
+    off = max(abs(kx - round(kx)), abs(ky - round(ky)))
+    if off > LATTICE_TOLERANCE:
+        raise LatticeMismatch(
+            f"origin ({transform.c!r}, {transform.f!r}) is {off:.3g} cell off the lattice of "
+            f"grid origin ({x0!r}, {y0!r}) (tolerance {LATTICE_TOLERANCE:g} cell); the product "
+            "was not gridded on this lattice, so its lookup table cannot be adopted")
+    return round(kx), round(ky)
+
+
+def adopt_glt(embedded: EmbeddedGLT, tile: TileRef) -> np.ndarray:
+    """The product's own lookup table, moved onto `tile` (03 section 3, `adopt`).
+
+    Valid only when the product was gridded on the run's lattice (`lattice_offset`, which this
+    calls and which refuses otherwise). Then no value is resampled and no index is recomputed:
+    the cells are already right, they only move to their place in the tile, and cells the
+    product's raster does not cover are 0. A cell either product band leaves at 0 is 0 in all
+    three bands, so bands 1-2 and the hit band cannot disagree.
+
+    What is NOT inherited is the interpolated marker: a product ships its lookup table with the
+    sign already resolved, so `max_distance` and the contiguity stencil have no meaning here and
+    an adopted GLT carries whatever fill decisions its producer made.
+    """
+    lattice_offset(tile.grid, embedded.transform, embedded.crs)
+    src = np.asarray(embedded.data)
+    if src.ndim != 3 or src.shape[-1] < 2:
+        raise ValueError(f"an embedded GLT is (H, W, >=2); got {src.shape}")
+    rows, cols = tile.shape
+    out = np.zeros((rows, cols, 3), dtype=np.int32)
+    rx, ry = tile.grid.resolution
+    t = tile.transform
+    row0 = round((embedded.transform.f - t.f) / ry)
+    col0 = round((embedded.transform.c - t.c) / rx)
+    sh, sw = src.shape[:2]
+    r0, r1 = max(row0, 0), min(row0 + sh, rows)
+    c0, c1 = max(col0, 0), min(col0 + sw, cols)
+    if r0 >= r1 or c0 >= c1:
+        return out                      # the product's raster does not reach this tile
+    win = src[r0 - row0:r1 - row0, c0 - col0:c1 - col0].astype(np.int32, copy=False)
+    hit = (win[..., 0] != 0) & (win[..., 1] != 0)
+    out[r0:r1, c0:c1, 0] = np.where(hit, win[..., 0], 0)
+    out[r0:r1, c0:c1, 1] = np.where(hit, win[..., 1], 0)
+    out[r0:r1, c0:c1, 2] = hit
+    return out
 
 
 def clean_contiguous(glt: np.ndarray) -> np.ndarray:
@@ -189,26 +274,45 @@ def read_glt(path: Path, window: Window | None = None) -> np.ndarray:
 # ------------------------------------------------------------------------------------- the stage
 def regrid_granule_tile(cache: CacheRoot, tile: TileRef, granule_id: str,
                         loc: Callable[[], LocArray], *, max_distance: float | None,
-                        regrid_method: str = "kdtree", n_workers: int = 1) -> CacheKey:
+                        regrid_method: str = "kdtree", n_workers: int = 1,
+                        embedded: Callable[[], EmbeddedGLT] | None = None,
+                        source_id: str | None = None) -> CacheKey:
     """One work item of the regrid stage: the GLT for `granule_id` over `tile`.
 
     Computes the key (06 section 2) and returns at once on a hit, so a hit never reads the
-    granule: `loc` is a zero-argument callable and is called only on a miss. A granule that does
-    not touch the tile still writes a GLT of zeros, so the miss is not rediscovered on the next
-    run; 06 section 8 question 2 defers negative caching until the pilot has measured it, and a
-    zero GLT is the cheapest thing that makes the question moot for a cached pair."""
-    if regrid_method != "kdtree":
+    granule: the reader callables are zero-argument and are called only on a miss. A granule that
+    does not touch the tile still writes a GLT of zeros, so the miss is not rediscovered on the
+    next run; 06 section 8 question 2 defers negative caching until the pilot has measured it,
+    and a zero GLT is the cheapest thing that makes the question moot for a cached pair.
+
+    `kdtree` builds the GLT from `loc`. `adopt` takes the product's own lookup table from
+    `embedded` and crops it to the tile, which requires the product to have been gridded on the
+    run's lattice; `source_id` identifies the bytes it came from (the asset's catalogue
+    checksum) and enters the key, because under `adopt` the producer's pipeline, not this one,
+    determines the output.
+    """
+    if regrid_method not in REGRID_METHODS:
         raise NotImplementedError(
-            f"regrid_method {regrid_method!r} is not implemented in this slice; only 'kdtree' is "
-            "(03 section 3, 'Two methods')")
-    md = resolve_max_distance(tile.grid, max_distance)
-    inputs = glt_inputs(granule_id, tile.grid, md, regrid_method, REGRID_ALGO_VERSION)
+            f"regrid_method {regrid_method!r} is not implemented in this slice; one of "
+            f"{list(REGRID_METHODS)} (03 section 3, 'Three methods')")
+    adopting = regrid_method == "adopt"
+    md = None if adopting else resolve_max_distance(tile.grid, max_distance)
+    inputs = glt_inputs(granule_id, tile.grid, md, regrid_method, REGRID_ALGO_VERSION,
+                        source=source_id)
     key = cache.key("glt", tile.grid.id, tile, inputs)
     if cache.hit(key):
         return key
-    glt = build_glt(loc(), tile, max_distance=md, n_workers=n_workers)
-    tags = {"regrid_algo_version": REGRID_ALGO_VERSION, "max_distance": md,
-            "regrid_method": regrid_method}
+    tags: dict[str, Any] = {"regrid_algo_version": REGRID_ALGO_VERSION,
+                            "regrid_method": regrid_method}
+    if adopting:
+        if embedded is None:
+            raise ValueError("regrid_method 'adopt' needs the product's own GLT; no `embedded` "
+                             "callable was given (03 section 3)")
+        glt = adopt_glt(embedded(), tile)
+        tags["glt_source"] = source_id or "unknown"
+    else:
+        glt = build_glt(loc(), tile, max_distance=md, n_workers=n_workers)
+        tags["max_distance"] = md
     cache.write_file(key, lambda p: write_glt(p, glt, tile, granule_id=granule_id, tags=tags))
     return key
 
@@ -255,8 +359,9 @@ def check_recorded_hash() -> tuple[bool, str]:
 
 
 __all__ = [
-    "GLT_BAND_NAMES", "MAX_DISTANCE_FACTOR", "REGRID_ALGO_VERSION", "build_glt", "build_glt_raw",
+    "GLT_BAND_NAMES", "LATTICE_TOLERANCE", "MAX_DISTANCE_FACTOR", "REGRID_ALGO_VERSION",
+    "REGRID_METHODS", "LatticeMismatch", "adopt_glt", "build_glt", "build_glt_raw",
     "cell_centres", "check_recorded_hash", "clean_contiguous", "internal_tile_size",
-    "module_content_hash", "read_glt", "record_hash", "recorded_hash", "regrid_granule_tile",
-    "resolve_max_distance", "write_glt",
+    "lattice_offset", "module_content_hash", "read_glt", "record_hash", "recorded_hash",
+    "regrid_granule_tile", "resolve_max_distance", "write_glt",
 ]

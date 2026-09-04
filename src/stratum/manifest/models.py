@@ -94,7 +94,7 @@ class GridSpec(Strict):
     tile_size: PositiveFloat
     block_size: PositiveInt = 512
     max_distance: PositiveFloat | None = None
-    regrid_method: Literal["kdtree", "warp_embedded"] = "kdtree"
+    regrid_method: Literal["kdtree", "adopt", "warp_embedded"] = "kdtree"
     force_positive_y: bool = False
 
     @model_validator(mode="after")

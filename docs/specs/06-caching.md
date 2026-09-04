@@ -25,7 +25,7 @@ a full rebuild into a re-read.
 | Artifact | Key derived from | New scorer invalidates? |
 |---|---|---|
 | **Prepared asset**<br>asset | `asset_checksum`, `prepare_version` | No |
-| **GLT**<br>granule × tile | `granule_id`, `grid_def`, `max_distance`, `regrid_method`, `regrid_algo_version` | **No** |
+| **GLT**<br>granule × tile | `granule_id`, `grid_def`, `max_distance`, `regrid_method`, `regrid_algo_version`, and under `adopt` only, `source_checksum` | **No** |
 | **Masked observation**<br>granule × tile × block | `glt_key`, `asset_roles` (per role read: the collection/asset/variable binding **and** the asset's catalogue checksum, `null` when the source has none), `pixel_mask_spec`, `mask_plugin_version`, `remaps` (per categorical layer: the raw table's fingerprint and a hash of the resolved lookup) | No |
 | **Aux warp**<br>source × tile | `source_uri`, `source_etag`, `grid_def`, `resampling` | No |
 | **Epoch snapshot**<br>tile × epoch × block | `obs_keys[]` (sorted), `aux_keys[]`, `scorer_ref`, `scorer_version`, `scorer_params`, `schema.layers_hash`, `epoch_bounds`, `window` | **Yes** |
@@ -134,7 +134,9 @@ else may be written into a snapshot directory: `read_snapshot` discovers layers 
 
 ## 4. Sharing
 
-The GLT cache is keyed on `(granule, grid, max_distance)` with no run, project or AOI component. Two
+The GLT cache is keyed on `(granule, grid, max_distance)` with no run, project or AOI component. `max_distance` is null for a method that searches for nothing (`adopt`), which
+instead keys on `source_checksum`: the table is the producer's, so their version, not
+`regrid_algo_version`, is what makes it stale ([03 §3](03-regrid-glt.md)). Two
 consequences, both good:
 
 - **Across experiments.** Five competing scorers over one zone share one GLT cache. The first pays

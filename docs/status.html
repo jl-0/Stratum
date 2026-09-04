@@ -166,10 +166,10 @@ until the in-region mode and its one-hour credential refresh exist.</p>
 <table>
 <thead><tr><th>Question</th><th>Blocks</th><th>Owner</th></tr></thead>
 <tbody>
-<tr><td>Is the existing temporal-stack <code>freq-N</code> parameter a frequency rank or a time period?</td><td>How much of mode-through-time is new work versus a port</td><td>James</td></tr>
-<tr><td>Reduce over class labels, or over continuous quantities first?</td><td>The shape of the baseline reducer</td><td>Phil</td></tr>
-<tr><td>Zone selection for the pilot</td><td>The zone registry (<code>examples/zones.yaml</code>) holds approximate boxes; confirm before a delivered run</td><td>Dana</td></tr>
-<tr><td>Confirm the 7-column edge trim and slit-dust column counts</td><td>Built-in mask defaults in <code>stratum_emit</code>; <code>SlitDust</code> refuses until confirmed</td><td>Phil</td></tr>
+<tr><td>Is the existing temporal-stack <code>freq-N</code> parameter a frequency rank or a time period?</td><td>How much of mode-through-time is new work versus a port</td><td>SDS engineering</td></tr>
+<tr><td>Reduce over class labels, or over continuous quantities first?</td><td>The shape of the baseline reducer</td><td>Science lead</td></tr>
+<tr><td>Zone selection for the pilot</td><td>The zone registry (<code>examples/zones.yaml</code>) holds approximate boxes; confirm before a delivered run</td><td>Science team</td></tr>
+<tr><td>Confirm the 7-column edge trim and slit-dust column counts</td><td>Built-in mask defaults in <code>stratum_emit</code>; <code>SlitDust</code> refuses until confirmed</td><td>Science lead</td></tr>
 <tr><td>AWS account and quota; how the Earthdata credential reaches a cloud worker</td><td>All cloud work. Blocks nothing locally: a <code>~/.netrc</code> or environment credential already serves laptop runs from the archive.</td><td>—</td></tr>
 </tbody>
 </table>
@@ -188,6 +188,7 @@ open-questions list.</p>
 <tr><td>Products and GLTs are tiled GeoTIFFs without the COG header layout or overviews, while the STAC media type claims COG. Write through the COG driver, or stop calling them COGs?</td><td><a href="specs/03-regrid-glt.md">03</a> §6, <a href="specs/07-output-mapping.md">07</a></td></tr>
 <tr><td>Two class-table fingerprints in flight: the raw table's in plan/report/provenance, the product table's on the STAC item</td><td><a href="specs/13-snapshot-schema.md">13</a> §7</td></tr>
 <tr><td>Local sources have no asset checksum, so a re-delivered file under the same name is invisible to the observation key</td><td><a href="specs/06-caching.md">06</a> §8</td></tr>
+<tr><td><code>adopt</code> and <code>kdtree</code> choose the same sensor pixel for only 57.8&nbsp;% of cells. The product's table is registered (−0.18, −0.37) cell off our cell centres, varying by granule; off-by-one, half-cell and forward-scatter explanations are each ruled out. Why the producer's registration differs, and which is preferable</td><td><a href="specs/03-regrid-glt.md">03</a> §3</td></tr>
 <tr><td>Regrid's KD-tree query runs single-threaded inside a pool that already fills the node; size <code>n_workers</code> from the allocation</td><td><a href="specs/03-regrid-glt.md">03</a> §6, <a href="specs/08-execution.md">08</a> §7</td></tr>
 <tr><td><code>max_vcpu_hours</code> is reported as "not estimated"; the router needs per-stage constants from the first measurements</td><td><a href="specs/08-execution.md">08</a> §7</td></tr>
 <tr><td><code>aoi.geometry</code> is on this site but not modelled</td><td><a href="specs/09-run-manifest.md">09</a> §6</td></tr>

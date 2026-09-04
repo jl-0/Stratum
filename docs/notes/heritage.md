@@ -199,6 +199,63 @@ manifests and the reader registry now say (12 §8, resolved 2026-09-02). In the 
 `EMITL2AMASK` is published at collection version `002`, and `EMITL2BFRCOV.001` ships per-fraction
 GeoTIFFs rather than one NetCDF.
 
+### The EMIT ortho lattice, and adopt versus kdtree
+
+*Measured 2026-09-03, over the granules on this machine; scripts were throwaway, the numbers are
+reproducible from the assets in `examples/emit-cmr-nevada/out/assets` and `trial-data/`.*
+
+**Every EMIT ortho grid is the same lattice.** 1360 granules across `EMITL1BRAD` (OBS, 47),
+`EMITL2BMIN` (674) and `EMITL2BMINUNCERT` (639), 2026-01-29 to 2026-08-28, lon −121 to −45, lat
+−25 to +48: one cell size (0.000542232520256367°), one CRS string, and an origin phase of
+0.399041310736 cell in x and 0.051286937952 cell in y measured from (−180, 90), with a spread of
+1.9 × 10⁻⁹ and 2.0 × 10⁻¹⁰ cell respectively — float64 noise. Where OBS and MIN cover the same
+acquisition (33 pairs, 4 compared band-for-band) the tables are bit-identical and the
+geotransforms equal. This is what makes `adopt` possible at all ([03 §3](../specs/03-regrid-glt.md)),
+and it corrects an earlier claim in [11 §7](../specs/11-types.md) that the origin was per-granule:
+the *extent* is, the lattice is not.
+
+**The two methods do not agree, and the difference is systematic.** On tile (−234, 82) of a
+0.5° grid laid on that lattice, for one granule:
+
+| | |
+|---|---|
+| cells in tile | 850,084 |
+| hit by `adopt` / by `kdtree` / by both | 811,536 / 811,801 / 811,536 |
+| both hit, **same sensor pixel** | 469,070 — **57.8 %** |
+| both hit, different | 342,466, every one at most **one** sensor pixel away |
+| signed offset, row | −1 in 32.3 %, 0 in 67.7 %, **never +1** |
+| signed offset, column | −1 in 20.1 %, 0 in 79.9 %, never +1 |
+| `kdtree` cells marked interpolated | 1 |
+| `adopt` hits | a strict subset: 265 cells `kdtree`-only, 0 `adopt`-only |
+| wall clock | `adopt` < 0.01 s vs `kdtree` 0.46 s at 4 workers |
+
+**The cause is a sub-cell registration offset, and three explanations are ruled out.** Measuring
+the vector from each cell centre to the lat/lon of the sensor pixel that method chose, in cells:
+
+| method | median distance | mean dx | mean dy |
+|---|---|---|---|
+| `kdtree` | 0.494 | **−0.000** | **+0.000** |
+| `adopt` | 0.633 | −0.184 | −0.372 |
+
+`kdtree` is exactly centred, which is what an inverse nearest-neighbour query against cell centres
+must be. The producer's table is displaced about 11 m west and 22 m south of it. Ruled out:
+
+- **An off-by-one in `adopt_glt`'s crop** — that would displace by ±1.000 cell, not 0.18/0.37.
+- **A half-cell (corner versus centre) convention** — shifting the sensor points half a cell in
+  each of the four diagonal directions gives 68.5 % (E+N), 57.8 % (unshifted), 39.3 %, 18.0 %,
+  9.2 % agreement. The best is nowhere near identical, and 0.18/0.37 is not 0.5.
+- **A forward scatter** (each sensor pixel floored into one cell, which would bias toward the
+  cell's lower-left and leave holes). Both tables reuse sensor pixels at the same rate — 1.578
+  cells per pixel for `adopt`, 1.549 for `kdtree`, with matching once/twice distributions — so the
+  producer gathers as we do.
+
+The offset is constant within a granule and varies between them, in clusters: over six granules,
+(−0.185, −0.370) for two and (−0.390, +0.135) for four, sd ≈ 0.4 within each. Geometry-dependent,
+therefore, not a fixed convention. What remains is that the producer's table was built against a
+different geolocation than the `loc` shipped beside it in the same file, or with the query in a
+different space. **Open.** Until it is understood, `adopt` should be read as *the producer's
+registration*, not as a cheaper `kdtree`.
+
 ---
 
 ## 8. Related documents
