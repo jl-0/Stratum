@@ -181,6 +181,18 @@ pre code { background: none; border: 0; padding: 0; font-size: 1em; }
 pre .c { color: var(--muted); font-style: italic; }
 pre .k { color: var(--accent); }
 
+/* ---------- source links ---------- */
+
+/* An anchor from a described step into the line that implements it:
+   <a class="src" href="...#L79">regrid/__init__.py:79</a>. guide/algorithms.html
+   is built out of these; they point at GitHub, not at anything this site serves. */
+a.src {
+  font-family: var(--mono); font-size: .82em; white-space: nowrap;
+  color: var(--muted); text-decoration: none;
+  border-bottom: 1px dashed var(--border-strong);
+}
+a.src:hover, a.src:focus { color: var(--accent); border-bottom-color: var(--accent); }
+
 /* ---------- tables ---------- */
 
 .tw { overflow-x: auto; margin: 0 0 1.3rem; }

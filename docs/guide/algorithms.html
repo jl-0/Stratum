@@ -1,0 +1,628 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Algorithms, step by step · Stratum</title>
+<link rel="stylesheet" href="../assets/stratum.css">
+</head>
+<body data-page="guide/algorithms" data-root="../">
+<a class="skip" href="#content">Skip to content</a>
+<header class="masthead">
+  <a class="wordmark" href="../index.html"><span class="glyph"></span>Stratum</a>
+  <span class="stage">Pre-release</span>
+  <span class="spacer"></span>
+  <span class="repo">EMIT Critical Minerals L3</span>
+</header>
+<div class="layout">
+<nav id="sidebar" aria-label="Documentation"></nav>
+<main id="content">
+<div class="prose">
+
+<h1>Algorithms, step by step</h1>
+<p class="lede">Every arithmetic operation between a granule on disk and a cell in the product,
+in order, with a link to the line that performs it.</p>
+
+<p>The other guides describe what Stratum does. This one follows one number from the sensor to
+the map and states, at each step, what is computed, which library computes it, and where that
+code lives. Nothing here is a summary of intent &mdash; if a step is arithmetic, the arithmetic
+is written out. Start with <a href="concepts.html">Concepts</a> if you want the model rather than
+the operations.</p>
+
+<div class="key">
+  <span class="label">The question this page exists to answer</span>
+  <p>Stratum puts granules on a common grid, which is what <code>SpectralUtil</code> already does
+  for AVIRIS and EMIT mosaics. <strong>The geometry is not reimplemented.</strong> The
+  nearest-neighbour search and the interpolation clean-up are called from
+  <code>SpectralUtil</code> unchanged; Stratum contributes the grid definition, the index
+  bookkeeping around that call, and everything downstream of the lookup table.
+  <a href="#boundary">Section 8</a> is the line-by-line ledger of which is which.</p>
+</div>
+
+<h2 id="reading">How to read this page</h2>
+
+<p>Links in the <strong>Code</strong> column open the file on GitHub at the line that implements
+the step. Stratum links follow <code>main</code>, so they track the code as it changes and a line
+number may drift by a few; the symbol is always named, so it stays findable. SpectralUtil links
+are pinned to <code>590dafd</code> — the commit the <code>vendor/SpectralUtil</code> submodule
+points at, which is the code a run actually executes.</p>
+
+<h2 id="through-line">1. The through-line</h2>
+
+<p>A value in the product is the end of this chain. Each arrow is a stage; each stage is a
+section below.</p>
+
+<pre><code>granule (sensor grid)
+  │  <span class="c">regrid — geometry only, no pixel is read</span>
+  ▼
+GLT: for each map cell, which sensor (row, col)          <span class="c">cached forever</span>
+  │  <span class="c">resolve — read the pixels the GLT names, score them, keep one per cell per epoch</span>
+  ▼
+snapshot: one winning value per cell per epoch, + its score
+  │  <span class="c">reduce — combine the epochs in the delivery window</span>
+  ▼
+product bands: winner, agreement, runner-up, counts, continuous statistics
+  │  <span class="c">publish — colour, tile, catalogue</span>
+  ▼
+COG + RGBA image + legend + STAC item</code></pre>
+
+<p>Two properties hold throughout and are worth keeping in mind while reading:</p>
+
+<ul>
+  <li><strong>No value is ever resampled.</strong> Every step is a selection — a nearest
+  neighbour, an argmax, a mode. A cell's value is always some sensor pixel's value, never a
+  blend of several. The one exception is explicit and opt-in: the continuous aggregations in
+  <a href="#reduce">section 5</a>, which average <em>across epochs</em>, never across space.</li>
+  <li><strong>Validity is carried, not inferred.</strong> Each step produces a boolean mask
+  alongside its values, and the masks are combined by conjunction. A cell is only as good as
+  the weakest step that touched it.</li>
+</ul>
+
+<h2 id="notation">2. Grid, tile, block</h2>
+
+<p>A grid is a CRS, a resolution and an origin — a rule for where cell edges fall, with no
+extent. A tile is a bounded rectangle of it; a block is a subdivision of a tile and the unit one
+worker processes. Cell centres come straight from the tile's affine transform, north-up, row 0
+at the northern edge:</p>
+
+<pre><code>x[c] = t.c + (c + 0.5) * t.a          <span class="c"># t.a  = +resolution east</span>
+y[r] = t.f + (r + 0.5) * t.e          <span class="c"># t.e  = -resolution north</span></code></pre>
+
+<p>Two derived quantities are used later:</p>
+
+<div class="tw">
+<table>
+<thead><tr><th>Quantity</th><th>Definition</th><th>Code</th></tr></thead>
+<tbody>
+<tr><td>Cell diagonal</td><td><code>hypot(rx, ry)</code> in the grid's own units — degrees for EPSG:4326</td><td><a class="src" data-sym="diagonal" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/types.py#L88">types.py:88</a></td></tr>
+<tr><td>Cell centres</td><td>the two lines above, as (y, x) meshes over the whole tile</td><td><a class="src" data-sym="cell_centres" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/regrid/__init__.py#L67">regrid:67</a></td></tr>
+</tbody>
+</table>
+</div>
+
+<h2 id="plan">3. Plan — selection, no pixels</h2>
+
+<p>Plan decides <em>what</em> will be processed. It touches the granule index, which is a table
+of metadata: URLs, footprints, times, cloud cover, checksums. It reads no pixel data at all
+(one geometry file is opened at the end, purely to prove the reader and the credential work).</p>
+
+<div class="tw">
+<table>
+<thead><tr><th>Step</th><th>What is computed</th><th>Code</th></tr></thead>
+<tbody>
+<tr>
+  <td>Resolve the AOI</td>
+  <td>AOI bbox → the set of tiles on the grid lattice that intersect it; time range → epochs</td>
+  <td><a class="src" data-sym="plan_run" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/plan/run.py#L677">plan/run.py:677</a></td>
+</tr>
+<tr>
+  <td>Filter</td>
+  <td>Each filter is a predicate over the index table, combined by conjunction. e.g.
+      <code>cloud_fraction &lt;= threshold</code>, with an explicit policy for a null value
+      rather than a silent drop</td>
+  <td><a class="src" data-sym="MaxCloudFraction" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/filters.py#L80">filters.py:80</a></td>
+</tr>
+<tr>
+  <td>Reconcile class tables</td>
+  <td>Every granule declares its own mineral class ids. Plan builds a per-granule
+      <em>remap</em> — an integer lookup array from that granule's ids to the run's ids — and
+      fails if two granules disagree irreconcilably. The remap is applied later, at the gather,
+      where the granule is still known</td>
+  <td><a class="src" data-sym="granule_remap" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/resolve/block.py#L96">block.py:96</a></td>
+</tr>
+<tr>
+  <td>Freeze</td>
+  <td>The surviving granule set is written to the run directory and hashed. Every later stage
+      reads the frozen set, never the live catalogue, so a re-run cannot silently include a
+      granule that appeared since</td>
+  <td><a class="src" data-sym="# -- freeze (02 section 6)" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/plan/run.py#L773">plan/run.py:773</a></td>
+</tr>
+</tbody>
+</table>
+</div>
+
+<h2 id="regrid">4. Regrid — the geometry</h2>
+
+<p>Regrid answers one question per granule per tile: <em>for each cell of the output grid, which
+sensor pixel is nearest?</em> The answer is a GLT — a geographic lookup table, <code>(H, W, 3)</code>
+int32, band 1 the sensor column, band 2 the sensor row, both 1-based with 0 meaning "no pixel",
+band 3 the file index. It depends only on where the granule's pixels fall, so it is cached by
+content and never rebuilt.</p>
+
+<p><strong>The input is the granule's <code>loc</code> array and nothing else</strong> — latitude
+and longitude per sensor pixel. No band, no mask, no science value is opened at this stage.</p>
+
+<h3 id="regrid-steps">The six steps</h3>
+
+<div class="tw">
+<table>
+<thead><tr><th>#</th><th>Step</th><th>Computed</th><th>Whose</th><th>Code</th></tr></thead>
+<tbody>
+<tr>
+  <td class="num">1</td>
+  <td>Valid points</td>
+  <td>Drop every sensor pixel whose lat or lon is masked or non-finite. Keeps a ledger
+      <code>rc</code> of the surviving <code>(row, col)</code> so indices can be mapped back to
+      the full array</td>
+  <td>Stratum</td>
+  <td><a class="src" data-sym="_valid_points" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/regrid/__init__.py#L78">regrid:78</a></td>
+</tr>
+<tr>
+  <td class="num">2</td>
+  <td>Cell centres</td>
+  <td>(y, x) meshes for the whole tile from its transform (<a href="#notation">section 2</a>)</td>
+  <td>Stratum</td>
+  <td><a class="src" data-sym="cell_centres" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/regrid/__init__.py#L67">regrid:67</a></td>
+</tr>
+<tr>
+  <td class="num">3</td>
+  <td>Nearest neighbour</td>
+  <td>A KD-tree is built over the <em>sensor</em> points and queried with the <em>cell centres</em>.
+      The tile is first cropped to the granule's coordinate bounding box, so the query is over the
+      overlap only. Returns, per cell, the index of the nearest sensor point and its distance</td>
+  <td><strong>SpectralUtil</strong></td>
+  <td><a class="src" data-sym="find_subgrid_locations" href="https://github.com/emit-sds/SpectralUtil/blob/590dafd/spectral_util/mosaic/mosaic.py#L91">mosaic.py:91</a></td>
+</tr>
+<tr>
+  <td class="num">4</td>
+  <td>Distance cutoff</td>
+  <td>A cell whose nearest sensor point is further than <code>max_distance</code> keeps the index
+      but with its sign flipped — the "interpolated" marker. Default cutoff
+      <code>1.5 × cell diagonal</code></td>
+  <td><strong>SpectralUtil</strong>, threshold restated by Stratum</td>
+  <td><a class="src" data-sym="resolve_max_distance" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/regrid/__init__.py#L58">regrid:58</a></td>
+</tr>
+<tr>
+  <td class="num">5</td>
+  <td>Index remap</td>
+  <td>Turn the returned flat index back into a <code>(row, col)</code> of the <em>full</em> sensor
+      array via the ledger from step 1, sign preserved, and write the three GLT bands</td>
+  <td>Stratum</td>
+  <td><a class="src" data-sym="build_glt_raw" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/regrid/__init__.py#L90">regrid:90</a></td>
+</tr>
+<tr>
+  <td class="num">6</td>
+  <td>Contiguity clean</td>
+  <td>Where interpolated cells cluster, the fill is not trustworthy: a 3×3 convolution counts
+      flagged cells in each neighbourhood and any cell with ≥ 3 is zeroed in all three bands</td>
+  <td><strong>SpectralUtil</strong></td>
+  <td><a class="src" data-sym="remove_negatives" href="https://github.com/emit-sds/SpectralUtil/blob/590dafd/spectral_util/mosaic/mosaic.py#L17">mosaic.py:17</a></td>
+</tr>
+</tbody>
+</table>
+</div>
+
+<h3 id="regrid-metric">The metric, exactly</h3>
+
+<p>The KD-tree is built on <code>(lat, lon)</code> pairs and queried with <code>(y, x)</code> cell
+centres, so <strong>distance is Euclidean in the grid's coordinate units</strong>. For the EMIT
+grids that means degrees, and a degree of longitude is shorter than a degree of latitude
+everywhere off the equator. The cutoff inherits the same units.</p>
+
+<div class="note">
+  <span class="label">Inherited on purpose</span>
+  <p>This is SpectralUtil's metric, and Stratum uses it unchanged so that a Stratum mosaic and a
+  SpectralUtil mosaic of the same granules select the same pixels. At EMIT's 60&nbsp;m posting the
+  cutoff sits well beyond one cell, so the anisotropy changes which pixel wins only where the
+  sensor sampling is already coarser than the grid. It is listed in
+  <a href="#caveats">section 9</a> as a review item rather than defended as ideal.</p>
+</div>
+
+<h3 id="regrid-cutoff">Why the cutoff appears in two places</h3>
+
+<p>Called with <code>max_distance=None</code>, SpectralUtil derives the threshold itself, inline,
+from the grid it was handed:</p>
+
+<pre><code>md = sqrt((y[1,0]-y[0,0])**2 + (x[0,1]-x[0,0])**2) * 1.5   <span class="c"># SpectralUtil, inline</span>
+D  = MAX_DISTANCE_FACTOR * grid.diagonal                   <span class="c"># Stratum = 1.5*hypot(rx,ry)</span></code></pre>
+
+<p>These are the same number. Stratum computes it explicitly, and passes it, for one reason:
+<strong>a value that changes the output has to be in the cache key.</strong> A threshold decided
+inside the call is invisible to the key, so a grid change could return a stale GLT. Restating it
+is bookkeeping, not a second algorithm — and if the two ever diverge, the parity harness
+(<a href="#boundary">section 8</a>) is what catches it.</p>
+
+<h3 id="regrid-stencil">Consequences of step 6</h3>
+
+<p>The contiguity clean is a <em>stencil</em>: a cell's fate depends on its neighbours. That is
+why a GLT is always built for a whole tile and never per block — blocks would each apply the 3×3
+independently and leave a seam at every internal boundary. It is the single reason regrid's unit
+is the tile while everything downstream can be a block.</p>
+
+<h3 id="regrid-signoff">Algorithm version and sign-off</h3>
+
+<p>GLT output feeds every downstream cache. <code>REGRID_ALGO_VERSION</code> enters the GLT cache
+key, and a hash of the whole <code>stratum/regrid/</code> package is recorded beside the code in
+<code>ALGO_HASH</code>. Editing anything in that package fails the test suite until someone
+re-records the hash — an explicit assertion, by a person, that they considered whether output
+changed.
+<a class="src" data-sym="check_recorded_hash" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/regrid/__init__.py#L344">regrid:344</a></p>
+
+<h3 id="regrid-adopt">When the product is already on our grid</h3>
+
+<p>EMIT products ship a lookup table of their own, on the grid their producer chose
+(<code>location/glt_x</code>, <code>glt_y</code>). Those grids are all one lattice: same CRS, same
+cell, and origins that share a phase to 2&nbsp;&times;&nbsp;10<sup>&minus;9</sup> of a cell across
+1360 granules from three collections. So a run whose <code>grid</code> is laid on that lattice can
+set <code>grid.regrid_method: adopt</code> and skip the search entirely &mdash; the cells are
+already right, and regrid becomes a crop onto the tile.</p>
+
+<pre><code>lattice_offset(grid, transform, crs)     <span class="c"># same CRS, same cell size, and an origin a</span>
+                                         <span class="c"># whole number of cells away, within 1e-6 cell</span>
+adopt_glt(embedded, tile)                <span class="c"># crop/pad onto the tile; no value recomputed</span></code></pre>
+
+<p>The precondition is checked at <em>plan</em> time, on one granule header, so a grid that cannot
+be adopted fails before anything is downloaded &mdash; and it refuses per granule rather than
+falling back, since a silent fallback would mix two derivations under one cache key.
+<a class="src" data-sym="lattice_offset" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/regrid/__init__.py#L131">regrid:131</a></p>
+
+<div class="warn">
+  <span class="label">Adopt is not a faster kdtree</span>
+  <p>On a measured tile the two methods pick the <strong>same sensor pixel for 57.8&nbsp;% of
+  cells</strong> &mdash; every disagreement at most one pixel, and one-sided. The reason is
+  registration: a lookup built here is exactly centred on the cell (mean offset 0.000 of a cell,
+  which an inverse nearest query must be), while the product's table sits about a fifth of a cell
+  west and a third south of that, by an amount that varies from granule to granule. Adopting takes
+  the producer's registration; it is not a cheaper route to ours. It also inherits their fill
+  decisions: an EMIT table carries no interpolated markers at all, so <code>max_distance</code>
+  and the contiguity clean have nothing to act on, and the GLT key records
+  <code>max_distance: null</code> plus the source asset's checksum instead.</p>
+</div>
+
+<h2 id="resolve">5. Resolve — read, score, keep one</h2>
+
+<p>Resolve is where pixel data is first read. The unit is one block × one epoch; the output is a
+<em>snapshot</em>: one winning value per cell, plus the score that won it and a validity mask.</p>
+
+<div class="tw">
+<table>
+<thead><tr><th>#</th><th>Step</th><th>Computed</th><th>Code</th></tr></thead>
+<tbody>
+<tr>
+  <td class="num">1</td>
+  <td>Candidates</td>
+  <td>Granules in the frozen set whose footprint intersects this block and whose acquisition
+      time falls in this epoch</td>
+  <td><a class="src" data-sym="candidates" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/resolve/block.py#L72">block.py:72</a></td>
+</tr>
+<tr>
+  <td class="num">2</td>
+  <td>GLT window</td>
+  <td>A windowed read of the cached GLT — internal tiling means only the block's own bytes are
+      fetched. A block with no hit is skipped before any granule is opened</td>
+  <td><a class="src" data-sym="read_glt" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/regrid/__init__.py#L254">regrid:254</a></td>
+</tr>
+<tr>
+  <td class="num">3</td>
+  <td>Sensor window</td>
+  <td>The bounding box of the sensor pixels this GLT window names:
+      <code>[min|gy|-1, max|gy|) × [min|gx|-1, max|gx|)</code>. This is the only part of the
+      granule that is read</td>
+  <td><a class="src" data-sym="covering" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/types.py#L533">types.py:533</a></td>
+</tr>
+<tr>
+  <td class="num">4</td>
+  <td>Read</td>
+  <td>Each role (geometry, mineral, mask…) read over that window as a masked array — fill values
+      arrive already masked</td>
+  <td><a class="src" data-sym="read_observation" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/resolve/observation.py#L110">observation.py:110</a></td>
+</tr>
+<tr>
+  <td class="num">5</td>
+  <td>Sensor-space masks</td>
+  <td>Every <code>PixelMask</code> evaluated in the granule's own geometry, combined by
+      conjunction — cheaper here than on the map, and some masks (slit artefacts, edge trims)
+      only make sense in sensor space</td>
+  <td><a class="src" data-sym="for mask in plan.sensor_mask" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/resolve/observation.py#L177">observation.py:177</a></td>
+</tr>
+<tr>
+  <td class="num">6</td>
+  <td><strong>The gather</strong></td>
+  <td>The lookup itself — see below</td>
+  <td><a class="src" data-sym="gather" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/resolve/gather.py#L31">gather.py:31</a></td>
+</tr>
+<tr>
+  <td class="num">7</td>
+  <td>Map-space masks</td>
+  <td>Masks that need map geometry or ancillary rasters, on the block, by conjunction</td>
+  <td><a class="src" data-sym="for mask in plan.map_masks:" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/resolve/observation.py#L200">observation.py:200</a></td>
+</tr>
+<tr>
+  <td class="num">8</td>
+  <td>Class remap</td>
+  <td>The granule's own class ids → the run's, by the lookup array plan built. A value with no
+      mapping is marked invalid rather than guessed</td>
+  <td><a class="src" data-sym="values = apply_remap(values," href="https://github.com/jl-0/Stratum/blob/main/src/stratum/resolve/observation.py#L215">observation.py:215</a></td>
+</tr>
+<tr>
+  <td class="num">9</td>
+  <td>Score and keep</td>
+  <td>The scorer runs on the block; the running best is updated — see below</td>
+  <td><a class="src" data-sym="resolve_window" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/resolve/block.py#L154">block.py:154</a></td>
+</tr>
+</tbody>
+</table>
+</div>
+
+<h3 id="gather">The gather, written out</h3>
+
+<pre><code>hit          = fi != 0                          <span class="c"># band 3: a sensor pixel was found</span>
+interpolated = ((gy &lt; 0) | (gx &lt; 0)) &amp; hit      <span class="c"># beyond max_distance, kept but flagged</span>
+r            = |gy| - 1 - sw.row0               <span class="c"># GLT is 1-based; sw is the sensor window</span>
+c            = |gx| - 1 - sw.col0
+band[hit]    = data[r, c]                       <span class="c"># the value, verbatim</span>
+valid        = hit &amp; ~mask[r, c] &amp; ok[r, c]     <span class="c"># fill, and the sensor masks</span></code></pre>
+
+<p>That is the whole of it: an integer index into an array. No weighting, no averaging, no
+sub-pixel interpolation. <code>SpectralUtil</code>'s <code>apply_glt</code> performs the identical
+indexing —</p>
+
+<pre><code>outdata[valid_glt, :] = dat[glt[valid_glt, 1], glt[valid_glt, 0], :]</code></pre>
+
+<p>— and the two lines are worth diffing during review:
+<a class="src" data-sym="band[hit] = data[rh, ch]" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/resolve/gather.py#L66">gather.py:66</a>
+versus
+<a class="src" data-sym="apply_glt" href="https://github.com/emit-sds/SpectralUtil/blob/590dafd/spectral_util/mosaic/mosaic.py#L385">mosaic.py:385</a>.
+Stratum does not call <code>apply_glt</code> because it is a whole-file operation — it loads the
+entire GLT and the entire raster and writes an output file — and resolve needs the same
+arithmetic on a windowed read, under a mask, one block at a time, with the per-granule class
+remap applied in the same pass.</p>
+
+<h3 id="scoring">Scoring and the running best</h3>
+
+<p>The scorer is the part you write. It receives the observation on the block and returns one
+float per cell; <code>NaN</code> means <em>refuse this cell</em>. The demo's rule is one line —
+the most nadir look wins:</p>
+
+<pre><code>def score(self, obs, aux):
+    return -obs["view_zenith"]        <span class="c"># negated: resolve keeps the HIGHEST score</span></code></pre>
+
+<p>Observations are streamed in candidate order and a running best is kept, so memory does not
+grow with the number of overlapping granules:</p>
+
+<pre><code>take = obs.valid &amp; ~isnan(score) &amp; (~won | (score &gt; best))
+best[take]   = score[take]
+layers[take] = values[take]
+won         |= take</code></pre>
+
+<p>The comparison is <strong>strictly greater</strong>, so on an exact tie the first candidate in
+order wins. That makes the result depend on candidate order, which is why the order is fixed by
+the frozen granule set rather than by whatever the filesystem returned
+(<a href="#caveats">section 9</a>).</p>
+
+<p>What lands on disk is the snapshot: each schema layer's winning value, the winning
+<code>score</code>, and <code>valid</code>.
+<a class="src" data-sym="write_snapshot" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/resolve/snapshot.py#L66">snapshot.py:66</a></p>
+
+<h2 id="reduce">6. Reduce — combining epochs</h2>
+
+<p>Reduce takes the stack of snapshots covering one delivery period and produces the delivered
+bands. Every kernel is vectorised over <code>(H, W)</code>; the only loops are over the epoch axis
+and over the class ids actually present.
+<a class="src" data-sym="reduce_stack" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/reduce/builtin.py#L39">builtin.py:39</a></p>
+
+<p>The support count is the starting point for everything else:</p>
+
+<pre><code>n_epochs = valid.sum(axis=0)          <span class="c"># how many epochs had anything to say here</span></code></pre>
+
+<h3 id="vote">Categorical: mode through time</h3>
+
+<p>The default for a class layer, in this decision order
+(<a class="src" data-sym="vote" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/reduce/builtin.py#L165">builtin.py:165</a>):</p>
+
+<ol>
+  <li>Invalid epochs are discarded. What remains is <code>n_epochs</code>.</li>
+  <li>Ignored classes (named in the manifest; <code>none</code> is class 0) leave the tally but
+  <em>stay</em> in <code>n_epochs</code> — being repeatedly told "nothing here" is information,
+  and hiding it would inflate agreement.</li>
+  <li><code>counts[k] = (vals == k &amp; counted).sum(axis=0)</code> per class; the modal class is
+  <code>counts.max(axis=0)</code>.</li>
+  <li>The winner is suppressed to nodata where its count is below <code>min_count</code>.</li>
+  <li>Ties are broken by <code>tie_break</code>: <code>earliest</code> / <code>latest</code> by
+  epoch order, <code>highest_score</code> by the best score any tied class holds, or
+  <code>nodata</code> to refuse. Equal keys fall to the lowest class id, so the result is
+  deterministic either way.
+  <a class="src" data-sym="_pick" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/reduce/builtin.py#L143">builtin.py:143</a></li>
+</ol>
+
+<p>Two companion bands come out of the same tally:</p>
+
+<pre><code>agreement = modal_count / n_epochs     <span class="c"># NaN where n_epochs == 0</span>
+runner_up = second mode, same tie rule</code></pre>
+
+<p><code>agreement</code> is reported even where the winner was suppressed by
+<code>min_count</code> or a refused tie: it describes the tally, not the decision.</p>
+
+<h3 id="continuous">Continuous: aggregation across epochs</h3>
+
+<p>Each method is nan-aware, so a non-finite value inside a selected epoch is skipped by the
+statistic but still counted in <code>&lt;layer&gt;_n</code>.
+<a class="src" data-sym="continuous" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/reduce/builtin.py#L229">builtin.py:229</a></p>
+
+<div class="tw">
+<table>
+<thead><tr><th>Method</th><th>Computed</th></tr></thead>
+<tbody>
+<tr><td><code>median</code>, <code>mean</code>, <code>min</code>, <code>max</code>, <code>percentile</code></td><td>the nan-aware numpy reduction over the epoch axis</td></tr>
+<tr><td><code>best</code></td><td>the value from the highest-scoring epoch — no arithmetic on values at all</td></tr>
+<tr><td><code>score_weighted</code></td><td><code>w = score - min(score) + 1e-6</code>, then <code>Σwx / Σw</code>. The shift exists because <strong>a score is only an ordering</strong> — <code>MinViewZenith</code> returns negative numbers — and a raw score cannot be a weight. The lowest-scoring epoch gets weight ε; equal scores reduce to a plain mean</td></tr>
+<tr><td><code>inverse_variance</code></td><td><code>w = 1/u²</code> from the layer's uncertainty band, dropping epochs whose <code>u</code> is NaN or ≤ 0 from both the estimate and the count</td></tr>
+</tbody>
+</table>
+</div>
+
+<p>Optional <code>spread</code> is the standard deviation or the interquartile range over the same
+selected epochs. A layer may be <code>conditional_on</code> a categorical layer, which narrows the
+epoch set to those that agreed with the winning class before any of the above runs — so a mean
+band depth is a mean over the epochs that actually saw that mineral.</p>
+
+<h2 id="publish">7. Publish — colour, tile, catalogue</h2>
+
+<p>Publish performs no science. Blocks are assembled into full-tile arrays, cells no block covered
+taking the band's nodata
+(<a class="src" data-sym="stitch" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/publish/stitch.py#L74">stitch.py:74</a>),
+then:</p>
+
+<ul>
+  <li><strong>Data COGs</strong> — one tiled, deflate-compressed GeoTIFF per delivered band, with
+  nodata, band descriptions, units, and the run's provenance tags. Categorical bands carry a GDAL
+  colour table so a plain viewer can render them.
+  <a class="src" data-sym="write_geotiff" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/publish/cogs.py#L77">cogs.py:77</a></li>
+  <li><strong>Images</strong> — a categorical mapper is a class → RGBA lookup
+  (<a class="src" data-sym="CategoricalMapper" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/publish/mappers.py#L91">mappers.py:91</a>);
+  a continuous mapper clips to a domain and interpolates a ramp
+  (<a class="src" data-sym="apply_ramp" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/publish/colors.py#L156">colors.py:156</a>).
+  Optional <code>alpha_from</code> interpolates a confidence band linearly into an alpha range, so
+  a low-agreement cell renders faint. Nodata is transparent.</li>
+  <li><strong>Legend and STAC</strong> — the class table as published, and an item recording the
+  granules, the manifest hash and the run id.</li>
+</ul>
+
+<h2 id="boundary">8. Where each method comes from</h2>
+
+<p>The complete ledger for anything that touches real data or real geometry.</p>
+
+<div class="tw">
+<table>
+<thead><tr><th>Method</th><th>Owner</th><th>Code</th></tr></thead>
+<tbody>
+<tr>
+  <td>Nearest-neighbour search (KD-tree), and the crop of the target grid to the granule's bounds</td>
+  <td><strong>SpectralUtil</strong>, called unmodified</td>
+  <td><a class="src" data-sym="find_subgrid_locations" href="https://github.com/emit-sds/SpectralUtil/blob/590dafd/spectral_util/mosaic/mosaic.py#L91">find_subgrid_locations</a></td>
+</tr>
+<tr>
+  <td>Distance cutoff and the negative "interpolated" marker</td>
+  <td><strong>SpectralUtil</strong></td>
+  <td><a class="src" data-sym="find_subgrid_locations" href="https://github.com/emit-sds/SpectralUtil/blob/590dafd/spectral_util/mosaic/mosaic.py#L91">find_subgrid_locations</a></td>
+</tr>
+<tr>
+  <td>Contiguous-interpolation clean (3×3, ≥ 3 flagged → drop)</td>
+  <td><strong>SpectralUtil</strong>, called unmodified</td>
+  <td><a class="src" data-sym="remove_negatives" href="https://github.com/emit-sds/SpectralUtil/blob/590dafd/spectral_util/mosaic/mosaic.py#L17">remove_negatives</a></td>
+</tr>
+<tr>
+  <td>Cell-centre generation from the tile transform</td>
+  <td>Stratum — grid definition, no granule input</td>
+  <td><a class="src" data-sym="cell_centres" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/regrid/__init__.py#L67">cell_centres</a></td>
+</tr>
+<tr>
+  <td>Dropping non-finite / masked <code>loc</code> pixels before the search</td>
+  <td>Stratum — changes which pixels are candidates</td>
+  <td><a class="src" data-sym="_valid_points" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/regrid/__init__.py#L78">_valid_points</a></td>
+</tr>
+<tr>
+  <td>Flat index → full-array <code>(row, col)</code>, sign preserved</td>
+  <td>Stratum — the adapter around the call above; the place to look first if a GLT ever looks wrong</td>
+  <td><a class="src" data-sym="build_glt_raw" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/regrid/__init__.py#L90">build_glt_raw</a></td>
+</tr>
+<tr>
+  <td>Cutoff default, <code>1.5 × cell diagonal</code></td>
+  <td>Stratum restating SpectralUtil's own default so it enters the cache key — <a href="#regrid-cutoff">same number</a></td>
+  <td><a class="src" data-sym="resolve_max_distance" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/regrid/__init__.py#L58">resolve_max_distance</a></td>
+</tr>
+<tr>
+  <td>Pixel lookup through the GLT</td>
+  <td>Stratum — same indexing as <code>apply_glt</code>, windowed and masked instead of whole-file</td>
+  <td><a class="src" data-sym="gather" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/resolve/gather.py#L31">gather</a></td>
+</tr>
+<tr>
+  <td>Per-cell winner within an epoch</td>
+  <td>Stratum — the point of the framework; the rule itself is a plugin</td>
+  <td><a class="src" data-sym="resolve_window" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/resolve/block.py#L154">resolve_window</a></td>
+</tr>
+<tr>
+  <td>Mode through time, agreement, runner-up, continuous statistics</td>
+  <td>Stratum, over numpy reductions</td>
+  <td><a class="src" data-sym="vote" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/reduce/builtin.py#L165">vote</a>, <a class="src" data-sym="continuous" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/reduce/builtin.py#L229">continuous</a></td>
+</tr>
+</tbody>
+</table>
+</div>
+
+<div class="key">
+  <span class="label">The check that this holds</span>
+  <p><code>examples/trial-nevada/parity.py</code> rebuilds the same tile through SpectralUtil's own
+  path — <code>build_obs_nc</code> with OBS band 2 and <code>min</code>, then its GLT — and compares
+  cell by cell against a Stratum run configured with <code>min_view_zenith</code>: the winning
+  class, the winning view zenith, and which granule won. It is the executable form of this
+  section, and the thing to run before believing any of it.
+  <a class="src" href="https://github.com/jl-0/Stratum/blob/main/examples/trial-nevada/parity.py">parity.py</a></p>
+</div>
+
+<h2 id="caveats">9. Known properties worth reviewing</h2>
+
+<p>Not defects — decisions, each with a consequence a reviewer should weigh.</p>
+
+<div class="tw">
+<table>
+<thead><tr><th>Property</th><th>Consequence</th></tr></thead>
+<tbody>
+<tr>
+  <td>Nearest-neighbour distance is Euclidean in grid units (degrees for EPSG:4326)</td>
+  <td>The metric and the cutoff are anisotropic away from the equator. Inherited from SpectralUtil
+      deliberately, for parity; a projected grid removes the question entirely</td>
+</tr>
+<tr>
+  <td>Ties in resolve go to the first candidate (<code>score &gt; best</code>)</td>
+  <td>The result depends on candidate order. Order comes from the frozen granule set, so it is
+      reproducible — but two runs with different filters can order differently</td>
+</tr>
+<tr>
+  <td>The contiguity clean is a stencil</td>
+  <td>GLTs must be built per whole tile. Any future attempt to parallelise regrid below the tile
+      would produce seams</td>
+</tr>
+<tr>
+  <td>A score is an ordering, not a physical quantity</td>
+  <td>Anything that treats it as a magnitude has to say how — which is what the shift in
+      <code>score_weighted</code> is, and why it is documented at the constant</td>
+</tr>
+<tr>
+  <td>GLT band 3 is always 1</td>
+  <td>One GLT per granule, so there is no file index to carry. The band is kept so
+      <code>SpectralUtil</code> and other EMIT mosaic tooling can open a Stratum GLT
+      unmodified</td>
+</tr>
+<tr>
+  <td>Interpolated cells are kept, not dropped</td>
+  <td>A cell filled from beyond <code>max_distance</code> reaches the product unless step 6 removed
+      it. The flag survives into the snapshot, so a scorer or mask can refuse them</td>
+</tr>
+</tbody>
+</table>
+</div>
+
+</div>
+<nav class="pager" aria-label="Pagination"></nav>
+<footer class="site">
+  Specified in <a href="../specs/03-regrid-glt.md"><code>specs/03-regrid-glt.md</code></a>,
+  <a href="../specs/04-cost-functions.md"><code>04</code></a>,
+  <a href="../specs/12-data-access.md"><code>12</code></a>,
+  <a href="../specs/13-snapshot-schema.md"><code>13</code></a>
+</footer>
+</main>
+</div>
+<script src="../assets/stratum.js"></script>
+</body>
+</html>

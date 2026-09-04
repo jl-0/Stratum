@@ -114,7 +114,7 @@ query and not a header scan. The file additionally carries `product_version` (`V
 `history` naming `tetracorder5.27c.cmds`; neither is in CMR, and `LocalSource` records them from the
 header. Field-by-field mapping in [12 §5](12-data-access.md).
 
-> Phil has since confirmed that V002 only **adds** metadata. A reader written against V001 fields
+> The science lead has since confirmed that V002 only **adds** metadata. A reader written against V001 fields
 > therefore stays forward-compatible. Note this does *not* extend to class tables keyed on
 > `index` — see [11 §9](11-types.md).
 

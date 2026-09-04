@@ -132,7 +132,7 @@ values rather than raw indices. Applying them on the sensor window is honest and
 
 ### Built-in EMIT masks
 
-Instrument knowledge belongs in `stratum_emit`, not in user config. Per Phil at the Mines tag-up
+Instrument knowledge belongs in `stratum_emit`, not in user config. Per the science lead at the Mines tag-up
 ([notes](../notes/2026-08-28-mines-tagup.md#2-concrete-instrument-artifacts-to-mask)):
 
 | Mask | Space | Behaviour |
@@ -147,8 +147,8 @@ boundaries in the along-track direction are a download convenience with no physi
 top/bottom edges are sound. Trimming them would discard good data.
 
 AMD's flag semantics (`Cloud flag`, `Cirrus flag`, `Water flag`, `Spacecraft Flag`, optionally
-`Dilated Cloud Flag`) remain expressible directly in config. Dana's additions — snow, high
-vegetation — enter as further chain entries, several needing aux data rather than the L2A mask.
+`Dilated Cloud Flag`) remain expressible directly in config. The science team's additions — snow,
+high vegetation — enter as further chain entries, several needing aux data rather than the L2A mask.
 
 ---
 
@@ -429,7 +429,7 @@ less defensive one: a single well-scoring epoch takes the cell with no corrobora
 
 ### Reduce continuously where possible
 
-At the Mines tag-up Phil framed the whole problem as a Kalman filter — *"coming up with the
+At the Mines tag-up the science lead framed the whole problem as a Kalman filter — *"coming up with the
 appropriate loss function that one applies… to get the right solution out"* — and named the goal
 as *"a version of the world where we're not destroying all of that information,"* noting that
 Tetracorder's binarized output has already discarded some of it
@@ -499,7 +499,7 @@ classifier discarded.
 
 ### Why this is pluggable at all
 
-The clearest statement of the reason came from Phil at the Mines tag-up: temporal stability is an
+The clearest statement of the reason came from the science lead at the Mines tag-up: temporal stability is an
 open geological hypothesis, and the right assumption depends on the question being asked —
 *"if you're trying to make a base map, you probably don't care so much; if you're trying to look at
 sand dunes, you care a lot."* No single temporal algorithm is correct for both, which is precisely

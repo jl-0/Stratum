@@ -13,7 +13,7 @@ leak into HCL, and then changing a cloud-fraction threshold requires an infrastr
 review, and an apply. The people the platform exists for stop using it directly, and a
 platform-team bottleneck forms around parameter changes.
 
-The specific risk here is that the science is *expected* to change constantly. Phil's instruction
+The specific risk here is that the science is *expected* to change constantly. The science lead's instruction
 was to start building and iterate; the whole design is optimized so that changing a cost function
 is cheap. If that change also requires `terraform apply`, the optimization is wasted.
 

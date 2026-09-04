@@ -111,7 +111,7 @@ Layered composition (AMD's `-p "mosaic<-v6<-filter-fit"`) is a genuinely good id
 dict-merge *before* validation, so the merged document is what gets validated and hashed.
 
 Rejected: **mlky** (what AMD uses). It already does patch composition with `${}` interpolation and
-James knows it well, which is a real argument. But it is an additional dependency owned outside
+is well known on the team, which is a real argument. But it is an additional dependency owned outside
 the team, and we need typed validation and JSON Schema more than we need interpolation.
 
 **Revisit if** mlky adds schema validation, or if config compatibility with AMD becomes a
