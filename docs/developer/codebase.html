@@ -335,28 +335,6 @@ from either end. The coarse version:</p>
   keep-them-in-step rule and the spec&nbsp;&rarr;&nbsp;site map.</p>
 </div>
 
-<h2 id="outside">5. What is in the repository but not in the tree</h2>
-
-<div class="tw">
-<table>
-<thead><tr><th>Path</th><th>What it is</th></tr></thead>
-<tbody>
-<tr><td><code>vendor/SpectralUtil/</code></td><td>A submodule pinned to one commit, installed
-editable by pixi. The KD-tree search and the interpolation clean-up are <em>called</em>, not
-forked &mdash; see <a href="../guide/algorithms.html#boundary">the boundary ledger</a>.</td></tr>
-<tr><td><code>examples/</code></td><td>Manifests and class files. Configuration, not code;
-<code>emit-cmr-nevada/</code> is the worked example that downloads from CMR on first touch.</td></tr>
-<tr><td><code>refs/</code></td><td>Verbatim artifacts from existing pipelines. <strong>Never
-edited.</strong></td></tr>
-<tr><td><code>trial-data/</code></td><td>Local granules for trial runs. Git-ignored, never
-committed.</td></tr>
-<tr><td><code>terraform/</code>, <code>scripts/</code></td><td>The platform side of
-<a href="../decisions/ADR-0002-terraform-manifest-boundary.md">ADR-0002</a>: what a deployment
-owns, as against what a manifest owns.</td></tr>
-</tbody>
-</table>
-</div>
-
 </div>
 <nav class="pager" aria-label="Pagination"></nav>
 <footer class="site">

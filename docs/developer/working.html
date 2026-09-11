@@ -44,6 +44,10 @@ maintained.</p>
   <code>[project].dependencies</code>: it has no PyPI release. The submodule pins the commit, and
   the doc links to SpectralUtil source are pinned to that same commit rather than to a
   branch.</p>
+  <p>A fresh clone must therefore pull it: <code>git clone --recurse-submodules</code>, or
+  <code>git submodule update --init</code> afterwards. Without it <code>vendor/SpectralUtil</code>
+  is an empty directory, <code>pixi install</code> cannot resolve the editable path dependency, and
+  the documentation link test skips rather than fails.</p>
 </div>
 
 <h2 id="suite">2. The test suite</h2>
