@@ -66,6 +66,53 @@ writing code. The group exists so that the uncommon case has somewhere to go.</p
 <code>module:Class</code> path otherwise. Both forms work everywhere, which is what lets you
 develop a plugin before packaging it.</p>
 
+<figure class="fig">
+<svg viewBox="0 0 860 306" width="860" height="306" role="img" aria-label="A manifest ref resolved at plan time and rebuilt in each worker">
+  <defs>
+    <marker id="h-pl" markerWidth="9" markerHeight="7" refX="8.4" refY="3.5" orient="auto">
+      <path class="hd" d="M0,0 L9,3.5 L0,7 Z"/>
+    </marker>
+    <marker id="ha-pl" markerWidth="9" markerHeight="7" refX="8.4" refY="3.5" orient="auto">
+      <path class="hd-a" d="M0,0 L9,3.5 L0,7 Z"/>
+    </marker>
+  </defs>
+    <rect class="nd-m" x="30" y="40" width="300" height="44" rx="6"/>
+    <text class="lb-c" x="180" y="60" text-anchor="middle">&quot;prefer_bare_earth&quot;</text>
+    <text class="lb lb-s lb-m" x="180" y="76" text-anchor="middle">a string in the manifest</text>
+    <path class="ed-a" d="M180,86 L180,98" marker-end="url(#ha-pl)"/>
+    <rect class="nd" x="30" y="102" width="300" height="44" rx="6"/>
+    <text class="lb-c" x="180" y="122" text-anchor="middle">resolve(kind, ref)</text>
+    <text class="lb lb-s lb-m" x="180" y="138" text-anchor="middle">entry point, then module:Class</text>
+    <path class="ed-a" d="M180,148 L180,160" marker-end="url(#ha-pl)"/>
+    <rect class="nd" x="30" y="164" width="300" height="44" rx="6"/>
+    <text class="lb-c" x="180" y="184" text-anchor="middle">instantiate(...)</text>
+    <text class="lb lb-s lb-m" x="180" y="200" text-anchor="middle">params as kwargs</text>
+    <path class="ed-a" d="M180,210 L180,222" marker-end="url(#ha-pl)"/>
+    <rect class="nd-a" x="30" y="226" width="300" height="44" rx="6"/>
+    <text class="lb-c" x="180" y="246" text-anchor="middle">PluginBinding</text>
+    <text class="lb lb-s lb-m" x="180" y="262" text-anchor="middle">instance + ref + version + params</text>
+    <text class="lb lb-s lb-m lb-b" x="180" y="24" text-anchor="middle">PLAN TIME — once</text>
+    <path class="ed ed-d" d="M336,300 L336,20"/>
+    <text class="lb lb-s lb-m" x="348" y="20" text-anchor="start">the process boundary</text>
+    <rect class="nd-a" x="376" y="130" width="180" height="44" rx="6"/>
+    <text class="lb-c" x="466" y="157" text-anchor="middle">plan.json</text>
+    <path class="ed-a" d="M336,152 L370,152" marker-end="url(#ha-pl)"/>
+    <text class="lb-c lb-s lb-m" x="466" y="190" text-anchor="middle">plugin_to_doc</text>
+    <text class="lb-c lb-s lb-m" x="466" y="206" text-anchor="middle">{ref, params, version}</text>
+    <path class="ed-a" d="M562,152 L596,152" marker-end="url(#ha-pl)"/>
+    <text class="lb lb-s lb-m lb-b" x="704" y="24" text-anchor="middle">RUN TIME — every worker</text>
+    <rect class="nd" x="602" y="96" width="204" height="44" rx="6"/>
+    <text class="lb-c" x="704" y="123" text-anchor="middle">plugin_from_doc</text>
+    <rect class="nd-a" x="602" y="158" width="204" height="44" rx="6"/>
+    <text class="lb-c" x="704" y="185" text-anchor="middle">the same instance</text>
+    <path class="ed-a" d="M704,142 L704,154" marker-end="url(#ha-pl)"/>
+    <text class="lb lb-s lb-m" x="704" y="222" text-anchor="middle">re-instantiated from {ref, params},</text>
+    <text class="lb lb-s lb-m" x="704" y="236" text-anchor="middle">but carrying the version the PLANNER</text>
+    <text class="lb lb-s lb-m" x="704" y="250" text-anchor="middle">recorded — so its keys are the planner&#x27;s keys</text>
+</svg>
+<figcaption>How a string becomes an object, and what survives the trip. The version is resolved once, by the planner, and carried across rather than re-derived &mdash; a worker with a differently-versioned plugin installed would otherwise compute different cache keys from the same plan.</figcaption>
+</figure>
+
 <pre><code>"prefer_bare_earth"                      <span class="c"># registered entry point</span>
 "my_lab.scorers:SnowAware"               <span class="c"># module:Class, nothing installed</span></code></pre>
 

@@ -53,11 +53,19 @@ def test_every_module_is_on_the_codebase_map() -> None:
                          "add a row to the module-by-module table")
 
 
+def repo_modules() -> list[str]:
+    """Every Python file in the working tree, repo-relative. Not just `src/`: the map cites test
+    modules too, and a caption naming a test that has been renamed rots exactly the same way."""
+    skip = (".pixi", ".git", "vendor", "__pycache__", ".ruff_cache", ".pytest_cache")
+    return [str(p.relative_to(ROOT)) for p in ROOT.rglob("*.py")
+            if not any(part in skip for part in p.relative_to(ROOT).parts)]
+
+
 def test_the_codebase_map_names_no_module_that_is_gone() -> None:
     """The other direction: a module renamed or deleted while the map still cites it. Only
     `<code>` spans ending in `.py` are considered - prose and file-format names are not paths."""
     tokens = {t for t in re.findall(r"<code>([A-Za-z0-9_./]+\.py)</code>", MAP.read_text())}
-    known = [str(p.relative_to(ROOT)) for p in MODULES]
+    known = repo_modules()
     gone = sorted(t for t in tokens if not any(k.endswith(t) for k in known))
     assert not gone, f"{MAP.name} names module(s) that no longer exist: {gone}; repoint them"
 
