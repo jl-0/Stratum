@@ -32,58 +32,23 @@ contract that holds the whole thing together.</p>
 <p>Everything Stratum does happens in one of two roles, and the difference is absolute.</p>
 
 <figure class="fig">
-<svg viewBox="0 0 860 248" width="860" height="248" role="img" aria-label="The planner writes a run directory; many workers read it">
-  <defs>
-    <marker id="h-pw" markerWidth="9" markerHeight="7" refX="8.4" refY="3.5" orient="auto">
-      <path class="hd" d="M0,0 L9,3.5 L0,7 Z"/>
-    </marker>
-    <marker id="ha-pw" markerWidth="9" markerHeight="7" refX="8.4" refY="3.5" orient="auto">
-      <path class="hd-a" d="M0,0 L9,3.5 L0,7 Z"/>
-    </marker>
-  </defs>
-    <text class="lb lb-s lb-m lb-b" x="24" y="24" text-anchor="start">PLANNER — one process, once</text>
-    <rect class="bd" x="24" y="36" width="200" height="116" rx="8"/>
-    <text class="lb-c" x="124" y="98" text-anchor="middle"></text>
-    <rect class="nd" x="38" y="50" width="172" height="28" rx="6"/>
-    <text class="lb-c" x="124" y="68" text-anchor="middle">manifest.yaml</text>
-    <rect class="nd" x="38" y="84" width="172" height="28" rx="6"/>
-    <text class="lb-c" x="124" y="102" text-anchor="middle">the granule index</text>
-    <rect class="nd" x="38" y="118" width="172" height="28" rx="6"/>
-    <text class="lb-c" x="124" y="136" text-anchor="middle">a few real granules</text>
-    <text class="lb lb-s" x="124" y="172" text-anchor="middle">decides everything</text>
-    <text class="lb lb-s lb-m" x="124" y="186" text-anchor="middle">tiles, epochs, granules,</text>
-    <text class="lb lb-s lb-m" x="124" y="198" text-anchor="middle">plugins, schema, fan-out</text>
-    <path class="ed-a" d="M228,94 L292,94" marker-end="url(#ha-pw)"/>
-    <text class="lb lb-s lb-m" x="260" y="86" text-anchor="middle">plan_run</text>
-    <text class="lb lb-s lb-m lb-b" x="300" y="24" text-anchor="start">RUN DIRECTORY — plain files</text>
-    <rect class="bd" x="300" y="36" width="236" height="172" rx="8"/>
-    <text class="lb-c" x="418" y="126" text-anchor="middle"></text>
-    <rect class="nd-a" x="314" y="50" width="208" height="28" rx="6"/>
-    <text class="lb-c" x="418" y="68" text-anchor="middle">plan.json</text>
-    <rect class="nd-a" x="314" y="84" width="208" height="28" rx="6"/>
-    <text class="lb-c" x="418" y="102" text-anchor="middle">index.parquet</text>
-    <rect class="nd-a" x="314" y="118" width="208" height="28" rx="6"/>
-    <text class="lb-c" x="418" y="136" text-anchor="middle">work/{stage}.jsonl</text>
-    <rect class="nd" x="314" y="152" width="208" height="28" rx="6"/>
-    <text class="lb-c" x="418" y="170" text-anchor="middle">report.md</text>
-    <text class="lb lb-s lb-m" x="418" y="228" text-anchor="middle">the whole contract between them</text>
-    <path class="ed-a" d="M540,80 L604,80" marker-end="url(#ha-pw)"/>
-    <text class="lb lb-s lb-m" x="572" y="72" text-anchor="middle">load</text>
-    <path class="ed" d="M604,150 L540,150" marker-end="url(#h-pw)"/>
-    <text class="lb lb-s lb-m" x="572" y="142" text-anchor="middle">results</text>
-    <text class="lb lb-s lb-m lb-b" x="612" y="24" text-anchor="start">WORKERS — N processes, once per item</text>
-    <rect class="bd" x="612" y="36" width="224" height="172" rx="8"/>
-    <text class="lb-c" x="724" y="126" text-anchor="middle"></text>
-    <rect class="nd" x="626" y="50" width="196" height="44" rx="6"/>
-    <text class="lb-c" x="724" y="68" text-anchor="middle">exec_item(run_dir,</text>
-    <text class="lb-c" x="724" y="82" text-anchor="middle">stage, index)</text>
-    <rect class="nd" x="626" y="106" width="196" height="28" rx="6"/>
-    <text class="lb-c" x="724" y="124" text-anchor="middle">HANDLERS[stage]</text>
-    <rect class="nd-a" x="626" y="140" width="196" height="28" rx="6"/>
-    <text class="lb-c" x="724" y="158" text-anchor="middle">one cache artifact</text>
-    <text class="lb lb-s" x="724" y="190" text-anchor="middle">decides nothing</text>
-    <text class="lb lb-s lb-m" x="724" y="228" text-anchor="middle">portable to SLURM or Lambda unchanged</text>
-</svg>
+<pre class="mermaid">
+sequenceDiagram
+  autonumber
+  participant P as planner
+  participant D as run dir
+  participant W as worker
+  participant C as cache
+  P->>P: load, filter, freeze, inspect
+  Note over P: every decision, once
+  P->>D: plan.json + work lists
+  D->>W: plan.json + one line
+  W->>C: recompute the key, look it up
+  C-->>W: hit, or miss
+  W->>C: write one artifact
+  W->>D: one outcome line
+  Note over W: decides nothing
+</pre>
 <figcaption>Two kinds of process, and the files between them. A worker reconstructs everything it needs from <code>plan.json</code> plus the installed code &mdash; it never consults the manifest, queries the catalogue, or re-derives a decision. That is what makes a run reproducible and the executor replaceable.</figcaption>
 </figure>
 
@@ -260,53 +225,17 @@ period. That is the seam where per-block output becomes per-tile output.</p>
 sequential processes that never speak to each other.</p>
 
 <figure class="fig">
-<svg viewBox="0 0 860 258" width="860" height="258" role="img" aria-label="Four stages writing to and reading from one content-addressed cache">
-  <defs>
-    <marker id="h-kc" markerWidth="9" markerHeight="7" refX="8.4" refY="3.5" orient="auto">
-      <path class="hd" d="M0,0 L9,3.5 L0,7 Z"/>
-    </marker>
-    <marker id="ha-kc" markerWidth="9" markerHeight="7" refX="8.4" refY="3.5" orient="auto">
-      <path class="hd-a" d="M0,0 L9,3.5 L0,7 Z"/>
-    </marker>
-  </defs>
-    <rect class="nd-a" x="30" y="40" width="176" height="44" rx="6"/>
-    <text class="lb-c" x="118" y="67" text-anchor="middle">regrid</text>
-    <rect class="nd-a" x="230" y="40" width="176" height="44" rx="6"/>
-    <text class="lb-c" x="318" y="67" text-anchor="middle">resolve</text>
-    <path class="ed ed-d" d="M208,62 L226,62"/>
-    <rect class="nd-a" x="430" y="40" width="176" height="44" rx="6"/>
-    <text class="lb-c" x="518" y="67" text-anchor="middle">reduce</text>
-    <path class="ed ed-d" d="M408,62 L426,62"/>
-    <rect class="nd-a" x="630" y="40" width="176" height="44" rx="6"/>
-    <text class="lb-c" x="718" y="67" text-anchor="middle">publish</text>
-    <path class="ed ed-d" d="M608,62 L626,62"/>
-    <text class="lb lb-s lb-m" x="430" y="24" text-anchor="middle">the four stages run in order, but never speak to each other</text>
-    <rect class="bd" x="30" y="176" width="800" height="54" rx="8"/>
-    <text class="lb-c" x="430" y="207" text-anchor="middle"></text>
-    <text class="lb-c lb-b" x="46" y="198" text-anchor="start">{root}/cache/</text>
-    <text class="lb lb-s lb-m" x="46" y="216" text-anchor="start">content-addressed; survives every run</text>
-    <rect class="nd" x="330" y="188" width="150" height="30" rx="6"/>
-    <text class="lb-c" x="405" y="207" text-anchor="middle">glt/</text>
-    <rect class="nd" x="492" y="188" width="150" height="30" rx="6"/>
-    <text class="lb-c" x="567" y="207" text-anchor="middle">snapshot/</text>
-    <rect class="nd" x="654" y="188" width="150" height="30" rx="6"/>
-    <text class="lb-c" x="729" y="207" text-anchor="middle">product/</text>
-    <path class="ed-a" d="M88.0,86 L88.0,172" marker-end="url(#ha-kc)"/>
-    <text class="lb lb-s lb-m" x="30" y="132" text-anchor="middle">writes</text>
-    <path class="ed-a" d="M288.0,86 L288.0,172" marker-end="url(#ha-kc)"/>
-    <text class="lb lb-s lb-m" x="230" y="132" text-anchor="middle">writes</text>
-    <path class="ed" d="M312.0,172 L312.0,86" marker-end="url(#h-kc)"/>
-    <text class="lb lb-s lb-m" x="380" y="152" text-anchor="middle">recomputes</text>
-    <text class="lb lb-s lb-m" x="380" y="164" text-anchor="middle">the key</text>
-    <path class="ed-a" d="M488.0,86 L488.0,172" marker-end="url(#ha-kc)"/>
-    <text class="lb lb-s lb-m" x="430" y="132" text-anchor="middle">writes</text>
-    <path class="ed" d="M512.0,172 L512.0,86" marker-end="url(#h-kc)"/>
-    <text class="lb lb-s lb-m" x="580" y="152" text-anchor="middle">recomputes</text>
-    <text class="lb lb-s lb-m" x="580" y="164" text-anchor="middle">the key</text>
-    <path class="ed" d="M712.0,172 L712.0,86" marker-end="url(#h-kc)"/>
-    <text class="lb lb-s lb-m" x="780" y="152" text-anchor="middle">recomputes</text>
-    <text class="lb lb-s lb-m" x="780" y="164" text-anchor="middle">the key</text>
-</svg>
+<pre class="mermaid">
+flowchart TB
+  R[regrid] -->|writes| C1[(cache / glt)]
+  C1 -->|resolve recomputes the GLT key| S[resolve]
+  S -->|writes| C2[(cache / snapshot)]
+  C2 -->|reduce recomputes the snapshot key| D[reduce]
+  D -->|writes| C3[(cache / product)]
+  C3 -->|publish recomputes the product key| P[publish]
+  classDef store stroke-width:2px
+  class C1,C2,C3 store
+</pre>
 <figcaption>The <strong>key-agreement contract</strong>. Nothing is handed from one stage to the next. A consumer derives the content address its input <em>would</em> have, from the same <code>plan.json</code> the producer used, and looks it up. Both sides deriving identically is therefore a correctness requirement, not an optimisation &mdash; and it is why the stages can be separate processes on separate machines.</figcaption>
 </figure>
 
@@ -388,5 +317,7 @@ way, so <code>stratum status --failed</code> can answer afterwards.</p>
 </main>
 </div>
 <script src="../assets/stratum.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11.17.2/dist/mermaid.min.js"></script>
+<script src="../assets/diagrams.js"></script>
 </body>
 </html>

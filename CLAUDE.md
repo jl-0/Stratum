@@ -220,9 +220,33 @@ the SpectralUtil `build_obs_nc` parity script) is **not tracked**; its measureme
 
 ## Working on the design site
 
-**There is no build step and there must not be one.** Plain HTML, one stylesheet, one script.
-It has to open correctly from `file://` as well as from Pages, so: no ES modules, no `fetch`, no
-CDN dependencies, relative links only.
+**There is no build step and there must not be one.** Plain HTML, one stylesheet, and scripts
+that a browser loads directly. No ES modules, no `fetch`, relative links only, and the page must
+open from `file://` as well as from Pages.
+
+**One CDN dependency is allowed: Mermaid, for diagrams.** Pinned to an exact version, loaded by
+the pages that carry a diagram and by no others:
+
+```html
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11.17.2/dist/mermaid.min.js"></script>
+<script src="../assets/diagrams.js"></script>
+```
+
+`dist/mermaid.min.js` is a classic script that sets `window.mermaid` -- not the ESM build, which
+would need `type="module"` and break the `file://` rule. Pin the exact version rather than a
+`@11` range: an unpinned range silently changes what renders. 11.17.2 over 12.x deliberately --
+3.4 MB against 5.3 MB, on a file every diagram page pulls.
+
+What this buys and what it costs: diagrams become editable text instead of hand-placed geometry,
+and in exchange the pages need the network on first load. `assets/diagrams.js` degrades on
+purpose -- when Mermaid is unreachable the `<pre class="mermaid">` keeps its source visible as a
+code block, so an offline reader still gets the structure, just unrendered. Do not add a second
+CDN dependency without a reason as good as this one, and do not reach for one where CSS or a
+table would do.
+
+`diagrams.js` also owns theming: it reads the palette off `:root` at run time and hands it to
+Mermaid as `themeVariables`, so a diagram follows light/dark with the rest of the page and there
+is no second palette to maintain. Never put a literal colour in a diagram.
 
 `docs/.nojekyll` is there on purpose. Without it GitHub Pages runs Jekyll, which would rewrite
 `specs/*.md` to `.html` and break every link from the site into the specs.

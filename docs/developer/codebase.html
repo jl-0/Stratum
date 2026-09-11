@@ -70,63 +70,23 @@ thing from the framework &mdash; <code>stratum.types</code> &mdash; and nothing 
 time by entry points declared in <code>pyproject.toml</code>, never by an import.</p>
 
 <figure class="fig">
-<svg viewBox="0 0 860 296" width="860" height="296" role="img" aria-label="src/stratum and src/stratum_emit, joined only by entry points">
-  <defs>
-    <marker id="h-pk" markerWidth="9" markerHeight="7" refX="8.4" refY="3.5" orient="auto">
-      <path class="hd" d="M0,0 L9,3.5 L0,7 Z"/>
-    </marker>
-    <marker id="ha-pk" markerWidth="9" markerHeight="7" refX="8.4" refY="3.5" orient="auto">
-      <path class="hd-a" d="M0,0 L9,3.5 L0,7 Z"/>
-    </marker>
-  </defs>
-    <rect class="bd" x="24" y="30" width="372" height="150" rx="8"/>
-    <text class="lb-c" x="210" y="109" text-anchor="middle"></text>
-    <text class="lb-c lb-b" x="40" y="50" text-anchor="start">src/stratum/</text>
-    <text class="lb lb-s lb-m" x="40" y="66" text-anchor="start">the framework</text>
-    <rect class="nd" x="40" y="78" width="78" height="28" rx="6"/>
-    <text class="lb-c" x="79" y="96" text-anchor="middle">cli</text>
-    <rect class="nd" x="126" y="78" width="78" height="28" rx="6"/>
-    <text class="lb-c" x="165" y="96" text-anchor="middle">plan</text>
-    <rect class="nd" x="212" y="78" width="78" height="28" rx="6"/>
-    <text class="lb-c" x="251" y="96" text-anchor="middle">executors</text>
-    <rect class="nd" x="298" y="78" width="78" height="28" rx="6"/>
-    <text class="lb-c" x="337" y="96" text-anchor="middle">resolve</text>
-    <rect class="nd" x="40" y="110" width="78" height="28" rx="6"/>
-    <text class="lb-c" x="79" y="128" text-anchor="middle">regrid</text>
-    <rect class="nd" x="126" y="110" width="78" height="28" rx="6"/>
-    <text class="lb-c" x="165" y="128" text-anchor="middle">publish</text>
-    <rect class="nd" x="212" y="110" width="78" height="28" rx="6"/>
-    <text class="lb-c" x="251" y="128" text-anchor="middle">cache</text>
-    <rect class="nd" x="298" y="110" width="78" height="28" rx="6"/>
-    <text class="lb-c" x="337" y="128" text-anchor="middle">index</text>
-    <rect class="nd-a" x="40" y="144" width="164" height="28" rx="6"/>
-    <text class="lb-c" x="122" y="162" text-anchor="middle">stratum.types</text>
-    <rect class="bd" x="470" y="30" width="366" height="150" rx="8"/>
-    <text class="lb-c" x="653" y="109" text-anchor="middle"></text>
-    <text class="lb-c lb-b" x="486" y="50" text-anchor="start">src/stratum_emit/</text>
-    <text class="lb lb-s lb-m" x="486" y="66" text-anchor="start">the EMIT plugin package</text>
-    <rect class="nd" x="486" y="78" width="106" height="28" rx="6"/>
-    <text class="lb-c" x="539" y="96" text-anchor="middle">readers</text>
-    <rect class="nd" x="600" y="78" width="106" height="28" rx="6"/>
-    <text class="lb-c" x="653" y="96" text-anchor="middle">masks</text>
-    <rect class="nd" x="714" y="78" width="106" height="28" rx="6"/>
-    <text class="lb-c" x="767" y="96" text-anchor="middle">scorers</text>
-    <text class="lb lb-s" x="486" y="126" text-anchor="start">Imports stratum.types and nothing else.</text>
-    <text class="lb lb-s lb-m" x="486" y="142" text-anchor="start">A different instrument is a sibling package</text>
-    <text class="lb lb-s lb-m" x="486" y="156" text-anchor="start">here, with no framework change.</text>
-    <path class="ed-a" d="M470,158 L212,158" marker-end="url(#ha-pk)"/>
-    <text class="lb lb-s lb-m" x="341" y="150" text-anchor="middle">imports stratum.types — the only edge</text>
-    <path class="ed ed-d" d="M396,96 L462,96" marker-end="url(#h-pk)"/>
-    <text class="lb lb-s lb-m" x="429" y="72" text-anchor="middle">never</text>
-    <path class="ed-a" d="M414,82 L444,110"/>
-    <path class="ed-a" d="M444,82 L414,110"/>
-    <rect class="nd-m" x="300" y="214" width="260" height="40" rx="6"/>
-    <text class="lb-c" x="430" y="232" text-anchor="middle">pyproject.toml</text>
-    <text class="lb lb-s lb-m" x="430" y="246" text-anchor="middle">[project.entry-points]</text>
-    <path class="ed ed-d" d="M360,214 L280,184" marker-end="url(#h-pk)"/>
-    <path class="ed ed-d" d="M500,214 L590,184" marker-end="url(#h-pk)"/>
-    <text class="lb lb-s lb-m" x="430" y="278" text-anchor="middle">The two halves meet here, at run time — never through an import</text>
-</svg>
+<pre class="mermaid">
+flowchart TB
+  subgraph FW["src/stratum/ &mdash; the framework"]
+    core["cli &middot; plan &middot; executors&lt;br/&gt;stages &middot; cache &middot; index"]
+    types["stratum.types"]
+  end
+  subgraph PL["src/stratum_emit/"]
+    plug["readers&lt;br/&gt;masks&lt;br/&gt;scorers"]
+  end
+  ep["pyproject.toml&lt;br/&gt;entry points"]
+  plug -->|the only import| types
+  core -.->|never| plug
+  ep -.-> core
+  ep -.-> plug
+  classDef leaf stroke-width:2px
+  class types leaf
+</pre>
 <figcaption>The <strong>framework/plugin boundary</strong>. <code>stratum_emit</code> imports one module from the framework; the framework imports nothing from <code>stratum_emit</code>. Everything else they share is resolved through entry points while a run is planning. This is the property that lets Stratum be pointed at another instrument, and a test enforces it.</figcaption>
 </figure>
 
@@ -145,64 +105,37 @@ time by entry points declared in <code>pyproject.toml</code>, never by an import
 deep. Nothing at a level imports anything at the same level or above it.</p>
 
 <figure class="fig">
-<svg viewBox="0 0 860 462" width="860" height="462" role="img" aria-label="The eight-level package stack, cli at the top and types at the base">
-  <defs>
-    <marker id="h-lg" markerWidth="9" markerHeight="7" refX="8.4" refY="3.5" orient="auto">
-      <path class="hd" d="M0,0 L9,3.5 L0,7 Z"/>
-    </marker>
-    <marker id="ha-lg" markerWidth="9" markerHeight="7" refX="8.4" refY="3.5" orient="auto">
-      <path class="hd-a" d="M0,0 L9,3.5 L0,7 Z"/>
-    </marker>
-  </defs>
-    <text class="lb lb-s lb-m" x="800" y="30" text-anchor="middle">imports</text>
-    <text class="lb lb-s lb-m" x="800" y="42" text-anchor="middle">only</text>
-    <text class="lb lb-s lb-m" x="800" y="54" text-anchor="middle">downward</text>
-    <path class="ed ed-a" d="M800,64 L800,414" marker-end="url(#ha-lg)"/>
-    <text class="lb lb-s lb-m lb-b" x="30" y="41" text-anchor="middle">L7</text>
-    <rect class="nd" x="54.0" y="16" width="698.0" height="42" rx="6"/>
-    <text class="lb-c" x="403" y="41" text-anchor="middle">cli</text>
-    <text class="lb lb-s lb-m lb-b" x="30" y="93" text-anchor="middle">L6</text>
-    <rect class="nd" x="54.0" y="68" width="698.0" height="42" rx="6"/>
-    <text class="lb-c" x="403" y="93" text-anchor="middle">executors</text>
-    <text class="lb lb-s lb-m lb-b" x="30" y="145" text-anchor="middle">L5</text>
-    <rect class="nd" x="54.0" y="120" width="698.0" height="42" rx="6"/>
-    <text class="lb-c" x="403" y="145" text-anchor="middle">plan</text>
-    <text class="lb lb-s lb-m lb-b" x="30" y="197" text-anchor="middle">L4</text>
-    <rect class="nd" x="54.0" y="172" width="698.0" height="42" rx="6"/>
-    <text class="lb-c" x="403" y="197" text-anchor="middle">filters</text>
-    <text class="lb lb-s lb-m lb-b" x="30" y="249" text-anchor="middle">L3</text>
-    <rect class="nd" x="54.0" y="224" width="345.0" height="42" rx="6"/>
-    <text class="lb-c" x="226.5" y="249" text-anchor="middle">resolve</text>
-    <rect class="nd" x="407.0" y="224" width="345.0" height="42" rx="6"/>
-    <text class="lb-c" x="579.5" y="249" text-anchor="middle">manifest</text>
-    <text class="lb lb-s lb-m lb-b" x="30" y="301" text-anchor="middle">L2</text>
-    <rect class="nd" x="54.0" y="276" width="345.0" height="42" rx="6"/>
-    <text class="lb-c" x="226.5" y="301" text-anchor="middle">regrid</text>
-    <rect class="nd" x="407.0" y="276" width="345.0" height="42" rx="6"/>
-    <text class="lb-c" x="579.5" y="301" text-anchor="middle">publish</text>
-    <text class="lb lb-s lb-m lb-b" x="30" y="353" text-anchor="middle">L1</text>
-    <rect class="nd" x="54.0" y="328" width="92.85714285714286" height="42" rx="6"/>
-    <text class="lb-c" x="100.429" y="353" text-anchor="middle">hooks</text>
-    <rect class="nd" x="154.85714285714286" y="328" width="92.85714285714286" height="42" rx="6"/>
-    <text class="lb-c" x="201.286" y="353" text-anchor="middle">cache</text>
-    <rect class="nd" x="255.71428571428572" y="328" width="92.85714285714286" height="42" rx="6"/>
-    <text class="lb-c" x="302.143" y="353" text-anchor="middle">classes</text>
-    <rect class="nd" x="356.57142857142856" y="328" width="92.85714285714286" height="42" rx="6"/>
-    <text class="lb-c" x="403" y="353" text-anchor="middle">time</text>
-    <rect class="nd" x="457.42857142857144" y="328" width="92.85714285714286" height="42" rx="6"/>
-    <text class="lb-c" x="503.857" y="353" text-anchor="middle">index</text>
-    <rect class="nd" x="558.2857142857143" y="328" width="92.85714285714286" height="42" rx="6"/>
-    <text class="lb-c" x="604.714" y="353" text-anchor="middle">reduce</text>
-    <rect class="nd" x="659.1428571428571" y="328" width="92.85714285714286" height="42" rx="6"/>
-    <text class="lb-c" x="705.571" y="353" text-anchor="middle">access</text>
-    <text class="lb lb-s lb-m lb-b" x="30" y="405" text-anchor="middle">L0</text>
-    <rect class="nd-a" x="54.0" y="380" width="345.0" height="42" rx="6"/>
-    <text class="lb-c" x="226.5" y="405" text-anchor="middle">types</text>
-    <rect class="nd" x="407.0" y="380" width="345.0" height="42" rx="6"/>
-    <text class="lb-c" x="579.5" y="405" text-anchor="middle">plugins</text>
-    <text class="lb lb-s lb-m" x="54" y="440" text-anchor="start">types is the universal leaf: ~30 modules import it, it imports nothing of ours</text>
-</svg>
-<figcaption>The <strong>package import graph</strong>, drawn as the stack it forms. Every arrow in the real graph points down this page and never sideways or up, so a package can only ever depend on a lower level. <code>tests/test_docs_developer.py</code> asserts the graph really is acyclic, and the levels are derived from it rather than asserted here.</figcaption>
+<pre class="mermaid">
+flowchart TB
+  cli --> executors
+  executors --> plan
+  executors --> regrid
+  executors --> resolve
+  executors --> reduce
+  executors --> publish
+  plan --> filters
+  filters --> manifest
+  plan --> resolve
+  manifest --> classes
+  manifest --> time
+  manifest --> publish
+  resolve --> access
+  resolve --> regrid
+  resolve --> hooks
+  resolve --> index
+  regrid --> cache
+  publish --> reduce
+  access --> plugins
+  cache --> types
+  classes --> types
+  time --> types
+  index --> types
+  reduce --> types
+  hooks --> types
+  classDef leaf stroke-width:2px
+  class types,plugins leaf
+</pre>
+<figcaption>The <strong>package import graph</strong> &mdash; the edges that fix each package&rsquo;s level, with transitive ones left out. It is a DAG eight levels deep: <code>cli</code> at the top, <code>types</code> and <code>plugins</code> at the bottom importing nothing of ours. <code>tests/test_docs_developer.py</code> asserts the acyclicity rather than trusting this picture.</figcaption>
 </figure>
 
 <div class="tw">
@@ -433,5 +366,7 @@ owns, as against what a manifest owns.</td></tr>
 </main>
 </div>
 <script src="../assets/stratum.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11.17.2/dist/mermaid.min.js"></script>
+<script src="../assets/diagrams.js"></script>
 </body>
 </html>

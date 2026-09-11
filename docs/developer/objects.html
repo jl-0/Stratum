@@ -114,203 +114,28 @@ planner, before a single work item exists.</p>
 sensor space becomes block space.</p>
 
 <figure class="fig">
-<svg viewBox="0 0 860 278" width="860" height="278" role="img" aria-label="Sensor space on the left, the GLT in the middle, block space on the right">
-  <defs>
-    <marker id="h-sp" markerWidth="9" markerHeight="7" refX="8.4" refY="3.5" orient="auto">
-      <path class="hd" d="M0,0 L9,3.5 L0,7 Z"/>
-    </marker>
-    <marker id="ha-sp" markerWidth="9" markerHeight="7" refX="8.4" refY="3.5" orient="auto">
-      <path class="hd-a" d="M0,0 L9,3.5 L0,7 Z"/>
-    </marker>
-  </defs>
-    <text class="lb lb-s lb-m lb-b" x="24" y="24" text-anchor="start">SENSOR SPACE — the granule as the instrument saw it</text>
-    <rect class="bd" x="24" y="36" width="250" height="190" rx="8"/>
-    <text class="lb-c" x="149" y="135" text-anchor="middle"></text>
-    <rect class="nd-m" x="40" y="50" width="32" height="20" rx="2"/>
-    <text class="lb-c" x="56" y="64" text-anchor="middle"></text>
-    <rect class="nd-m" x="76" y="50" width="32" height="20" rx="2"/>
-    <text class="lb-c" x="92" y="64" text-anchor="middle"></text>
-    <rect class="nd-m" x="112" y="50" width="32" height="20" rx="2"/>
-    <text class="lb-c" x="128" y="64" text-anchor="middle"></text>
-    <rect class="nd-m" x="148" y="50" width="32" height="20" rx="2"/>
-    <text class="lb-c" x="164" y="64" text-anchor="middle"></text>
-    <rect class="nd-m" x="184" y="50" width="32" height="20" rx="2"/>
-    <text class="lb-c" x="200" y="64" text-anchor="middle"></text>
-    <rect class="nd-m" x="220" y="50" width="32" height="20" rx="2"/>
-    <text class="lb-c" x="236" y="64" text-anchor="middle"></text>
-    <rect class="nd-m" x="40" y="74" width="32" height="20" rx="2"/>
-    <text class="lb-c" x="56" y="88" text-anchor="middle"></text>
-    <rect class="nd-a" x="76" y="74" width="32" height="20" rx="2"/>
-    <text class="lb-c" x="92" y="88" text-anchor="middle"></text>
-    <rect class="nd-a" x="112" y="74" width="32" height="20" rx="2"/>
-    <text class="lb-c" x="128" y="88" text-anchor="middle"></text>
-    <rect class="nd-a" x="148" y="74" width="32" height="20" rx="2"/>
-    <text class="lb-c" x="164" y="88" text-anchor="middle"></text>
-    <rect class="nd-a" x="184" y="74" width="32" height="20" rx="2"/>
-    <text class="lb-c" x="200" y="88" text-anchor="middle"></text>
-    <rect class="nd-m" x="220" y="74" width="32" height="20" rx="2"/>
-    <text class="lb-c" x="236" y="88" text-anchor="middle"></text>
-    <rect class="nd-m" x="40" y="98" width="32" height="20" rx="2"/>
-    <text class="lb-c" x="56" y="112" text-anchor="middle"></text>
-    <rect class="nd-a" x="76" y="98" width="32" height="20" rx="2"/>
-    <text class="lb-c" x="92" y="112" text-anchor="middle"></text>
-    <rect class="nd-a" x="112" y="98" width="32" height="20" rx="2"/>
-    <text class="lb-c" x="128" y="112" text-anchor="middle"></text>
-    <rect class="nd-a" x="148" y="98" width="32" height="20" rx="2"/>
-    <text class="lb-c" x="164" y="112" text-anchor="middle"></text>
-    <rect class="nd-a" x="184" y="98" width="32" height="20" rx="2"/>
-    <text class="lb-c" x="200" y="112" text-anchor="middle"></text>
-    <rect class="nd-m" x="220" y="98" width="32" height="20" rx="2"/>
-    <text class="lb-c" x="236" y="112" text-anchor="middle"></text>
-    <rect class="nd-m" x="40" y="122" width="32" height="20" rx="2"/>
-    <text class="lb-c" x="56" y="136" text-anchor="middle"></text>
-    <rect class="nd-a" x="76" y="122" width="32" height="20" rx="2"/>
-    <text class="lb-c" x="92" y="136" text-anchor="middle"></text>
-    <rect class="nd-a" x="112" y="122" width="32" height="20" rx="2"/>
-    <text class="lb-c" x="128" y="136" text-anchor="middle"></text>
-    <rect class="nd-a" x="148" y="122" width="32" height="20" rx="2"/>
-    <text class="lb-c" x="164" y="136" text-anchor="middle"></text>
-    <rect class="nd-a" x="184" y="122" width="32" height="20" rx="2"/>
-    <text class="lb-c" x="200" y="136" text-anchor="middle"></text>
-    <rect class="nd-m" x="220" y="122" width="32" height="20" rx="2"/>
-    <text class="lb-c" x="236" y="136" text-anchor="middle"></text>
-    <rect class="nd-m" x="40" y="146" width="32" height="20" rx="2"/>
-    <text class="lb-c" x="56" y="160" text-anchor="middle"></text>
-    <rect class="nd-a" x="76" y="146" width="32" height="20" rx="2"/>
-    <text class="lb-c" x="92" y="160" text-anchor="middle"></text>
-    <rect class="nd-a" x="112" y="146" width="32" height="20" rx="2"/>
-    <text class="lb-c" x="128" y="160" text-anchor="middle"></text>
-    <rect class="nd-a" x="148" y="146" width="32" height="20" rx="2"/>
-    <text class="lb-c" x="164" y="160" text-anchor="middle"></text>
-    <rect class="nd-a" x="184" y="146" width="32" height="20" rx="2"/>
-    <text class="lb-c" x="200" y="160" text-anchor="middle"></text>
-    <rect class="nd-m" x="220" y="146" width="32" height="20" rx="2"/>
-    <text class="lb-c" x="236" y="160" text-anchor="middle"></text>
-    <rect class="nd-m" x="40" y="170" width="32" height="20" rx="2"/>
-    <text class="lb-c" x="56" y="184" text-anchor="middle"></text>
-    <rect class="nd-m" x="76" y="170" width="32" height="20" rx="2"/>
-    <text class="lb-c" x="92" y="184" text-anchor="middle"></text>
-    <rect class="nd-m" x="112" y="170" width="32" height="20" rx="2"/>
-    <text class="lb-c" x="128" y="184" text-anchor="middle"></text>
-    <rect class="nd-m" x="148" y="170" width="32" height="20" rx="2"/>
-    <text class="lb-c" x="164" y="184" text-anchor="middle"></text>
-    <rect class="nd-m" x="184" y="170" width="32" height="20" rx="2"/>
-    <text class="lb-c" x="200" y="184" text-anchor="middle"></text>
-    <rect class="nd-m" x="220" y="170" width="32" height="20" rx="2"/>
-    <text class="lb-c" x="236" y="184" text-anchor="middle"></text>
-    <rect class="nd-m" x="40" y="194" width="32" height="20" rx="2"/>
-    <text class="lb-c" x="56" y="208" text-anchor="middle"></text>
-    <rect class="nd-m" x="76" y="194" width="32" height="20" rx="2"/>
-    <text class="lb-c" x="92" y="208" text-anchor="middle"></text>
-    <rect class="nd-m" x="112" y="194" width="32" height="20" rx="2"/>
-    <text class="lb-c" x="128" y="208" text-anchor="middle"></text>
-    <rect class="nd-m" x="148" y="194" width="32" height="20" rx="2"/>
-    <text class="lb-c" x="164" y="208" text-anchor="middle"></text>
-    <rect class="nd-m" x="184" y="194" width="32" height="20" rx="2"/>
-    <text class="lb-c" x="200" y="208" text-anchor="middle"></text>
-    <rect class="nd-m" x="220" y="194" width="32" height="20" rx="2"/>
-    <text class="lb-c" x="236" y="208" text-anchor="middle"></text>
-    <text class="lb-c" x="149" y="246" text-anchor="middle">SensorWindow.covering(...)</text>
-    <text class="lb lb-s lb-m" x="149" y="262" text-anchor="middle">carries its ORIGIN, not just a shape</text>
-    <rect class="nd-a" x="318" y="96" width="224" height="72" rx="6"/>
-    <text class="lb-c" x="430" y="126" text-anchor="middle">GLT</text>
-    <text class="lb lb-s lb-m" x="430" y="140" text-anchor="middle">for each map cell, which</text>
-    <text class="lb lb-s lb-m" x="430" y="152" text-anchor="middle">sensor (row, col)</text>
-    <path class="ed-a" d="M278,132 L312,132" marker-end="url(#ha-sp)"/>
-    <path class="ed-a" d="M546,132 L580,132" marker-end="url(#ha-sp)"/>
-    <text class="lb lb-s" x="430" y="200" text-anchor="middle">gather() — the only function</text>
-    <text class="lb lb-s lb-m" x="430" y="214" text-anchor="middle">that touches both spaces</text>
-    <text class="lb-c lb-s lb-m" x="430" y="246" text-anchor="middle">stratum/resolve/gather.py</text>
-    <text class="lb lb-s lb-m lb-b" x="586" y="24" text-anchor="start">BLOCK SPACE — cells on the run&#x27;s grid</text>
-    <rect class="bd" x="586" y="36" width="250" height="190" rx="8"/>
-    <text class="lb-c" x="711" y="135" text-anchor="middle"></text>
-    <rect class="nd" x="602" y="50" width="32" height="20" rx="2"/>
-    <text class="lb-c" x="618" y="64" text-anchor="middle"></text>
-    <rect class="nd" x="638" y="50" width="32" height="20" rx="2"/>
-    <text class="lb-c" x="654" y="64" text-anchor="middle"></text>
-    <rect class="nd" x="674" y="50" width="32" height="20" rx="2"/>
-    <text class="lb-c" x="690" y="64" text-anchor="middle"></text>
-    <rect class="nd" x="710" y="50" width="32" height="20" rx="2"/>
-    <text class="lb-c" x="726" y="64" text-anchor="middle"></text>
-    <rect class="nd" x="746" y="50" width="32" height="20" rx="2"/>
-    <text class="lb-c" x="762" y="64" text-anchor="middle"></text>
-    <rect class="nd" x="782" y="50" width="32" height="20" rx="2"/>
-    <text class="lb-c" x="798" y="64" text-anchor="middle"></text>
-    <rect class="nd" x="602" y="74" width="32" height="20" rx="2"/>
-    <text class="lb-c" x="618" y="88" text-anchor="middle"></text>
-    <rect class="nd-a" x="638" y="74" width="32" height="20" rx="2"/>
-    <text class="lb-c" x="654" y="88" text-anchor="middle"></text>
-    <rect class="nd-a" x="674" y="74" width="32" height="20" rx="2"/>
-    <text class="lb-c" x="690" y="88" text-anchor="middle"></text>
-    <rect class="nd-a" x="710" y="74" width="32" height="20" rx="2"/>
-    <text class="lb-c" x="726" y="88" text-anchor="middle"></text>
-    <rect class="nd-a" x="746" y="74" width="32" height="20" rx="2"/>
-    <text class="lb-c" x="762" y="88" text-anchor="middle"></text>
-    <rect class="nd" x="782" y="74" width="32" height="20" rx="2"/>
-    <text class="lb-c" x="798" y="88" text-anchor="middle"></text>
-    <rect class="nd" x="602" y="98" width="32" height="20" rx="2"/>
-    <text class="lb-c" x="618" y="112" text-anchor="middle"></text>
-    <rect class="nd-a" x="638" y="98" width="32" height="20" rx="2"/>
-    <text class="lb-c" x="654" y="112" text-anchor="middle"></text>
-    <rect class="nd-a" x="674" y="98" width="32" height="20" rx="2"/>
-    <text class="lb-c" x="690" y="112" text-anchor="middle"></text>
-    <rect class="nd-a" x="710" y="98" width="32" height="20" rx="2"/>
-    <text class="lb-c" x="726" y="112" text-anchor="middle"></text>
-    <rect class="nd-a" x="746" y="98" width="32" height="20" rx="2"/>
-    <text class="lb-c" x="762" y="112" text-anchor="middle"></text>
-    <rect class="nd" x="782" y="98" width="32" height="20" rx="2"/>
-    <text class="lb-c" x="798" y="112" text-anchor="middle"></text>
-    <rect class="nd" x="602" y="122" width="32" height="20" rx="2"/>
-    <text class="lb-c" x="618" y="136" text-anchor="middle"></text>
-    <rect class="nd-a" x="638" y="122" width="32" height="20" rx="2"/>
-    <text class="lb-c" x="654" y="136" text-anchor="middle"></text>
-    <rect class="nd-a" x="674" y="122" width="32" height="20" rx="2"/>
-    <text class="lb-c" x="690" y="136" text-anchor="middle"></text>
-    <rect class="nd-a" x="710" y="122" width="32" height="20" rx="2"/>
-    <text class="lb-c" x="726" y="136" text-anchor="middle"></text>
-    <rect class="nd-a" x="746" y="122" width="32" height="20" rx="2"/>
-    <text class="lb-c" x="762" y="136" text-anchor="middle"></text>
-    <rect class="nd" x="782" y="122" width="32" height="20" rx="2"/>
-    <text class="lb-c" x="798" y="136" text-anchor="middle"></text>
-    <rect class="nd" x="602" y="146" width="32" height="20" rx="2"/>
-    <text class="lb-c" x="618" y="160" text-anchor="middle"></text>
-    <rect class="nd-a" x="638" y="146" width="32" height="20" rx="2"/>
-    <text class="lb-c" x="654" y="160" text-anchor="middle"></text>
-    <rect class="nd-a" x="674" y="146" width="32" height="20" rx="2"/>
-    <text class="lb-c" x="690" y="160" text-anchor="middle"></text>
-    <rect class="nd-a" x="710" y="146" width="32" height="20" rx="2"/>
-    <text class="lb-c" x="726" y="160" text-anchor="middle"></text>
-    <rect class="nd-a" x="746" y="146" width="32" height="20" rx="2"/>
-    <text class="lb-c" x="762" y="160" text-anchor="middle"></text>
-    <rect class="nd" x="782" y="146" width="32" height="20" rx="2"/>
-    <text class="lb-c" x="798" y="160" text-anchor="middle"></text>
-    <rect class="nd" x="602" y="170" width="32" height="20" rx="2"/>
-    <text class="lb-c" x="618" y="184" text-anchor="middle"></text>
-    <rect class="nd-a" x="638" y="170" width="32" height="20" rx="2"/>
-    <text class="lb-c" x="654" y="184" text-anchor="middle"></text>
-    <rect class="nd-a" x="674" y="170" width="32" height="20" rx="2"/>
-    <text class="lb-c" x="690" y="184" text-anchor="middle"></text>
-    <rect class="nd-a" x="710" y="170" width="32" height="20" rx="2"/>
-    <text class="lb-c" x="726" y="184" text-anchor="middle"></text>
-    <rect class="nd-a" x="746" y="170" width="32" height="20" rx="2"/>
-    <text class="lb-c" x="762" y="184" text-anchor="middle"></text>
-    <rect class="nd" x="782" y="170" width="32" height="20" rx="2"/>
-    <text class="lb-c" x="798" y="184" text-anchor="middle"></text>
-    <rect class="nd" x="602" y="194" width="32" height="20" rx="2"/>
-    <text class="lb-c" x="618" y="208" text-anchor="middle"></text>
-    <rect class="nd" x="638" y="194" width="32" height="20" rx="2"/>
-    <text class="lb-c" x="654" y="208" text-anchor="middle"></text>
-    <rect class="nd" x="674" y="194" width="32" height="20" rx="2"/>
-    <text class="lb-c" x="690" y="208" text-anchor="middle"></text>
-    <rect class="nd" x="710" y="194" width="32" height="20" rx="2"/>
-    <text class="lb-c" x="726" y="208" text-anchor="middle"></text>
-    <rect class="nd" x="746" y="194" width="32" height="20" rx="2"/>
-    <text class="lb-c" x="762" y="208" text-anchor="middle"></text>
-    <rect class="nd" x="782" y="194" width="32" height="20" rx="2"/>
-    <text class="lb-c" x="798" y="208" text-anchor="middle"></text>
-    <text class="lb lb-s lb-m" x="711" y="246" text-anchor="middle">halo outside, core inside</text>
-    <text class="lb lb-s lb-m" x="711" y="262" text-anchor="middle">only the core enters the snapshot key</text>
-</svg>
+<pre class="mermaid">
+flowchart TB
+  subgraph SS["sensor space"]
+    sw["SensorWindow&lt;br/&gt;carries its origin"]
+    rd["reader.read(var, window)"]
+    sm["sensor masks&lt;br/&gt;EdgeTrim, SlitDust"]
+    sw --> rd --> sm
+  end
+  glt[("GLT")]
+  subgraph BS["block space, halo included"]
+    ow["ObsWindow(space=block)"]
+    mm["map masks"]
+    sc["Scorer.score()"]
+    ow --> mm --> sc
+  end
+  sm -->|gather| ow
+  glt -.->|indexes| sw
+  glt -.->|places| ow
+  sc --> core["sliced to the core"]
+  classDef hinge stroke-width:2px
+  class glt hinge
+</pre>
 <figcaption>Where the two coordinate spaces meet. Masks that need a detector column run <em>before</em> the gather, on the sensor window; masks and scorers that reason about ground run <em>after</em> it, on the block. Everything is computed on the haloed window and sliced to the core before writing &mdash; the halo never changes output, which is why it is excluded from the key.</figcaption>
 </figure>
 
@@ -448,5 +273,7 @@ respect when editing:</p>
 </main>
 </div>
 <script src="../assets/stratum.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11.17.2/dist/mermaid.min.js"></script>
+<script src="../assets/diagrams.js"></script>
 </body>
 </html>

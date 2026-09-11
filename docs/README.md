@@ -18,7 +18,9 @@ points. Nothing in `developer/` is needed to write a manifest or a plugin.
 ## The site
 
 Open [`index.html`](index.html) locally, or browse it on Pages. No build step: plain HTML with one
-shared stylesheet and one shared nav script.
+shared stylesheet and one shared nav script. Pages with a diagram additionally load Mermaid from a
+pinned CDN URL plus [`assets/diagrams.js`](assets/diagrams.js) — the site's only external
+dependency; see [`../CLAUDE.md`](../CLAUDE.md).
 
 ```
 index.html                what it does, the pipeline, where you plug in
@@ -42,7 +44,8 @@ developer/
   working.html            environment, the test suite, the invariants, conventions, footguns
 decisions/index.html      ADR digest
 status.html               what is implemented, what is open
-assets/                   stratum.css, stratum.js — the only shared chrome
+assets/                   stratum.css, stratum.js — the shared chrome
+                          diagrams.js — Mermaid theming; loaded only by diagram pages
 ```
 
 ### Adding a page
@@ -53,6 +56,9 @@ assets/                   stratum.css, stratum.js — the only shared chrome
    `data-root` (`""` at the top level, `"../"` one level down).
 3. Use the existing components in `stratum.css` — `.key` / `.note` / `.warn` callouts, `.chip-*`
    status pills, `.gen` for generated-later regions, `.cards`, `.stages`, `.tw > table`.
+   A diagram is `<pre class="mermaid">` inside `<figure class="fig">`; the page then also loads
+   the pinned Mermaid script and `assets/diagrams.js`. Write `&lt;br/&gt;`, not `<br/>`, and keep
+   double quotes out of node labels — both break silently otherwise.
 4. Run `pytest tests/test_docs_links.py tests/test_docs_developer.py` — the first checks every
    `<a class="src">` still points at the line it names, the second that `data-page` matches a nav
    `id`, that `data-root` is right, and (for `developer/codebase.html`) that no package in `src/`

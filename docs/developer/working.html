@@ -148,8 +148,28 @@ a missed one produces wrong geometry that looks cached and correct.</p>
 <h2 id="docs-tests">5. The tests that guard these pages</h2>
 
 <p>The site has <strong>no build step and must not acquire one</strong> &mdash; plain HTML, one
-stylesheet, one script, working from <code>file://</code> as well as from Pages. Documentation
-accuracy is therefore maintained by tests rather than by generation.</p>
+stylesheet, and scripts a browser loads directly, working from <code>file://</code> as well as
+from Pages. Documentation accuracy is therefore maintained by tests rather than by generation.</p>
+
+<div class="note">
+  <span class="label">The one exception: diagrams</span>
+  <p>Pages that carry a diagram load Mermaid from a CDN, pinned to an exact version, plus
+  <code>assets/diagrams.js</code>. It is the site's only external dependency, and it buys
+  diagrams that are editable text instead of hand-placed geometry. <code>diagrams.js</code> reads
+  the palette off <code>:root</code> so a diagram follows light and dark with the rest of the
+  page, and degrades on purpose: when Mermaid is unreachable the source stays visible as a code
+  block rather than collapsing to nothing. Write a diagram as
+  <code>&lt;pre class="mermaid"&gt;</code> inside <code>&lt;figure class="fig"&gt;</code>, and
+  never put a literal colour in one.</p>
+</div>
+
+<div class="warn">
+  <span class="label">Two escaping traps in a Mermaid block</span>
+  <p><code>&lt;pre&gt;</code> content is parsed as HTML, so a literal <code>&lt;br/&gt;</code>
+  becomes a real element and disappears from <code>textContent</code> &mdash; Mermaid never sees
+  the line break. Write <code>&amp;lt;br/&amp;gt;</code> instead. And a literal double quote
+  inside a quoted label breaks Mermaid's parser, so keep quotes out of labels entirely.</p>
+</div>
 
 <div class="tw">
 <table>
