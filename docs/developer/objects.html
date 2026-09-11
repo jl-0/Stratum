@@ -1,0 +1,251 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Objects &amp; ownership · Stratum</title>
+<link rel="stylesheet" href="../assets/stratum.css">
+</head>
+<body data-page="developer/objects" data-root="../">
+<a class="skip" href="#content">Skip to content</a>
+<header class="masthead">
+  <a class="wordmark" href="../index.html"><span class="glyph"></span>Stratum</a>
+  <span class="stage">Pre-release</span>
+  <span class="spacer"></span>
+  <span class="repo">EMIT Critical Minerals L3</span>
+</header>
+<div class="layout">
+<nav id="sidebar" aria-label="Documentation"></nav>
+<main id="content">
+<div class="prose">
+
+<h1>Objects &amp; ownership</h1>
+<p class="lede">Which object is constructed by whom, how long it lives, whether it can be mutated,
+and which ones have to survive a trip through JSON.</p>
+
+<p><a href="../reference/types.html">Type reference</a> says what each type <em>is</em> and what
+fields it carries. This page is about <em>lifecycle</em>: the questions you hit when changing the
+code rather than using it.</p>
+
+<h2 id="leaf">1. One leaf, thirty dependents</h2>
+
+<p><a class="src" data-sym="Core types" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/types.py#L1">types.py</a>
+holds every object that crosses an interface and imports nothing else from the repository. Around
+thirty modules import it, including both EMIT plugin modules. That makes it the one file where a
+change is guaranteed to be felt everywhere, and the one file where adding a third-party
+dependency makes that dependency universal.</p>
+
+<div class="note">
+  <span class="label">The rule this implies</span>
+  <p>A type belongs in <code>types.py</code> when more than one package has to name it. A type
+  used inside a single package &mdash; <code>Resolved</code>, <code>ObsContext</code>,
+  <code>Gathered</code>, <code>ResolveItem</code> &mdash; stays in that package, however
+  central it feels there.</p>
+</div>
+
+<h2 id="lifetimes">2. Objects by lifetime</h2>
+
+<p>Four lifetimes, and knowing which one an object has tells you most of what you need.</p>
+
+<div class="tw">
+<table>
+<thead><tr><th>Lifetime</th><th>Objects</th><th>Built by</th><th>Crosses a process boundary?</th></tr></thead>
+<tbody>
+<tr><td><strong>Run</strong><br>decided once, never re-derived</td><td><code>GridDef</code>, <code>SnapshotSchema</code>, <code>Enumeration</code>, <code>Remap</code>, the <code>PluginBinding</code>s, <code>GranuleRef</code></td><td>The planner</td><td><strong>Yes</strong> — as JSON in <code>plan.json</code>, rebuilt identically in every worker</td></tr>
+<tr><td><strong>Process</strong><br>built once per worker, reused</td><td><code>PlanContext</code>, <code>RunPlan</code>, <code>CacheRoot</code>, <code>AssetStore</code>, each <code>GranuleReader</code></td><td>A worker, on its first item</td><td>No — each process builds its own</td></tr>
+<tr><td><strong>Work item</strong></td><td><code>ResolveItem</code>, <code>CacheKey</code>, <code>TileRef</code>, <code>BlockRef</code></td><td>A handler</td><td>No</td></tr>
+<tr><td><strong>Observation</strong><br>one granule over one block</td><td><code>ObsContext</code>, <code>SensorWindow</code>, <code>Gathered</code>, <code>ObsWindow</code>, <code>Observation</code></td><td><a class="src" data-sym="def read_observation" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/resolve/observation.py#L110">read_observation</a></td><td>No — the shortest-lived and most numerous objects in the system</td></tr>
+</tbody>
+</table>
+</div>
+
+<p>The process-lifetime row is worth dwelling on.
+<a class="src" data-sym="def load_cached" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/executors/worker.py#L33">load_cached</a>
+memoises the <code>RunPlan</code> per run directory in a module-level dict, and
+<a class="src" data-sym="def reader_for" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/access/readers.py#L33">reader_for</a>
+memoises one reader instance per <code>(collection, ref)</code>. So parsing
+<code>plan.json</code>, instantiating plugins and scanning entry points happen once per
+<em>process</em>, not once per item &mdash; which is what makes a pool of long-lived workers
+chewing through thousands of small items affordable.</p>
+
+<div class="warn">
+  <span class="label">Readers must therefore be stateless between files</span>
+  <p>One reader instance serves every granule of its collection in that process. Anything a reader
+  needs to remember about a particular file belongs in the <code>ReaderContext</code> it returns
+  from <code>open()</code>, never on <code>self</code>. Both caches have a
+  <code>clear_cache()</code> for tests; neither has one for production, on purpose.</p>
+</div>
+
+<h2 id="plancontext">3. <code>PlanContext</code> — the worker's whole world</h2>
+
+<p><a class="src" data-sym="class PlanContext" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/resolve/context.py#L160">PlanContext</a>
+is what a resolve worker needs that is not in the work item. Every field is either plain data or
+an already-constructed plugin instance &mdash; deliberately, so that the planner and a
+freshly-spawned worker can build equivalent ones from the same files.</p>
+
+<div class="tw">
+<table>
+<thead><tr><th>Field</th><th>Holds</th><th>Filled from</th></tr></thead>
+<tbody>
+<tr><td><code>grid</code></td><td>The run's <code>GridDef</code>; <code>grid.id</code> names the cache shard</td><td><code>manifest.grid</code></td></tr>
+<tr><td><code>cache</code></td><td>The content-addressed store</td><td><code>CacheRoot(root)</code>, rebuilt per process</td></tr>
+<tr><td><code>store</code></td><td>URI &rarr; openable handle</td><td><code>AssetStore</code>, rebuilt per process</td></tr>
+<tr><td><code>granules</code></td><td><code>granule_id</code> &rarr; <code>GranuleRef</code> for the whole frozen set</td><td>The frozen index</td></tr>
+<tr><td><code>roles</code>, <code>aliases</code></td><td>Role bindings, and band aliases already resolved to an integer band index</td><td><code>inputs.roles</code>, <code>inputs.band_aliases</code> — <code>match:</code> aliases resolved by the planner against a real granule</td></tr>
+<tr><td><code>geolocation_role</code></td><td>The role whose <code>loc</code> built the GLTs</td><td>Derived from the readers' declared spaces</td></tr>
+<tr><td><code>schema</code></td><td>The resolved <code>SnapshotSchema</code>; <code>layers_hash</code> keys snapshots</td><td><code>manifest.snapshot</code> + per-granule class resolution</td></tr>
+<tr><td><code>scorer</code>, <code>masks</code></td><td><code>PluginBinding</code>s: instance <em>plus</em> the ref, version and params that enter a cache key</td><td>Entry-point resolution at plan time</td></tr>
+<tr><td><code>remaps</code></td><td>layer &rarr; granule &rarr; <code>Remap</code>: the raw-to-product lookup resolved <em>per granule</em></td><td>The planner, reading each granule's own class table</td></tr>
+<tr><td><code>max_distance</code>, <code>regrid_method</code>, <code>regrid_algo_version</code></td><td>What regrid actually used — all three enter the GLT key</td><td>Resolved defaults, not manifest text</td></tr>
+<tr><td><code>reader_lookup</code></td><td>Optional injection point: <code>collection</code> &rarr; reader</td><td><code>None</code> in production; a fake in tests</td></tr>
+</tbody>
+</table>
+</div>
+
+<p>Its <code>__post_init__</code> is the cheapest correctness gate in the codebase. It refuses a
+name that is both a role and a band alias (one namespace), an alias naming an unknown role, a
+mask that declares neither <code>sensor</code> nor <code>map</code> space, and a scorer whose
+capability is not <code>streaming</code>. All four fail at context construction &mdash; in the
+planner, before a single work item exists.</p>
+
+<h2 id="observation">4. The observation objects</h2>
+
+<p>Reading one granule over one block builds a short chain, and the interesting part is where
+sensor space becomes block space.</p>
+
+<pre><code>ObsContext        plan + block + epoch + granule + glt_key + glt window
+    │  read_observation
+    ├─ SensorWindow.covering(glt_x, glt_y)     <span class="c"># the sensor rectangle the GLT names</span>
+    ├─ reader.read(rctx, var, sensor_window)   <span class="c"># per role</span>
+    ├─ ObsWindow(space="sensor", …)            <span class="c"># only if sensor masks exist</span>
+    ├─ gather(arr, glt, sw, ok) → Gathered     <span class="c"># the one place the spaces meet</span>
+    ├─ ObsWindow(space="block", …)             <span class="c"># what the scorer and map masks see</span>
+    └─ Observation(obs, layers)                <span class="c"># + per-layer values, already remapped</span></code></pre>
+
+<div class="tw">
+<table>
+<thead><tr><th>Object</th><th>Space</th><th>Note</th></tr></thead>
+<tbody>
+<tr><td><a class="src" data-sym="class SensorWindow" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/types.py#L524">SensorWindow</a></td><td>sensor</td><td>Carries its <strong>origin</strong>, not just a shape. A sensor-space mask that needs the absolute cross-track column — <code>EdgeTrim</code> — is wrong without it</td></tr>
+<tr><td><a class="src" data-sym="class ObsWindow" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/types.py#L246">ObsWindow</a></td><td>both</td><td>One class, two forms; the difference is one axis. <code>space</code> is explicit and checked, never inferred from shape</td></tr>
+<tr><td><a class="src" data-sym="class Gathered" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/resolve/gather.py#L17">Gathered</a></td><td>block</td><td>The output of the only function that touches both spaces</td></tr>
+<tr><td><a class="src" data-sym="class Observation" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/resolve/observation.py#L51">Observation</a></td><td>block</td><td>The block <code>ObsWindow</code> plus each schema layer's values, with categorical remapping already applied</td></tr>
+<tr><td><a class="src" data-sym="class Resolved" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/resolve/block.py#L145">Resolved</a></td><td>block, core</td><td>The streaming argmax over every observation, trimmed from the haloed window to the core</td></tr>
+</tbody>
+</table>
+</div>
+
+<p>Two ownership facts that are easy to get wrong:</p>
+
+<ul>
+  <li><strong>Remapping happens at the gather, not at the reducer.</strong> Raw class keys become
+  product ids inside <code>read_observation</code>, where the granule is still known &mdash;
+  because the lookup is <em>per granule</em>. By the time values reach a snapshot they are already
+  in the product's own enumeration, and a granule whose raw key the remap does not describe has
+  been marked invalid.</li>
+  <li><strong>The halo is carried through resolve and dropped at the end.</strong>
+  <code>BlockRef</code> has two windows on purpose: <code>window</code> includes the halo,
+  <code>core_window</code> does not. Everything is computed on the haloed window and sliced to the
+  core before writing. Only the core enters the snapshot key &mdash; the halo, by invariant, never
+  changes output.</li>
+</ul>
+
+<h2 id="products">5. Snapshot and product objects</h2>
+
+<div class="tw">
+<table>
+<thead><tr><th>Object</th><th>Is</th><th>Handed to</th></tr></thead>
+<tbody>
+<tr><td><a class="src" data-sym="class SnapshotSchema" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/types.py#L441">SnapshotSchema</a></td><td>One declaration per run of what a snapshot holds; carries <code>layers_hash</code> and <code>aggregate_hash</code> separately</td><td>Everything downstream of resolve</td></tr>
+<tr><td><a class="src" data-sym="class SnapshotStack" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/types.py#L471">SnapshotStack</a></td><td>Epoch-major: every epoch's snapshot over one window, all written under the same schema</td><td>A <code>Reducer</code></td></tr>
+<tr><td><a class="src" data-sym="class BandStack" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/types.py#L494">BandStack</a></td><td>Finished bands for one tile</td><td>An <code>OutputMapper</code></td></tr>
+<tr><td><a class="src" data-sym="class BandSpec" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/types.py#L392">BandSpec</a></td><td>One delivered band: name, dtype, nodata, units, description</td><td>The COG writer and the STAC item</td></tr>
+</tbody>
+</table>
+</div>
+
+<p>The two hashes on <code>SnapshotSchema</code> are split because they invalidate different
+things. <code>layers_hash</code> says what a snapshot <em>contains</em>, so it keys snapshots;
+<code>aggregate_hash</code> says how layers collapse through time, so it keys product blocks.
+Changing an aggregation method rebuilds products and reuses every snapshot &mdash; which is the
+whole point of separating them.</p>
+
+<h2 id="mutability">6. Frozen, and the eleven that are not</h2>
+
+<p>Thirty-eight dataclasses in the tree are <code>frozen=True</code>; eleven are not. The frozen
+ones are the default and need no explanation. The exceptions are worth knowing, because each is
+mutable for a reason:</p>
+
+<div class="tw">
+<table>
+<thead><tr><th>Class</th><th>Why not frozen</th></tr></thead>
+<tbody>
+<tr><td><a class="src" data-sym="class PlanContext" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/resolve/context.py#L160">PlanContext</a>, <a class="src" data-sym="class RunPlan" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/plan/document.py#L255">RunPlan</a></td><td>Assembled field by field and held live handles (a <code>CacheRoot</code>, an <code>AssetStore</code>); freezing would buy nothing since they are never shared across threads</td></tr>
+<tr><td><code>Resolved</code>, <code>Observation</code>, <code>ObsContext</code></td><td>Short-lived carriers of NumPy arrays. Freezing a dataclass does not freeze the arrays inside it, so it would be a promise the type cannot keep</td></tr>
+<tr><td><a class="src" data-sym="class GLT" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/types.py#L349">GLT</a>, <code>EmbeddedGLT</code></td><td>Same reason — array wrappers</td></tr>
+<tr><td><a class="src" data-sym="class Remap" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/classes.py#L60">Remap</a></td><td>Holds a NumPy lookup array indexed by raw key</td></tr>
+</tbody>
+</table>
+</div>
+
+<p>The pattern: freeze anything that is identity or configuration; do not pretend to freeze
+anything whose payload is an array.</p>
+
+<h2 id="serialisation">7. The serialisation seam</h2>
+
+<p><a class="src" data-sym="class RunPlan" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/plan/document.py#L255">plan/document.py</a>
+is the only module that knows how a live object becomes JSON and back. Every conversion is a
+<em>pair</em>, and the pairing is the point: a round trip has to produce an object that computes
+the same hashes.</p>
+
+<div class="tw">
+<table>
+<thead><tr><th>Object</th><th>Out</th><th>Back in</th></tr></thead>
+<tbody>
+<tr><td><code>Epoch</code></td><td><a class="src" data-sym="def epoch_to_doc" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/plan/document.py#L73">epoch_to_doc</a></td><td><a class="src" data-sym="def epoch_from_doc" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/plan/document.py#L77">epoch_from_doc</a></td></tr>
+<tr><td><code>DeliveryPeriod</code></td><td><a class="src" data-sym="def period_to_doc" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/plan/document.py#L82">period_to_doc</a></td><td><a class="src" data-sym="def period_from_doc" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/plan/document.py#L87">period_from_doc</a></td></tr>
+<tr><td><code>ClassTable</code></td><td><a class="src" data-sym="def class_table_to_doc" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/plan/document.py#L92">class_table_to_doc</a></td><td><a class="src" data-sym="def class_table_from_doc" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/plan/document.py#L100">class_table_from_doc</a></td></tr>
+<tr><td><code>SnapshotSchema</code></td><td><a class="src" data-sym="def schema_to_doc" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/plan/document.py#L105">schema_to_doc</a></td><td><a class="src" data-sym="def schema_from_doc" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/plan/document.py#L123">schema_from_doc</a></td></tr>
+<tr><td><code>GranuleRef</code></td><td><a class="src" data-sym="def granule_to_doc" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/plan/document.py#L142">granule_to_doc</a></td><td><a class="src" data-sym="def granule_from_doc" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/plan/document.py#L152">granule_from_doc</a></td></tr>
+<tr><td><code>Remap</code> (per layer, per granule)</td><td><a class="src" data-sym="def remaps_to_doc" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/plan/document.py#L160">remaps_to_doc</a></td><td><a class="src" data-sym="def remaps_from_doc" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/plan/document.py#L176">remaps_from_doc</a></td></tr>
+<tr><td><code>PluginBinding</code></td><td><a class="src" data-sym="def plugin_to_doc" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/plan/document.py#L185">plugin_to_doc</a></td><td><a class="src" data-sym="def plugin_from_doc" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/plan/document.py#L189">plugin_from_doc</a></td></tr>
+<tr><td><code>GridDef</code></td><td><a class="src" data-sym="def grid_to_doc" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/plan/document.py#L197">grid_to_doc</a></td><td><a class="src" data-sym="def grid_from_doc" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/plan/document.py#L202">grid_from_doc</a></td></tr>
+<tr><td><code>PlanContext</code></td><td><a class="src" data-sym="def context_to_doc" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/plan/document.py#L207">context_to_doc</a></td><td><a class="src" data-sym="def context_from_doc" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/plan/document.py#L229">context_from_doc</a></td></tr>
+</tbody>
+</table>
+</div>
+
+<p>Three of these carry a check rather than a plain rebuild, and those checks are the ones to
+respect when editing:</p>
+
+<ul>
+  <li><code>schema_from_doc</code> refuses when the rebuilt <code>layers_hash</code> does not
+  match the one recorded in the document. A schema that round-trips to a different hash would
+  silently orphan every snapshot the run already wrote.</li>
+  <li><code>class_table_to_doc</code> writes columns as lists, because the fingerprint is taken
+  over the values &mdash; so a table rebuilt from the document fingerprints identically.</li>
+  <li><code>plugin_from_doc</code> re-instantiates from <code>{ref, params}</code> but carries the
+  version the <em>planner</em> recorded. A worker with a differently-versioned plugin installed
+  would otherwise compute different keys from the same plan.</li>
+</ul>
+
+<div class="key">
+  <span class="label">The test for adding a field to <code>plan.json</code></span>
+  <p>If a worker needs it, it goes in <code>PlanContext</code> and gets a
+  <code>*_to_doc</code>/<code>*_from_doc</code> pair. If only reporting needs it, it goes in the
+  plan document beside the context, not inside it — <code>context_to_doc</code> deliberately
+  carries every field its docstring lists and no more.</p>
+</div>
+
+</div>
+<nav class="pager" aria-label="Pagination"></nav>
+<footer class="site">
+  Specified in <a href="../specs/11-types.md"><code>specs/11-types.md</code></a>,
+  <a href="../specs/13-snapshot-schema.md"><code>13</code></a>,
+  <a href="../specs/12-data-access.md"><code>12</code></a>
+</footer>
+</main>
+</div>
+<script src="../assets/stratum.js"></script>
+</body>
+</html>

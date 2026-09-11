@@ -1,0 +1,285 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lifecycle of a run · Stratum</title>
+<link rel="stylesheet" href="../assets/stratum.css">
+</head>
+<body data-page="developer/lifecycle" data-root="../">
+<a class="skip" href="#content">Skip to content</a>
+<header class="masthead">
+  <a class="wordmark" href="../index.html"><span class="glyph"></span>Stratum</a>
+  <span class="stage">Pre-release</span>
+  <span class="spacer"></span>
+  <span class="repo">EMIT Critical Minerals L3</span>
+</header>
+<div class="layout">
+<nav id="sidebar" aria-label="Documentation"></nav>
+<main id="content">
+<div class="prose">
+
+<h1>Lifecycle of a run</h1>
+<p class="lede">From <code>stratum run</code> to the last COG: which function calls which, where
+the process boundaries fall, and what has to cross them.</p>
+
+<p><a href="../guide/algorithms.html">Algorithms</a> follows a <em>number</em> from sensor to map.
+This page follows <em>control</em>: the call stack, the files written between stages, and the one
+contract that holds the whole thing together.</p>
+
+<h2 id="two-processes">1. Two kinds of process</h2>
+
+<p>Everything Stratum does happens in one of two roles, and the difference is absolute.</p>
+
+<div class="tw">
+<table>
+<thead><tr><th></th><th>The planner</th><th>A worker</th></tr></thead>
+<tbody>
+<tr><td><strong>Runs</strong></td><td>Once per run</td><td>Once per work item &mdash; thousands of times</td></tr>
+<tr><td><strong>Entry</strong></td><td><a class="src" data-sym="def plan_run" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/plan/run.py#L677">plan_run</a></td><td><a class="src" data-sym="def exec_item" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/executors/worker.py#L186">exec_item</a></td></tr>
+<tr><td><strong>Reads</strong></td><td>The manifest, the index, and a handful of real granules</td><td><code>plan.json</code>, one work list line, and the assets that line names</td></tr>
+<tr><td><strong>Decides</strong></td><td>Everything: tiles, epochs, granules, plugins, schema, class lumping, fan-out</td><td>Nothing. It executes a decision already recorded</td></tr>
+<tr><td><strong>Writes</strong></td><td>The run directory</td><td>One cache artifact, and one outcome line</td></tr>
+</tbody>
+</table>
+</div>
+
+<div class="key">
+  <span class="label">The rule that follows from this</span>
+  <p>A worker must be able to reconstruct everything it needs from <code>plan.json</code> plus the
+  installed code. It never re-derives a decision, never queries the catalogue, and never consults
+  the manifest's intent &mdash; only the planner's resolved answer. If you find yourself wanting
+  a worker to look something up, the thing to change is what the planner writes down.</p>
+</div>
+
+<h2 id="call-order">2. <code>stratum run</code>, in call order</h2>
+
+<pre><code>cli.run                                        <span class="c"># cli.py</span>
+├─ executor_available("local")                 <span class="c"># refuses slurm/aws in this slice</span>
+├─ plan_run(manifest, out, patches)            <span class="c"># plan/run.py — section 3 below</span>
+│    └─ writes {run_dir}/…
+└─ run_all(run_dir, workers)                   <span class="c"># executors/local.py</span>
+     ├─ budget_gate(read_plan(run_dir))        <span class="c"># refuse before any compute</span>
+     ├─ load_cached(run_dir)                   <span class="c"># plan.json → RunPlan, once</span>
+     ├─ for stage in ("regrid","resolve","reduce","publish"):
+     │    run_stage(run_dir, stage, workers)
+     │      └─ ProcessPoolExecutor(spawn)
+     │           └─ exec_item(run_dir, stage, i)   <span class="c"># executors/worker.py</span>
+     │                └─ HANDLERS[stage](item, run)
+     └─ Finalize: STAC collection, provenance.json, report.md</code></pre>
+
+<div class="tw">
+<table>
+<thead><tr><th>Step</th><th>Does</th><th>Code</th></tr></thead>
+<tbody>
+<tr><td>Refuse unknown executors</td><td><code>slurm</code> and <code>aws</code> are declared in the CLI's choices but not shipped; the refusal names the spec section rather than failing obscurely later</td><td><a class="src" data-sym="def executor_available" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/executors/__init__.py#L11">executors:11</a></td></tr>
+<tr><td>Budget gate</td><td>Re-checked here, against the written plan, because <code>plan_run</code> <em>reports</em> an exceeded budget rather than raising — <code>stratum plan</code> should still produce a report you can read</td><td><a class="src" data-sym="def budget_gate" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/executors/local.py#L86">budget_gate</a></td></tr>
+<tr><td>Stage loop</td><td>Strictly sequential over the four stages; parallelism is <em>within</em> a stage. A stage's items are independent by construction</td><td><a class="src" data-sym="for stage in STAGES:" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/executors/local.py#L112">local.py:112</a></td></tr>
+<tr><td>Pool</td><td><code>spawn</code> context, not <code>fork</code>: each worker imports cleanly and rebuilds its own <code>RunPlan</code>, which is exactly what a SLURM array task or a Lambda would do</td><td><a class="src" data-sym="multiprocessing.get_context" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/executors/local.py#L62">local.py:62</a></td></tr>
+<tr><td>Finalize</td><td>The only step that sees the whole run: the STAC collection over every item, then <code>provenance.json</code>, then an execution section appended to the report</td><td><a class="src" data-sym="def provenance_record" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/executors/local.py#L142">provenance_record</a></td></tr>
+</tbody>
+</table>
+</div>
+
+<div class="note">
+  <span class="label"><code>workers=1</code> is the same code path</span>
+  <p>With one worker <code>run_stage</code> calls <code>exec_item</code> in-process rather than
+  submitting to a pool &mdash; deliberately the identical function, so a debugger, a profiler or a
+  stack trace sees the real thing. It is the first thing to reach for when a worker fails
+  inexplicably.</p>
+</div>
+
+<h2 id="plan">3. What planning decides, in order</h2>
+
+<p><a class="src" data-sym="def plan_run" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/plan/run.py#L677">plan_run</a>
+is about two hundred lines of sequence, and the order is load-bearing.</p>
+
+<div class="tw">
+<table>
+<thead><tr><th class="num">#</th><th>Step</th><th>Why here</th></tr></thead>
+<tbody>
+<tr><td class="num">1</td><td>Load and merge the manifest, then <code>validate_static</code></td><td>Every check that needs no data happens before anything is opened</td></tr>
+<tr><td class="num">2</td><td>Resolve grid, tiles, epochs, delivery periods</td><td>Pure arithmetic on the manifest</td></tr>
+<tr><td class="num">3</td><td>Resolve a reader per collection; pick the geolocation role</td><td>A missing reader must be a plan refusal, not a worker traceback</td></tr>
+<tr><td class="num">4</td><td>Build the index if absent, then check its recorded scope covers this manifest</td><td>A wider AOI or time window than the index was built for is a rebuild, not a silent short answer</td></tr>
+<tr><td class="num">5</td><td>Query, pin collection versions, apply <code>granule_filter</code></td><td>Metadata only; no pixel has been read</td></tr>
+<tr><td class="num">6</td><td>Drop granules that meet no tile, then granules lacking a role's asset</td><td>The AOI is its <em>tiles</em>, not the box around them — a granule in the gap between two distant zones can be read by no work item, so it must not be frozen, counted or budgeted</td></tr>
+<tr><td class="num">7</td><td>Freeze the survivors to <code>index.parquet</code> and hash the file</td><td>The candidate set is now immutable for the life of the run</td></tr>
+<tr><td class="num">8</td><td><strong>The budget gate</strong></td><td><strong>Before</strong> the data-dependent checks, because against a catalogue source those download real bytes, and a run that is going to be refused must not pay for one</td></tr>
+<tr><td class="num">9</td><td><code>inspect_granules</code>: open real granules, resolve band aliases, resolve per-granule class lumping, check table vintages</td><td>The only place the planner touches pixels; staged assets become cache hits for the run</td></tr>
+<tr><td class="num">10</td><td>Validate <code>outputs</code> against the resolved schema</td><td>A render that cannot work should fail now, not after regrid has run for an hour</td></tr>
+<tr><td class="num">11</td><td>Build the <code>PlanContext</code>, then the four work lists</td><td>The fan-out is now fully determined</td></tr>
+<tr><td class="num">12</td><td>Write <code>plan.json</code>, the work lists, and <code>report.md</code></td><td>Everything a worker will ever need is now on disk</td></tr>
+</tbody>
+</table>
+</div>
+
+<div class="warn">
+  <span class="label">Step 8 before step 9 is not an accident</span>
+  <p>Swapping them would make an over-budget plan download granules before refusing. The comment
+  at
+  <a class="src" data-sym="the budget gate (09 section 4) comes BEFORE" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/plan/run.py#L776">plan/run.py:776</a>
+  says so explicitly; treat it as a constraint on any reordering.</p>
+</div>
+
+<h3 id="run-dir">The run directory</h3>
+
+<pre><code>{root}/runs/{run_id}/
+  manifest.merged.yaml       <span class="c"># the document that was hashed</span>
+  index.parquet              <span class="c"># the frozen candidate set</span>
+  plan.json                  <span class="c"># every resolved decision</span>
+  work/regrid.jsonl          <span class="c"># one work item per line</span>
+  work/regrid.results.jsonl  <span class="c"># one outcome per item, from the executor</span>
+  work/resolve.jsonl   …
+  report.md                  <span class="c"># dry-run report, extended by the executor</span>
+  provenance.json            <span class="c"># written by Finalize</span></code></pre>
+
+<p>Beside it, and <em>not</em> inside it, are the two shared stores: <code>{root}/cache/</code>,
+which is content-addressed and survives across runs, and <code>{root}/products/{run_id}/</code>,
+which is what you ship. A run directory is disposable; the cache is not.</p>
+
+<h2 id="work-lists">4. The four work lists</h2>
+
+<p>A work item is one JSON object on one line, and it is the entire input to a worker besides
+<code>plan.json</code>. <a class="src" data-sym="def build_work_lists" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/plan/run.py#L904">build_work_lists</a>
+emits all four in a single pass over the tiles.</p>
+
+<div class="tw">
+<table>
+<thead><tr><th>Stage</th><th>Item</th><th>One per</th><th>Emitted when</th></tr></thead>
+<tbody>
+<tr><td><code>regrid</code></td><td><code>{granule_id, collection, asset, uri, tile}</code></td><td>granule &times; tile</td><td>the granule's bbox meets the tile</td></tr>
+<tr><td><code>resolve</code></td><td><code>{tile, epoch, block}</code></td><td>tile &times; epoch &times; block</td><td>the block meets the AOI <em>and</em> at least one granule is a candidate for that epoch</td></tr>
+<tr><td><code>reduce</code></td><td><code>{tile, block, period, epochs}</code></td><td>tile &times; block &times; delivery period</td><td>at least one of the period's epochs produced a resolve item — and it lists exactly those</td></tr>
+<tr><td><code>publish</code></td><td><code>{tile, period}</code></td><td>tile &times; delivery period</td><td>at least one reduce item exists for it</td></tr>
+</tbody>
+</table>
+</div>
+
+<p>Two details in that table carry weight:</p>
+
+<ul>
+  <li><strong>The scorer's halo widens the candidate test, not the output.</strong>
+  <code>build_work_lists</code> reads <code>halo</code> off the scorer instance and tests
+  candidacy against the <em>haloed</em> block, so an observation that only reaches the halo still
+  produces a resolve item. The snapshot is still written for the core window.</li>
+  <li><strong>A reduce item lists its epochs explicitly.</strong> An epoch with no candidates has
+  no snapshot, so "every epoch in the window" would name files that were never written. Listing
+  the epochs that actually resolved is what lets the reduce handler treat a missing snapshot as a
+  hard error instead of a normal case.</li>
+</ul>
+
+<h2 id="worker">5. Inside a worker</h2>
+
+<pre><code>exec_item(run_dir, stage, index)
+├─ load_cached(run_dir)              <span class="c"># plan.json → RunPlan, cached per process</span>
+├─ read_work(run_dir, stage)[index]
+├─ HANDLERS[stage](item, run)        <span class="c"># regrid_item | resolve_item | reduce_item | publish_item</span>
+└─ {index, stage, ok, key, hit, seconds}</code></pre>
+
+<p>The outcome record is the whole worker API: an executor appends it to
+<code>work/{stage}.results.jsonl</code> and <code>stratum status</code> reads nothing else.
+A failure is folded into the same record shape &mdash; <code>ok: false</code> with the error and
+traceback &mdash; so a crashed item is queryable rather than lost.</p>
+
+<div class="tw">
+<table>
+<thead><tr><th>Handler</th><th>Reads</th><th>Writes</th><th>Code</th></tr></thead>
+<tbody>
+<tr><td><code>regrid_item</code></td><td>The geolocation asset, only on a miss</td><td>One GLT GeoTIFF</td><td><a class="src" data-sym="def regrid_item" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/executors/worker.py#L52">worker.py:52</a></td></tr>
+<tr><td><code>resolve_item</code></td><td>GLT windows, then every contributing granule</td><td>One snapshot directory</td><td><a class="src" data-sym="def resolve_item" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/executors/worker.py#L105">worker.py:105</a></td></tr>
+<tr><td><code>reduce_item</code></td><td>The listed epochs' snapshots</td><td>One product-block directory</td><td><a class="src" data-sym="def reduce_item" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/executors/worker.py#L127">worker.py:127</a></td></tr>
+<tr><td><code>publish_item</code></td><td>Every product block of the tile &times; period</td><td>COGs, RGBA images, legends, a STAC item</td><td><a class="src" data-sym="def publish_item" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/executors/worker.py#L153">worker.py:153</a></td></tr>
+</tbody>
+</table>
+</div>
+
+<p><code>publish_item</code> is the one handler that reads a work list rather than only its own
+item: it re-reads <code>work/reduce.jsonl</code> to find the blocks belonging to its tile and
+period. That is the seam where per-block output becomes per-tile output.</p>
+
+<h2 id="key-contract">6. The key-agreement contract</h2>
+
+<p>This is the single most important internal invariant, and the reason the stages can be
+sequential processes that never speak to each other.</p>
+
+<div class="key">
+  <span class="label">Every consumer recomputes its producer's key</span>
+  <p>Nothing is passed between stages. A stage that needs an input derives the content address
+  that input <em>would</em> have, from the same <code>plan.json</code> the producer used, and
+  looks it up. If the two derivations ever disagree, the consumer sees a miss for an artifact
+  that exists &mdash; so both sides deriving identically is a correctness requirement, not an
+  optimisation.</p>
+</div>
+
+<div class="tw">
+<table>
+<thead><tr><th>Consumer</th><th>Recomputes</th><th>Through</th></tr></thead>
+<tbody>
+<tr><td><code>resolve</code></td><td>Each candidate granule's GLT key</td><td><a class="src" data-sym="def glt_key_for" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/resolve/block.py#L89">glt_key_for</a></td></tr>
+<tr><td><code>reduce</code></td><td>Each listed epoch's snapshot key — candidates, GLT window hit test and all, without resolving anything</td><td><a class="src" data-sym="def snapshot_key" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/resolve/block.py#L271">snapshot_key</a></td></tr>
+<tr><td><code>publish</code></td><td>Each block's product key</td><td><a class="src" data-sym="def product_key" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/executors/worker.py#L114">product_key</a></td></tr>
+</tbody>
+</table>
+</div>
+
+<p>Two guards make a divergence loud rather than silent:</p>
+
+<ul>
+  <li><code>regrid_item</code> derives the GLT key itself <em>and</em> compares it against the key
+  <code>regrid_granule_tile</code> actually wrote to, raising if they differ &mdash;
+  <a class="src" data-sym="if written.hash != key.hash" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/executors/worker.py#L100">worker.py:100</a>.
+  Without it, a drift between the two derivations would look like "resolve never hits the
+  cache".</li>
+  <li><code>regrid_item</code> also refuses outright when the plan was made under a different
+  <code>REGRID_ALGO_VERSION</code> than the installed build &mdash; a stale plan against new
+  geometry code is a re-plan, not a rerun.</li>
+</ul>
+
+<h3 id="cache-writes">Why a partial write can never read as a hit</h3>
+
+<p><a class="src" data-sym="def hit(self, key: CacheKey)" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/cache/__init__.py#L80">CacheRoot.hit</a>
+requires both the artifact and its <code>.inputs.json</code> sidecar. Both write paths commit the
+artifact first and the sidecar last &mdash; a file via <code>os.replace</code> onto the key path,
+a directory by filling a sibling temp directory and renaming it whole. A worker killed mid-write
+leaves either nothing or a temp name, never a half-artifact that the next run would trust.</p>
+
+<h2 id="failures">7. Failure paths</h2>
+
+<div class="tw">
+<table>
+<thead><tr><th>Raised</th><th>Means</th><th>Surfaces as</th></tr></thead>
+<tbody>
+<tr><td><a class="src" data-sym="class PlanError" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/plan/document.py#L55">PlanError</a></td><td>The manifest, the data or the index make the run impossible</td><td>A clean CLI message; nothing is written</td></tr>
+<tr><td><a class="src" data-sym="class BudgetExceeded" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/plan/document.py#L59">BudgetExceeded</a></td><td>Fan-out exceeds the manifest's budget and <code>on_exceed</code> is not <code>warn</code></td><td>Exit 2, with the plan and report still written so you can see <em>why</em></td></tr>
+<tr><td><code>FileNotFoundError</code> from a handler</td><td>An upstream stage did not run for this item</td><td>One failed outcome record, naming the missing key path and the stage to run</td></tr>
+<tr><td><a class="src" data-sym="class ExecutionError" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/executors/local.py#L37">ExecutionError</a></td><td>One or more items of a stage failed</td><td>The stage stops the run; up to ten failures listed, plus the first traceback in full</td></tr>
+<tr><td><code>FilterError</code></td><td>A <code>granule_filter</code> met missing metadata under <code>on_missing: fail</code></td><td>Wrapped into a <code>PlanError</code> — a policy decision, not a traceback</td></tr>
+</tbody>
+</table>
+</div>
+
+<p>Locally a run is all-or-nothing: any failed item stops it. The tolerated-failure percentage of
+<a href="../specs/08-execution.md">spec 08 §4</a> is a later slice. Outcomes are written either
+way, so <code>stratum status --failed</code> can answer afterwards.</p>
+
+<div class="gen">
+  <span class="label">Later slices</span>
+  <p>The SLURM and AWS executors, <code>stratum approve</code> at a paused budget gate, and
+  <code>--from-provenance</code> re-runs all resolve to the same <code>exec_item</code> seam and
+  the same work lists. What changes is the dispatcher above them, not anything on this page below
+  section 5.</p>
+</div>
+
+</div>
+<nav class="pager" aria-label="Pagination"></nav>
+<footer class="site">
+  Specified in <a href="../specs/08-execution.md"><code>specs/08-execution.md</code></a>,
+  <a href="../specs/06-caching.md"><code>06</code></a>,
+  <a href="../specs/09-run-manifest.md"><code>09</code></a>
+</footer>
+</main>
+</div>
+<script src="../assets/stratum.js"></script>
+</body>
+</html>

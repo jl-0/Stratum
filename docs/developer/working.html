@@ -1,0 +1,241 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Working on the code · Stratum</title>
+<link rel="stylesheet" href="../assets/stratum.css">
+</head>
+<body data-page="developer/working" data-root="../">
+<a class="skip" href="#content">Skip to content</a>
+<header class="masthead">
+  <a class="wordmark" href="../index.html"><span class="glyph"></span>Stratum</a>
+  <span class="stage">Pre-release</span>
+  <span class="spacer"></span>
+  <span class="repo">EMIT Critical Minerals L3</span>
+</header>
+<div class="layout">
+<nav id="sidebar" aria-label="Documentation"></nav>
+<main id="content">
+<div class="prose">
+
+<h1>Working on the code</h1>
+<p class="lede">The environment, the shape of the test suite, the four tests that are not
+negotiable, and the mistakes that have already been made once.</p>
+
+<h2 id="environment">1. Environment</h2>
+
+<pre><code>pixi install
+pixi run test                     <span class="c"># pytest</span>
+pixi run lint                     <span class="c"># ruff check src tests</span>
+pixi run python -m stratum.regrid <span class="c"># check the recorded regrid hash — section 4</span></code></pre>
+
+<p>The environment is pixi over conda-forge, not pip over PyPI, and
+<a href="../decisions/ADR-0001-tech-stack.md">ADR-0001</a> records why: GDAL, rasterio and
+netCDF4 need to agree about the same native libraries, and conda-forge is where that agreement is
+maintained.</p>
+
+<div class="note">
+  <span class="label">Two editable installs, and both are load-bearing</span>
+  <p><code>stratum</code> itself is editable, and so is
+  <code>vendor/SpectralUtil</code> &mdash; the latter because a non-editable install of that
+  upstream repository ships no subpackages, its <code>pyproject.toml</code> listing only the
+  top-level package. That is also why <code>spectral-util</code> is absent from
+  <code>[project].dependencies</code>: it has no PyPI release. The submodule pins the commit, and
+  the doc links to SpectralUtil source are pinned to that same commit rather than to a
+  branch.</p>
+</div>
+
+<h2 id="suite">2. The test suite</h2>
+
+<p>About 6,000 lines over twenty-one modules, and the split is by seam rather than by file.</p>
+
+<div class="tw">
+<table>
+<thead><tr><th>Module</th><th>Guards</th></tr></thead>
+<tbody>
+<tr><td><code>test_types.py</code>, <code>test_time.py</code>, <code>test_manifest.py</code></td><td>Specs 11, 09 in executable form — every assertion cites the section it guards</td></tr>
+<tr><td><code>test_classes.py</code></td><td>Enumerations resolve by attribute, never by position</td></tr>
+<tr><td><code>test_cache.py</code></td><td>Key layout, key sensitivity, atomic writes, <code>explain</code>/<code>diff</code></td></tr>
+<tr><td><code>test_index.py</code>, <code>test_cmr_source.py</code></td><td><code>LocalSource</code> and <code>CMRSource</code> reaching index rows through the same path</td></tr>
+<tr><td><code>test_readers.py</code>, <code>test_store.py</code></td><td>The EMIT readers, the reader registry, and HTTPS staging into the node-local asset cache</td></tr>
+<tr><td><code>test_regrid.py</code>, <code>test_resolve.py</code>, <code>test_reduce.py</code>, <code>test_publish.py</code></td><td>One per stage. <code>test_resolve.py</code> is the largest at ~600 lines, which is proportionate: the read path has the most ways to be subtly wrong</td></tr>
+<tr><td><code>test_plan.py</code></td><td>Selection, the plan-time checks, the vintage check</td></tr>
+<tr><td><code>test_e2e.py</code>, <code>test_cmr_e2e.py</code></td><td>Plan &rarr; <code>run_all</code> &rarr; products, STAC and provenance, through the real readers, planner and executor</td></tr>
+<tr><td><code>test_invariants.py</code></td><td><a href="#invariants">Section 3</a> — the non-negotiable ones</td></tr>
+<tr><td><code>test_docs_links.py</code></td><td><a href="#docs-tests">Section 5</a> — the site's code links</td></tr>
+</tbody>
+</table>
+</div>
+
+<h3 id="fixtures">Two synthetic worlds, and why there are two</h3>
+
+<div class="tw">
+<table>
+<thead><tr><th>Helper</th><th>Produces</th><th>Used by</th></tr></thead>
+<tbody>
+<tr><td><a class="src" data-sym="Tiny in-memory" href="https://github.com/jl-0/Stratum/blob/main/tests/synthetic.py#L1">synthetic.py</a></td><td>In-memory arrays behind a <code>FakeReader</code> and <code>FakeStore</code>. No NetCDF at all; sensor pixels sit exactly on tile cell centres so the KD-tree is deterministic</td><td>Resolve-level tests that want to isolate the algorithm from the format</td></tr>
+<tr><td><a class="src" data-sym="Small REAL NetCDF granule pairs" href="https://github.com/jl-0/Stratum/blob/main/tests/synthetic_nc.py#L1">synthetic_nc.py</a></td><td>Real, tiny NetCDF files shaped like EMIT L2B MIN + L1B OBS</td><td>The end-to-end and invariant tests, which have to exercise the real readers</td></tr>
+</tbody>
+</table>
+</div>
+
+<p>Both exist because they answer different questions. A failure under <code>synthetic.py</code>
+is an algorithm bug; the same test passing there and failing under <code>synthetic_nc.py</code>
+points at the reader or the format. Keeping them separate is what makes that inference
+possible.</p>
+
+<div class="key">
+  <span class="label">No fixture is a file in the repository</span>
+  <p><a class="src" data-sym="Fixtures resolve from URLs or a local trial directory" href="https://github.com/jl-0/Stratum/blob/main/tests/conftest.py#L1">conftest.py</a>
+  resolves real granules from <code>STRATUM_TRIAL_DATA</code> or <code>STRATUM_FIXTURE_URL</code>
+  and <strong>skips</strong> when they are absent. The suite therefore runs green on a clean
+  checkout with no data. A test that needs real granules is marked
+  <code>trial_data</code>; the one reference L2B granule under <code>refs/</code> is git-ignored
+  and its fixture skips when it is missing.</p>
+</div>
+
+<h2 id="invariants">3. The non-negotiable tests</h2>
+
+<p><a class="src" data-sym="The non-negotiable tests" href="https://github.com/jl-0/Stratum/blob/main/tests/test_invariants.py#L1">tests/test_invariants.py</a>
+holds four tests that are not ordinary regression cover. Each one asserts a property the whole
+design rests on, and a failure in any of them means something architectural has broken, not that
+a number moved.</p>
+
+<div class="tw">
+<table>
+<thead><tr><th>Test</th><th>Asserts</th><th>Breaks when</th></tr></thead>
+<tbody>
+<tr><td><a class="src" data-sym="def test_seam_equivalence_block_wise_equals_tile_wise" href="https://github.com/jl-0/Stratum/blob/main/tests/test_invariants.py#L36">Seam equivalence</a></td><td>Four 25-cell blocks and one 50-cell block deliver <strong>bit-identical</strong> product bands</td><td>Anything makes a result depend on how work was divided — a halo that leaks, a per-block normalisation, an ordering that is not deterministic</td></tr>
+<tr><td><a class="src" data-sym="def test_cache_key_sensitivity_scorer_change_keeps_glts" href="https://github.com/jl-0/Stratum/blob/main/tests/test_invariants.py#L54">Cache-key sensitivity</a></td><td>A scorer change moves snapshot keys and leaves GLT keys alone</td><td>A term leaks into the wrong key — the failure mode that makes iteration expensive, and the one users notice last</td></tr>
+<tr><td><a class="src" data-sym="def test_regrid_algo_version_bumped_with_module_hash" href="https://github.com/jl-0/Stratum/blob/main/tests/test_invariants.py#L96">Recorded regrid hash</a></td><td><code>ALGO_HASH</code> matches both the current version and the current module contents</td><td>Geometry code changes without the version bump — see <a href="#algo-hash">section 4</a></td></tr>
+<tr><td><a class="src" data-sym="def test_lumping_change_invalidates_snapshots_not_glts" href="https://github.com/jl-0/Stratum/blob/main/tests/test_invariants.py#L123">Lumping sensitivity</a></td><td>Two enumerations with the <em>same</em> ids and names but different lumping produce different snapshot keys</td><td>Class resolution stops entering the key by its content — the subtlest of the four, because both runs look identical in every report</td></tr>
+</tbody>
+</table>
+</div>
+
+<div class="warn">
+  <span class="label">Fixing one of these by relaxing it is always wrong</span>
+  <p>They are chosen so that the only honest fix is in the code under test. If seam equivalence
+  fails, block-wise and tile-wise really do disagree, and the product is wrong at block
+  boundaries.</p>
+</div>
+
+<h2 id="algo-hash">4. The recorded regrid hash</h2>
+
+<p>Geometry is the one thing the cache cannot check for itself. A GLT's key contains
+<a class="src" data-sym="REGRID_ALGO_VERSION = 1" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/regrid/__init__.py#L39">REGRID_ALGO_VERSION</a>,
+an integer a human maintains &mdash; so a change to the KD-tree path that nobody remembered to
+version would silently reuse GLTs built by the old code.</p>
+
+<p>The guard is a recorded content hash.
+<a class="src" data-sym="def module_content_hash" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/regrid/__init__.py#L321">module_content_hash</a>
+hashes every <code>.py</code> in the package; <code>ALGO_HASH</code> beside them records the
+version and hash that were current when someone last looked.
+<a class="src" data-sym="def check_recorded_hash" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/regrid/__init__.py#L344">check_recorded_hash</a>
+compares them and names which step was skipped.</p>
+
+<pre><code><span class="c"># after changing anything under src/stratum/regrid/</span>
+pixi run python -m stratum.regrid            <span class="c"># check: does ALGO_HASH still match?</span>
+
+<span class="c"># if GLT output can differ, bump REGRID_ALGO_VERSION first, then:</span>
+pixi run python -m stratum.regrid --record   <span class="c"># rewrite ALGO_HASH</span></code></pre>
+
+<p>The decision the tool cannot make for you is whether output <em>can</em> differ. A comment
+change cannot; a tolerance change can. When unsure, bump: an unnecessary bump costs one rebuild,
+a missed one produces wrong geometry that looks cached and correct.</p>
+
+<h2 id="docs-tests">5. The tests that guard these pages</h2>
+
+<p>The site has <strong>no build step and must not acquire one</strong> &mdash; plain HTML, one
+stylesheet, one script, working from <code>file://</code> as well as from Pages. Documentation
+accuracy is therefore maintained by tests rather than by generation.</p>
+
+<div class="tw">
+<table>
+<thead><tr><th>Test</th><th>Asserts</th></tr></thead>
+<tbody>
+<tr><td><a class="src" data-sym="def test_code_link_points_at_the_line_it_names" href="https://github.com/jl-0/Stratum/blob/main/tests/test_docs_links.py#L48">Code links point at the line they name</a></td><td>Every <code>&lt;a class="src"&gt;</code> on the site carries a <code>data-sym</code> fragment of the line it claims, and the test re-reads the file. A drifted link fails the suite</td></tr>
+<tr><td><a class="src" data-sym="def test_the_page_actually_carries_links" href="https://github.com/jl-0/Stratum/blob/main/tests/test_docs_links.py#L63">The regex matches something</a></td><td>A pattern that silently matched nothing would make every assertion above it vacuous</td></tr>
+<tr><td><a class="src" data-sym="def test_every_module_is_on_the_codebase_map" href="https://github.com/jl-0/Stratum/blob/main/tests/test_docs_developer.py#L46">Every package is on the codebase map</a></td><td>A package added to <code>src/</code> and documented nowhere. Link rot is caught by the test above; <em>absence</em> is not, because a page that omits something breaks no link</td></tr>
+<tr><td><a class="src" data-sym="def test_the_codebase_map_names_no_module_that_is_gone" href="https://github.com/jl-0/Stratum/blob/main/tests/test_docs_developer.py#L56">&hellip; and the map names nothing that is gone</a></td><td>The other direction: a module renamed or deleted while the map still cites it</td></tr>
+<tr><td><a class="src" data-sym="def test_the_framework_never_imports_the_plugin_package" href="https://github.com/jl-0/Stratum/blob/main/tests/test_docs_developer.py#L79">The framework never imports the plugin package</a></td><td>Nothing under <code>src/stratum/</code> imports <code>stratum_emit</code> &mdash; the boundary the <a href="codebase.html#packages">codebase map</a> asserts, enforced rather than hoped for</td></tr>
+<tr><td><a class="src" data-sym="def test_the_package_import_graph_is_acyclic" href="https://github.com/jl-0/Stratum/blob/main/tests/test_docs_developer.py#L91">The package graph is acyclic</a></td><td>The <a href="codebase.html#layers">layer table</a> stays true. A cycle names the two packages that formed it</td></tr>
+<tr><td><a class="src" data-sym="def test_developer_pages_are_registered_in_the_nav" href="https://github.com/jl-0/Stratum/blob/main/tests/test_docs_developer.py#L123">Every Developer page is in the nav model</a></td><td><code>data-page</code> matches an id in <code>PAGES</code> and <code>data-root</code> is <code>../</code>. Both fail silently in a browser, which is why a test is worth more than care</td></tr>
+</tbody>
+</table>
+</div>
+
+<p>When a code link fails, <strong>repoint it; never loosen the assertion</strong>. A doc that
+links the wrong line is worse than one that links nothing at all.</p>
+
+<p>After adding or moving a page there is one more check, because <code>data-page</code> and
+<code>data-root</code> fail silently when wrong:</p>
+
+<pre><code>python3 - &lt;&lt;'EOF'
+import pathlib, re
+root = pathlib.Path('docs')
+for f in sorted(root.rglob('*.html')):
+    for m in re.finditer(r'(?:href|src)="([^"#]+)"', f.read_text()):
+        u = m.group(1)
+        if u.startswith(('http', 'mailto:')): continue
+        if not (f.parent / u.split('#')[0]).resolve().exists():
+            print('BROKEN', f, u)
+EOF</code></pre>
+
+<h2 id="conventions">6. Conventions</h2>
+
+<div class="tw">
+<table>
+<thead><tr><th>Convention</th><th>How consistently</th></tr></thead>
+<tbody>
+<tr><td>A module docstring naming what the module owns and citing its spec section</td><td>Every module in <code>src/</code>, without exception. It is how the spec&nbsp;&rarr;&nbsp;code map stays discoverable from the code end</td></tr>
+<tr><td><code>from __future__ import annotations</code></td><td>Every module but the two that declare nothing</td></tr>
+<tr><td><code>__all__</code></td><td>On the modules that form a package's public face, not on internal ones</td></tr>
+<tr><td>Line length 100, ruff, target py311</td><td>Enforced by <code>pixi run lint</code></td></tr>
+<tr><td><code>extra="forbid"</code> on every manifest model</td><td>A misspelt manifest key is an error, never a silently ignored default</td></tr>
+<tr><td>Errors name the spec section they enforce</td><td>Widespread and worth continuing — it turns a traceback into a pointer at the contract</td></tr>
+<tr><td>A term in the docs matches the field name in the code</td><td><code>halo</code> is <code>halo</code> everywhere. A friendlier synonym that disagrees with the API is worse than an unfamiliar word</td></tr>
+</tbody>
+</table>
+</div>
+
+<h2 id="footguns">7. Footguns</h2>
+
+<div class="tw">
+<table>
+<thead><tr><th>Doing this</th><th>Produces</th><th>Instead</th></tr></thead>
+<tbody>
+<tr><td>Adding a term to a cache key without thinking about which artifact it belongs to</td><td>Either too much rebuilding, or stale hits — and the second is silent</td><td>Put it in the narrowest <code>*_inputs</code> function that needs it, and add a case to <code>test_invariants.py</code></td></tr>
+<tr><td>Changing how a key is derived in only one of the two places that derive it</td><td>An artifact that exists but is never found. Looks like "the cache does not work"</td><td><code>regrid_item</code> compares the two derivations explicitly; do the same for a new stage</td></tr>
+<tr><td>Keeping per-file state on a reader instance</td><td>Cross-contamination between granules, because one instance serves the whole collection in a process</td><td>Put it on the <code>ReaderContext</code> returned by <code>open()</code></td></tr>
+<tr><td>Treating <code>SensorWindow</code> as a shape</td><td>A sensor-space mask trims the edge of every <em>block</em> instead of the detector edge</td><td>It carries its origin; use it</td></tr>
+<tr><td>Writing a cache artifact without going through <code>write_file</code> / <code>write_dir</code></td><td>A partial artifact that reads as a hit after a crash</td><td>Both commit the sidecar last, on purpose</td></tr>
+<tr><td>Having a worker consult the manifest or the catalogue</td><td>A run that is not reproducible, and an executor that cannot be ported</td><td>Whatever it needs goes into <code>plan.json</code> at plan time</td></tr>
+<tr><td>Changing <code>src/stratum/regrid/</code> without running the hash check</td><td>GLTs built by old code, reused by new code, with no indication</td><td><a href="#algo-hash">Section 4</a></td></tr>
+<tr><td>Importing <code>stratum_emit</code> from <code>stratum</code> "just for a type"</td><td>The framework stops being re-targetable</td><td>The type belongs in <code>stratum.types</code>, or the coupling belongs in an entry point</td></tr>
+<tr><td>Deleting a run directory to "start clean"</td><td>Nothing, usually — but deleting <code>{root}/cache/</code> discards every GLT, which is the expensive half</td><td>Run directories are disposable; the cache is not</td></tr>
+</tbody>
+</table>
+</div>
+
+<div class="reading">
+  <span class="label">Further reading</span>
+  <ul>
+    <li><a href="https://github.com/jl-0/Stratum/blob/main/CLAUDE.md">CLAUDE.md</a> <span class="what">&mdash; the working agreement: what to keep in step with what, and the established facts not to re-derive</span></li>
+    <li><a href="../specs/00-overview.md">specs/00-overview.md</a> <span class="what">&mdash; read before anything substantive; the vocabulary and the five invariants</span></li>
+    <li><a href="../notes/heritage.md">notes/heritage.md</a> <span class="what">&mdash; where the historical code lives and which observation forced which design choice</span></li>
+  </ul>
+</div>
+
+</div>
+<nav class="pager" aria-label="Pagination"></nav>
+<footer class="site">
+  Conventions recorded in <a href="https://github.com/jl-0/Stratum/blob/main/CLAUDE.md"><code>CLAUDE.md</code></a>
+  and <a href="../decisions/ADR-0001-tech-stack.md"><code>ADR-0001</code></a>
+</footer>
+</main>
+</div>
+<script src="../assets/stratum.js"></script>
+</body>
+</html>

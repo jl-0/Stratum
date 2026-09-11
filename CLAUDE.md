@@ -197,6 +197,7 @@ docs/index.html    site landing page (GitHub Pages serves docs/)
 docs/guide/        concepts, running, reading-data, algorithms, plugins, caching,
                    scaling                                          <- how to use it
 docs/reference/    manifest, types, cli                             <- field/API reference
+docs/developer/    codebase, lifecycle, objects, extending, working <- how to CHANGE it
 docs/decisions/    ADR digest (HTML) + the ADRs themselves (Markdown)
 docs/status.html   what is implemented, what is open
 docs/assets/       stratum.css, stratum.js - the only shared chrome
@@ -230,6 +231,14 @@ CDN dependencies, relative links only.
 that implements it, and a line number rots the moment code is inserted above it. Every
 `<a class="src">` records a fragment of the line it claims and `tests/test_docs_links.py` re-reads
 it, so a drifted link fails the suite. When it does, repoint the link; do not loosen the test.
+
+**`docs/developer/` is guarded a second way.** It documents the source tree itself, and the way
+that rots is not a broken link but an omission: a package added and described nowhere breaks
+nothing. `tests/test_docs_developer.py` therefore checks that every package under `src/` appears
+on `developer/codebase.html` and that the map cites no module that is gone. It also enforces two
+structural claims those pages make as fact - that `src/stratum/` never imports `stratum_emit`,
+and that the package import graph is acyclic - because a documented invariant nobody enforces is
+a documented aspiration. Same rule as above: fix the code or the page, never the assertion.
 
 **The nav model lives in exactly one place** — `PAGES` in `docs/assets/stratum.js`. The sidebar,
 the active-page highlight and the prev/next pager all derive from it. Adding a page means one

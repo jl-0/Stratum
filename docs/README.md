@@ -11,6 +11,10 @@ Three layers, with different audiences. Keep them in step — see [`../CLAUDE.md
 The site describes the **current tool**. It does not argue for the design, compare against
 predecessors, or explain what was replaced — that belongs in [`notes/heritage.md`](notes/heritage.md).
 
+`guide/` and `reference/` document the tool for whoever **uses** it. `developer/` documents the
+codebase for whoever **changes** it — module layout, execution flow, object lifetimes, extension
+points. Nothing in `developer/` is needed to write a manifest or a plugin.
+
 ## The site
 
 Open [`index.html`](index.html) locally, or browse it on Pages. No build step: plain HTML with one
@@ -22,6 +26,7 @@ guide/
   concepts.html           grid/tile/block, epochs & delivery, roles, spaces, nodata, class tables
   running.html            write a manifest, dry-run it, submit it, read the output
   reading-data.html       the block read path; sources, readers, staging, credentials
+  algorithms.html         every arithmetic step, linked to the line that performs it
   plugins.html            authoring guide for all five science hooks
   caching.html            what invalidates what; inspecting the cache
   scaling.html            local, SLURM and AWS executors; credentials; Terraform's role
@@ -29,6 +34,12 @@ reference/
   manifest.html           every manifest field                        [generation candidate]
   types.html              the types plugins receive                   [generation candidate]
   cli.html                every command and option                    [generation candidate]
+developer/
+  codebase.html           package map, the layer graph, module by module, spec -> code
+  lifecycle.html          plan -> work lists -> exec_item; the key-agreement contract
+  objects.html            object lifetimes, PlanContext, frozen vs not, the JSON seam
+  extending.html          registries, plugin resolution, adding a reader/source/stage/executor
+  working.html            environment, the test suite, the invariants, conventions, footguns
 decisions/index.html      ADR digest
 status.html               what is implemented, what is open
 assets/                   stratum.css, stratum.js — the only shared chrome
@@ -42,6 +53,10 @@ assets/                   stratum.css, stratum.js — the only shared chrome
    `data-root` (`""` at the top level, `"../"` one level down).
 3. Use the existing components in `stratum.css` — `.key` / `.note` / `.warn` callouts, `.chip-*`
    status pills, `.gen` for generated-later regions, `.cards`, `.stages`, `.tw > table`.
+4. Run `pytest tests/test_docs_links.py tests/test_docs_developer.py` — the first checks every
+   `<a class="src">` still points at the line it names, the second that `data-page` matches a nav
+   `id`, that `data-root` is right, and (for `developer/codebase.html`) that no package in `src/`
+   is undocumented and no documented module has been deleted.
 
 `.nojekyll` is present on purpose: Jekyll would rewrite `specs/*.md` to `.html` and break every
 link from the site into the specs.

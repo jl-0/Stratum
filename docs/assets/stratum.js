@@ -27,6 +27,13 @@
       { id: 'reference/types',    href: 'reference/types.html',    label: 'Types' },
       { id: 'reference/cli',      href: 'reference/cli.html',      label: 'Commands' }
     ]},
+    { section: 'Developer', items: [
+      { id: 'developer/codebase',  href: 'developer/codebase.html',  label: 'Codebase map' },
+      { id: 'developer/lifecycle', href: 'developer/lifecycle.html', label: 'Lifecycle of a run' },
+      { id: 'developer/objects',   href: 'developer/objects.html',   label: 'Objects & ownership' },
+      { id: 'developer/extending', href: 'developer/extending.html', label: 'Extension wiring' },
+      { id: 'developer/working',   href: 'developer/working.html',   label: 'Working on the code' }
+    ]},
     { section: 'Project', items: [
       { id: 'decisions/index', href: 'decisions/index.html', label: 'Decision records' },
       { id: 'status',          href: 'status.html',          label: 'Status' }

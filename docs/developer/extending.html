@@ -1,0 +1,262 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Extension wiring · Stratum</title>
+<link rel="stylesheet" href="../assets/stratum.css">
+</head>
+<body data-page="developer/extending" data-root="../">
+<a class="skip" href="#content">Skip to content</a>
+<header class="masthead">
+  <a class="wordmark" href="../index.html"><span class="glyph"></span>Stratum</a>
+  <span class="stage">Pre-release</span>
+  <span class="spacer"></span>
+  <span class="repo">EMIT Critical Minerals L3</span>
+</header>
+<div class="layout">
+<nav id="sidebar" aria-label="Documentation"></nav>
+<main id="content">
+<div class="prose">
+
+<h1>Extension wiring</h1>
+<p class="lede">How a string in a manifest becomes an object in a worker, what identity that
+object carries into a cache key, and what it takes to add a new kind of thing.</p>
+
+<p><a href="../guide/plugins.html">Writing plugins</a> teaches the five science hooks from the
+author's side. This page is the mechanism underneath: the registries, the resolver, the binding,
+and the checklists for extending the framework rather than plugging into it.</p>
+
+<h2 id="registries">1. Seven registries, one resolver</h2>
+
+<p>Every extensible thing in Stratum is an entry-point group, and they are declared in one
+dictionary:
+<a class="src" data-sym="GROUPS = {" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/plugins.py#L12">plugins.py:12</a>.</p>
+
+<div class="tw">
+<table>
+<thead><tr><th>Kind</th><th>Entry-point group</th><th>Contract</th><th>Shipped here</th></tr></thead>
+<tbody>
+<tr><td><code>scorer</code></td><td><code>stratum.scorers</code></td><td><a class="src" data-sym="class Scorer(Protocol)" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/hooks.py#L40">Scorer</a></td><td>4, in <code>stratum_emit.scorers</code></td></tr>
+<tr><td><code>mask</code></td><td><code>stratum.masks</code></td><td><a class="src" data-sym="class PixelMask(Protocol)" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/hooks.py#L30">PixelMask</a></td><td>4, in <code>stratum_emit.masks</code></td></tr>
+<tr><td><code>reducer</code></td><td><code>stratum.reducers</code></td><td><a class="src" data-sym="class Reducer(Protocol)" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/hooks.py#L53">Reducer</a></td><td>none — the built-in schema reducer is not a plugin</td></tr>
+<tr><td><code>mapper</code></td><td><code>stratum.mappers</code></td><td><a class="src" data-sym="class OutputMapper(Protocol)" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/hooks.py#L78">OutputMapper</a></td><td>none — the config mappers are built in</td></tr>
+<tr><td><code>filter</code></td><td><code>stratum.filters</code></td><td><a class="src" data-sym="class GranuleFilter(Protocol)" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/hooks.py#L22">GranuleFilter</a></td><td>none registered — the built-ins are named by keyword</td></tr>
+<tr><td><code>reader</code></td><td><code>stratum.readers</code></td><td><a class="src" data-sym="class GranuleReader(Protocol)" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/types.py#L609">GranuleReader</a></td><td>4, keyed by EMIT collection name</td></tr>
+<tr><td><code>source</code></td><td><code>stratum.sources</code></td><td><a class="src" data-sym="class GranuleSource(Protocol)" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/types.py#L625">GranuleSource</a></td><td><code>local</code> and <code>cmr</code></td></tr>
+</tbody>
+</table>
+</div>
+
+<p>The three that ship nothing are not oversights. A <code>Reducer</code> or
+<code>OutputMapper</code> plugin is only needed for what the schema vocabulary and the config
+mappers cannot express, and the built-ins deliberately cover the ordinary cases without anyone
+writing code. The group exists so that the uncommon case has somewhere to go.</p>
+
+<div class="note">
+  <span class="label">Readers and sources are not science hooks</span>
+  <p>They sit in the access tier because a new instrument or a new archive does not change what a
+  mosaic <em>means</em>. Keeping them out of the five-hook list is what keeps that list short
+  enough to learn.</p>
+</div>
+
+<h2 id="resolution">2. From a manifest string to a live object</h2>
+
+<p>A <code>ref</code> is an entry-point name when one is registered, and a
+<code>module:Class</code> path otherwise. Both forms work everywhere, which is what lets you
+develop a plugin before packaging it.</p>
+
+<pre><code>"prefer_bare_earth"                      <span class="c"># registered entry point</span>
+"my_lab.scorers:SnowAware"               <span class="c"># module:Class, nothing installed</span></code></pre>
+
+<pre><code>manifest.scorer.ref
+    │  resolve(kind, ref)              <span class="c"># plugins.py — entry point first, then module:Class</span>
+    ▼
+  the class
+    │  instantiate(kind, ref, params)  <span class="c"># plan/run.py — constructor gets the params verbatim</span>
+    ▼
+  the instance
+    │  PluginBinding(ref, version, params, instance)
+    ▼
+  ctx.scorer  ──plugin_to_doc──▶  plan.json  ──plugin_from_doc──▶  ctx.scorer in every worker</code></pre>
+
+<div class="tw">
+<table>
+<thead><tr><th>Step</th><th>Does</th><th>Code</th></tr></thead>
+<tbody>
+<tr><td><code>resolve</code></td><td>Entry-point name first, then <code>module:Class</code>; a <code>LookupError</code> names both attempts, so a typo does not read as "no plugins installed"</td><td><a class="src" data-sym="def resolve(kind: str, ref: str)" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/plugins.py#L28">plugins.py:28</a></td></tr>
+<tr><td><code>instantiate</code></td><td>Calls the class with the manifest's <code>params</code> as keyword arguments. No adaptation layer: a plugin's constructor signature <em>is</em> its parameter schema</td><td><a class="src" data-sym="def instantiate" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/plan/run.py#L341">plan/run.py:341</a></td></tr>
+<tr><td><code>PluginBinding</code></td><td>Pairs the instance with the three things that enter a cache key: the ref as written, the distribution version, the params</td><td><a class="src" data-sym="class PluginBinding" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/resolve/context.py#L109">context.py:109</a></td></tr>
+<tr><td>Round trip</td><td>A worker re-instantiates from <code>{ref, params}</code> but keeps the version the <em>planner</em> recorded</td><td><a class="src" data-sym="def plugin_from_doc" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/plan/document.py#L189">document.py:189</a></td></tr>
+</tbody>
+</table>
+</div>
+
+<p>Resolution happens <strong>at plan time</strong> for every kind. A plugin that cannot be
+imported, or whose constructor rejects the manifest's params, is a plan refusal &mdash;
+<a class="src" data-sym="def validate_static" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/manifest/validate.py#L57">validate_static</a>
+instantiates each named plugin precisely so that <code>stratum validate</code> catches it without
+touching data.</p>
+
+<h2 id="identity">3. Version identity, and what "unversioned" costs</h2>
+
+<p>A plugin's version enters the cache key, so Stratum has to determine it from an arbitrary
+object.
+<a class="src" data-sym="def plugin_version" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/resolve/context.py#L122">plugin_version</a>
+tries three strategies in order:</p>
+
+<ol>
+  <li>Look the object's top-level package up in the installed distributions' metadata.</li>
+  <li>Failing that, try a distribution named the same as the top-level package.</li>
+  <li>Failing that &mdash; the editable-install case, which records no top-level list &mdash; find
+  the distribution whose <code>direct_url.json</code> source directory actually contains the
+  module file, checking the package directory specifically so that a test or example under the
+  same source tree does not match.</li>
+</ol>
+
+<div class="warn">
+  <span class="label">A plugin that resolves to <code>"unversioned"</code> is a cache hazard</span>
+  <p>Its cache keys stop distinguishing versions, so editing the plugin's code without changing
+  its ref or params leaves stale artifacts looking like valid hits. The long-term answer is a
+  content hash beside the version (<a href="../specs/06-caching.md">spec 06 §3 rule 3</a>); until
+  then, install plugin packages with real metadata, and treat <code>"unversioned"</code> in a
+  <code>.inputs.json</code> as a warning rather than a detail.</p>
+</div>
+
+<h3 id="key-contribution">What each plugin kind contributes to a key</h3>
+
+<div class="tw">
+<table>
+<thead><tr><th>Kind</th><th>Enters</th><th>So changing it rebuilds</th></tr></thead>
+<tbody>
+<tr><td><code>mask</code></td><td>The masked-observation identity, inside each snapshot's <code>obs_keys</code></td><td>snapshots and products — not GLTs</td></tr>
+<tr><td><code>scorer</code></td><td>The snapshot key directly: ref, version, params</td><td>snapshots and products — not GLTs</td></tr>
+<tr><td><code>reducer</code></td><td>The product-block key, when one is named at all</td><td>products only</td></tr>
+<tr><td><code>mapper</code></td><td>Nothing — rendering is downstream of the data product</td><td>nothing; <code>stratum render</code> re-renders without recomputing</td></tr>
+<tr><td><code>filter</code></td><td>Nothing directly — it changes <em>which granules</em> are frozen, which changes <code>obs_keys</code></td><td>whatever the changed granule set touches</td></tr>
+<tr><td><code>reader</code>, <code>source</code></td><td>Nothing — they produce bytes and rows, not decisions</td><td>nothing, by design</td></tr>
+</tbody>
+</table>
+</div>
+
+<p>That last row is the load-bearing one. A reader is expected to produce the same array from the
+same bytes; if a reader change alters values, the cache will not notice. Reader changes that
+affect data are a deliberate cache concern and belong with a discussion of
+<a href="../specs/06-caching.md">spec 06</a>, not a silent merge.</p>
+
+<h2 id="add-reader">4. Adding a reader</h2>
+
+<p>A reader owns band meaning and is where sentinel fills die. The four EMIT readers subclass
+<a class="src" data-sym="class EmitNetCDFReader" href="https://github.com/jl-0/Stratum/blob/main/src/stratum_emit/readers/netcdf.py#L85">EmitNetCDFReader</a>,
+which is a convenience, not a requirement &mdash; the contract is the
+<code>GranuleReader</code> protocol.</p>
+
+<ol>
+  <li>Implement <code>open</code>, <code>variables</code>, <code>read</code>, and
+  <code>geolocation</code>; add <code>glt</code> if the product ships its own lookup table and
+  <code>class_table</code> if it carries categorical classes.</li>
+  <li>Declare <code>space</code> &mdash; <code>"sensor"</code> or <code>"ortho"</code>. The
+  planner picks the geolocation role by asking each reader for this, so getting it wrong
+  misroutes the whole regrid stage.</li>
+  <li>Return masked arrays. Every sentinel the format uses must already be masked before the
+  value leaves the reader; nothing downstream knows what <code>-9999</code> means.</li>
+  <li>Honour the <code>SensorWindow</code>, origin included. A reader that ignores it and returns
+  the whole scene is correct but slow; one that treats the window as a shape is wrong.</li>
+  <li>Register it under the collection name in <code>[project.entry-points."stratum.readers"]</code>.
+  A manifest can override the choice per collection via <code>inputs.readers</code>.</li>
+</ol>
+
+<p><a class="src" data-sym="class L2BFrcov(EmitNetCDFReader)" href="https://github.com/jl-0/Stratum/blob/main/src/stratum_emit/readers/__init__.py#L68">L2BFrcov</a>
+is the instructive example: an already-orthorectified product, so it overrides
+<code>read</code> and reports no geolocation at all.</p>
+
+<h2 id="add-source">5. Adding a source</h2>
+
+<p>A source runs at index build and <strong>never during a run</strong>. That constraint is what
+makes a run reproducible: the catalogue is consulted once, the answer is frozen, and the run reads
+the frozen file.</p>
+
+<ol>
+  <li>Implement <code>search</code>, <code>assets</code>, and <code>checksums</code>. Return
+  <a class="src" data-sym="class GranuleRecord" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/types.py#L574">GranuleRecord</a>
+  objects &mdash; source-shaped, not schema-shaped; the translation to index rows belongs to
+  <a class="src" data-sym="def row_from_record" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/index/build.py#L70">row_from_record</a>.</li>
+  <li>Carry the source's metadata through verbatim. Promoted columns are the ones the index
+  schema names; everything else lands in <code>attributes</code> stringified, which is what lets a
+  filter like <code>MaxSolarZenith</code> work without the framework knowing what solar zenith
+  is.</li>
+  <li>Report checksums when the catalogue has them, and honestly report none when it does not
+  &mdash; <code>LocalSource</code> records none rather than inventing them.</li>
+  <li>Register under <code>[project.entry-points."stratum.sources"]</code> and add the
+  <code>kind</code> to
+  <a class="src" data-sym="def source_from_manifest" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/plan/run.py#L209">source_from_manifest</a>.</li>
+</ol>
+
+<h2 id="add-stage">6. Adding a stage</h2>
+
+<p>Rarer, and a bigger change. There are six places a stage exists, and missing one gives a
+confusing failure rather than a clean one:</p>
+
+<div class="tw">
+<table>
+<thead><tr><th></th><th>What to add</th><th>Where</th></tr></thead>
+<tbody>
+<tr><td>1</td><td>The stage name, in pipeline order</td><td><a class="src" data-sym="STAGES: tuple[str, ...]" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/plan/document.py#L51">STAGES</a></td></tr>
+<tr><td>2</td><td>An artifact kind, if it writes to the cache</td><td><a class="src" data-sym="ARTIFACT_KINDS" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/cache/__init__.py#L31">ARTIFACT_KINDS</a> and a <code>*_inputs</code> function beside it</td></tr>
+<tr><td>3</td><td>A work list, with the fan-out rule that decides when an item exists</td><td><a class="src" data-sym="def build_work_lists" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/plan/run.py#L904">build_work_lists</a></td></tr>
+<tr><td>4</td><td>A handler returning <code>(key_or_path, hit)</code></td><td><a class="src" data-sym="HANDLERS" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/executors/worker.py#L179">HANDLERS</a></td></tr>
+<tr><td>5</td><td>A key function the <em>next</em> stage can call to recompute this stage's output address without doing the work</td><td>beside the handler — <code>snapshot_key</code> and <code>product_key</code> are the models</td></tr>
+<tr><td>6</td><td>The CLI's <code>--stage</code> choices, and the docs</td><td><a class="src" data-sym="def exec_" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/cli.py#L150">cli.py:150</a>, <a href="../reference/cli.html">Commands</a></td></tr>
+</tbody>
+</table>
+</div>
+
+<p>Item 5 is the one people skip. Without it the next stage has to either trust that its input
+exists or do the producing work to find out &mdash; and both defeat the
+<a href="lifecycle.html#key-contract">key-agreement contract</a> that lets stages run as
+independent processes.</p>
+
+<h2 id="add-executor">7. Adding an executor</h2>
+
+<p>The least invasive extension of the three, because the seam was designed for it. An executor's
+whole job is to call
+<a class="src" data-sym="def exec_item" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/executors/worker.py#L186">exec_item(run_dir, stage, index)</a>
+once per item and collect the outcome records.</p>
+
+<ul>
+  <li>Add the name to
+  <a class="src" data-sym="EXECUTORS: tuple[str, ...]" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/executors/__init__.py#L8">EXECUTORS</a>
+  so <code>executor_available</code> stops refusing it.</li>
+  <li>Dispatch the items of one stage however the platform prefers &mdash; a SLURM array task and
+  a Lambda invocation both reduce to <code>stratum exec --plan … --stage … --index N</code>.</li>
+  <li>Write <code>work/{stage}.results.jsonl</code> in the same shape. <code>stratum status</code>
+  and <code>stratum report</code> read nothing else, so they keep working for free.</li>
+  <li>Honour the budget gate before dispatching anything.</li>
+</ul>
+
+<p>Nothing about a stage handler, a cache key or a plugin changes. That is the payoff for
+insisting that a worker takes only a run directory, a stage name and an integer.</p>
+
+<h2 id="inspecting">8. Inspecting what is installed</h2>
+
+<pre><code>stratum plugins list                   <span class="c"># every registered plugin, by kind</span>
+stratum plugins list --kind scorer
+stratum plugins show prefer_bare_earth <span class="c"># resolve a ref and print what it declares</span>
+stratum plugins show my_lab.scorers:SnowAware</code></pre>
+
+<p><code>show</code> accepts either ref form and resolves it the same way a manifest would, which
+makes it the fastest check that a plugin is visible to the environment a run will use &mdash;
+usually the real answer when a <code>LookupError</code> appears at plan time.</p>
+
+</div>
+<nav class="pager" aria-label="Pagination"></nav>
+<footer class="site">
+  Specified in <a href="../specs/04-cost-functions.md"><code>specs/04-cost-functions.md</code></a>,
+  <a href="../specs/12-data-access.md"><code>12</code></a>,
+  <a href="../specs/08-execution.md"><code>08</code></a>
+</footer>
+</main>
+</div>
+<script src="../assets/stratum.js"></script>
+</body>
+</html>
