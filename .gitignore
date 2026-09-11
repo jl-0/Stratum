@@ -13,3 +13,33 @@ __pycache__/
 *.parquet
 !refs/**/*.parquet
 trial-data/
+
+# ---- Terraform / AWS (docs/notes/2026-09-03-aws-deployment-playbook.md section 7) ----
+# NOTHING in this block may ever be committed. Terraform state holds every value Terraform
+# touches, in plaintext.
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfvars
+*.tfvars.json
+!*.tfvars.example
+backend.hcl
+!backend.hcl.example
+crash.log
+crash.*.log
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+.terraformrc
+terraform.rc
+# .terraform.lock.hcl IS committed - it is the provider lock, the peer of pixi.lock.
+
+# ---- credential material, any kind ----
+.netrc
+.aws/
+credentials
+*.pem
+*.p12
+*.pfx
+*.key
