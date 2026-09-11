@@ -20,7 +20,8 @@
       { id: 'guide/algorithms', href: 'guide/algorithms.html', label: 'Algorithms, step by step' },
       { id: 'guide/plugins',    href: 'guide/plugins.html',    label: 'Writing plugins' },
       { id: 'guide/caching',    href: 'guide/caching.html',    label: 'Caching & reruns' },
-      { id: 'guide/scaling',    href: 'guide/scaling.html',    label: 'Running at scale' }
+      { id: 'guide/scaling',    href: 'guide/scaling.html',    label: 'Running at scale' },
+      { id: 'guide/deploying',  href: 'guide/deploying.html',  label: 'Deploying to AWS' }
     ]},
     { section: 'Reference', items: [
       { id: 'reference/manifest', href: 'reference/manifest.html', label: 'Manifest' },

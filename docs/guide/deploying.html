@@ -1,0 +1,266 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Deploying to AWS · Stratum</title>
+<link rel="stylesheet" href="../assets/stratum.css">
+</head>
+<body data-page="guide/deploying" data-root="../">
+<a class="skip" href="#content">Skip to content</a>
+<header class="masthead">
+  <a class="wordmark" href="../index.html"><span class="glyph"></span>Stratum</a>
+  <span class="stage">Pre-release</span>
+  <span class="spacer"></span>
+  <span class="repo">EMIT Critical Minerals L3</span>
+</header>
+<div class="layout">
+<nav id="sidebar" aria-label="Documentation"></nav>
+<main id="content">
+<div class="prose">
+
+<h1>Deploying to AWS</h1>
+<p class="lede">Standing up a deployment, from an empty account to a bucket a manifest can write
+to. <a href="scaling.html">Running at scale</a> explains what the executors are; this page is the
+runbook.</p>
+
+<div class="warn">
+  <span class="label">Read this before you follow it</span>
+  <p>Only the first step is built. The Terraform below creates a bucket, an image repository, a
+  secret container and three roles — all of which apply cleanly today — but
+  <strong>nothing yet runs in the cloud</strong>: the S3 storage root, the container image, the
+  Lambda worker and the <code>aws</code> executor are all later slices. Each refuses by name with
+  its spec section cited. Follow this page to stand up the platform; do not expect a cloud run at
+  the end of it. <a href="../status.html">Status</a> is the authority on what exists.</p>
+</div>
+
+<h2 id="shape">What you are building</h2>
+
+<p>One deployment serves many runs. A new experiment is a new manifest, never a new deployment
+(<a href="../decisions/ADR-0002-terraform-manifest-boundary.md">ADR-0002</a>). The deployment is
+deliberately small:</p>
+
+<div class="tw">
+<table>
+<thead><tr><th>Resource</th><th>Why</th><th>Status</th></tr></thead>
+<tbody>
+<tr><td>S3 bucket</td><td>The storage root. <code>cache/</code>, <code>runs/</code> and <code>products/</code> hang off it</td><td><span class="chip chip-locked">built</span></td></tr>
+<tr><td>ECR repository</td><td>One image, two entrypoints. Immutable tags, because deployments pin by digest</td><td><span class="chip chip-locked">built</span></td></tr>
+<tr><td>Secrets Manager secret</td><td>The Earthdata credential. Container only — the value never passes through Terraform</td><td><span class="chip chip-locked">built</span></td></tr>
+<tr><td>Three IAM roles</td><td>Lambda worker, orchestrator task, task execution</td><td><span class="chip chip-locked">built</span></td></tr>
+<tr><td>Lambda function</td><td>Runs one work item — the same <code>stratum exec</code> every executor calls</td><td><span class="chip chip-open">not started</span></td></tr>
+<tr><td>ECS task definition</td><td>The orchestrator, when a run should survive a closed laptop</td><td><span class="chip chip-open">not started</span></td></tr>
+</tbody>
+</table>
+</div>
+
+<p>No EC2, and no Batch. Every work item in the reference run clears Lambda's 15-minute and 10&nbsp;GB
+ceilings by one to three orders of magnitude, so there is no placement decision to make and nothing
+to provision. <a href="scaling.html#aws">Running at scale</a> has the measurements.</p>
+
+<h2 id="prereqs">Before you start</h2>
+
+<div class="tw">
+<table>
+<thead><tr><th>#</th><th>You need</th><th>Check</th></tr></thead>
+<tbody>
+<tr><td>1</td><td>Terraform 1.10 or newer, the AWS CLI, and Docker</td><td><code>terraform version</code></td></tr>
+<tr><td>2</td><td>An AWS account and a working profile</td><td><code>aws sts get-caller-identity</code></td></tr>
+<tr><td>3</td><td><strong>Someone permitted to create IAM roles</strong>, and any site requirements they must satisfy</td><td>Ask before planning</td></tr>
+<tr><td>4</td><td>An Earthdata Login account</td><td>Log in at <code>urs.earthdata.nasa.gov</code></td></tr>
+<tr><td>5</td><td><strong>The LP DAAC EULA accepted by that account</strong></td><td>Without it, downloads fail <code>401</code> with no useful message</td></tr>
+</tbody>
+</table>
+</div>
+
+<p>Row 3 is the one that sets the shape of everything else, and row 5 is the one that is forgotten
+until a download fails for a reason the error does not explain.</p>
+
+<h2 id="env">1. One private file</h2>
+
+<p>Everything account-specific lives in <code>.env</code>, which is gitignored.
+<strong>Nothing in the repository names an account, a profile, a bucket, or a site requirement.</strong></p>
+
+<pre><code>cp .env.example .env
+$EDITOR .env</code></pre>
+
+<div class="tw">
+<table>
+<thead><tr><th>Variable</th><th>Meaning</th></tr></thead>
+<tbody>
+<tr><td><code>AWS_PROFILE</code></td><td>The profile your login produces</td></tr>
+<tr><td><code>AWS_REGION</code></td><td><code>us-west-2</code>. Not a preference — the source data and Step Functions must share a region</td></tr>
+<tr><td><code>STRATUM_DEPLOYMENT</code></td><td>Deployment name, e.g. <code>dev</code></td></tr>
+<tr><td><code>STRATUM_PERMISSIONS_BOUNDARY_ARN</code></td><td>Site requirement. <strong>Present but empty</strong> if your site imposes none</td></tr>
+<tr><td><code>STRATUM_ROLE_NAME_PREFIX</code></td><td>Site requirement. Present but empty if none</td></tr>
+</tbody>
+</table>
+</div>
+
+<div class="key">
+  <span class="label">Empty is a valid answer; undefined is not</span>
+  <p>The two site variables have <strong>no defaults</strong>, on purpose. A site value that is
+  missing must fail the plan loudly rather than quietly apply something the site would reject. Set
+  them to <code>""</code> when your site imposes no boundary or prefix — that is different from
+  leaving them out, and the scripts tell you which you did.</p>
+</div>
+
+<h2 id="bootstrap">2. Create the state bucket</h2>
+
+<p>Terraform keeps its state in S3, but cannot create the bucket that holds its own state. That
+chicken-and-egg is the entire reason this step exists — it creates a bucket and nothing else. No
+IAM, no roles, no site requirements.</p>
+
+<pre><code>make bootstrap</code></pre>
+
+<p>Idempotent, and safe to re-run. It enables versioning (the only recovery path from a corrupted
+state file), default encryption, and a public-access block.</p>
+
+<div class="warn">
+  <span class="label">The state bucket is a secret store</span>
+  <p>Terraform state contains every value Terraform touches, in plaintext JSON — including your
+  site's permissions boundary and role prefix. That is true however those values are supplied, and
+  it is why this bucket's access policy deserves the same care as the values themselves.</p>
+</div>
+
+<h2 id="apply">3. Apply the platform root</h2>
+
+<pre><code>make tf-init     <span class="c"># generates terraform/backend.hcl from .env, then terraform init</span>
+make tf-plan     <span class="c"># read this before applying</span>
+make tf-apply    <span class="c"># PRIVILEGED — creates IAM roles</span></code></pre>
+
+<p><code>make tf-init</code> writes <code>terraform/backend.hcl</code> from <code>.env</code> plus the
+account id resolved at run time, so even the state bucket name is never hand-written or committed.</p>
+
+<div class="note">
+  <span class="label">Federated sessions expire mid-apply</span>
+  <p>If your login issues short-lived tokens, re-authenticate immediately before
+  <code>tf-apply</code> and keep applies small. An apply that dies on an expired token is
+  recoverable — the state is in S3 and locked — but it is an avoidable annoyance.</p>
+</div>
+
+<p>When it succeeds, <code>make tf-output</code> prints what the next slice consumes, including
+<code>storage_root</code> — the value a manifest's <code>outputs.bucket</code> will take.</p>
+
+<h2 id="roles">4. Who applies what</h2>
+
+<p>At many sites only certain people may create IAM roles, and role creation carries naming and
+permissions-boundary requirements. Rather than treat that as an obstacle, the Terraform is split
+along it.</p>
+
+<div class="tw">
+<table>
+<thead><tr><th>Root</th><th>Creates</th><th>Applied by</th><th>How often</th></tr></thead>
+<tbody>
+<tr><td><code>terraform/platform/</code></td><td>IAM roles, bucket, ECR, secret container</td><td>The account owner</td><td>Rarely</td></tr>
+<tr><td><code>terraform/deployment/</code></td><td>Lambda, task definitions, budgets. <strong>No IAM</strong></td><td>Anyone with bucket write</td><td>Every image</td></tr>
+</tbody>
+</table>
+</div>
+
+<p>Two state keys, not one, so the bucket prefixes can carry different permissions: a deployer can
+neither read nor clobber platform state. This is what makes "add a selector" an unprivileged
+operation — a new scorer is a new image and a <code>deployment/</code> apply, and touches no role.</p>
+
+<div class="key">
+  <span class="label">A new selector is code, not configuration</span>
+  <p>Scorers resolve through entry points read from installed metadata, so a <em>new</em> scorer
+  class must be in the image: rebuild, push, apply <code>deployment/</code>. Choosing among
+  <em>registered</em> scorers by name is a manifest edit and needs no deploy at all. Both sides of
+  that line are in <a href="../decisions/ADR-0002-terraform-manifest-boundary.md">ADR-0002</a>.</p>
+</div>
+
+<h2 id="site">5. Site requirements</h2>
+
+<p>The whole mechanism is two Terraform variables with no defaults, filled from <code>.env</code>,
+consumed at the point of use:</p>
+
+<pre><code><span class="k">resource</span> <span class="k">"aws_iam_role"</span> <span class="k">"lambda"</span> {
+  name                 = <span class="k">"${var.role_name_prefix}stratum-${var.deployment}-lambda"</span>
+  permissions_boundary = local.boundary       <span class="c"># null when the site imposes none</span>
+  assume_role_policy   = data.aws_iam_policy_document.assume[<span class="k">"lambda"</span>].json
+}</code></pre>
+
+<p>A second site is a second <code>.env</code>, selected with <code>STRATUM_ENV=…</code>. If EC2 is
+ever needed, its site-specific parts — AMI or SSM parameter name, instance profile, VPC and subnet
+ids, Session Manager configuration — are more variables of the same kind, not a new mechanism.</p>
+
+<h2 id="secret">6. The Earthdata credential</h2>
+
+<p>There are <strong>two independent credential chains</strong> in a cloud run, and only one of them
+is yours. Confusing them is the most common early mistake.</p>
+
+<div class="tw">
+<table>
+<thead><tr><th></th><th>Your AWS identity</th><th>NASA Earthdata</th></tr></thead>
+<tbody>
+<tr><td>Issued by</td><td>Your account</td><td>NASA URS / the DAAC</td></tr>
+<tr><td>Reaches</td><td>Your bucket, ECR, Lambda</td><td><code>s3://lp-prod-protected/…</code> — the granules</td></tr>
+<tr><td>How a task gets it</td><td>Its role, automatically</td><td>Fetched at run time from Secrets Manager, then exchanged</td></tr>
+<tr><td>Lifetime</td><td>Refreshed by the SDK</td><td><strong>~1 hour, and nothing refreshes it for you</strong></td></tr>
+</tbody>
+</table>
+</div>
+
+<p>Over HTTPS the Earthdata username and password are the whole story. For <strong>direct S3 access
+in-region</strong> the password is never used against S3: the DAAC's credentials endpoint is called
+with Earthdata authentication and returns <em>temporary AWS credentials belonging to NASA</em>,
+scoped to that bucket, valid about an hour. Those read the granules.</p>
+
+<div class="warn">
+  <span class="label">The value never passes through Terraform</span>
+  <p>Terraform creates the secret <em>container</em> and the policy that lets a role read it. There
+  is deliberately no version resource — its absence is the mechanism. Anything passed through
+  Terraform lands in state, and state lives in the bucket from step 2. Populate the value out of
+  band with <code>aws secretsmanager put-secret-value</code>.</p>
+</div>
+
+<p>The one-hour expiry is why the orchestrator never reads granules — the workers do, and no worker
+runs past Lambda's 15-minute ceiling, so nothing on this path ever needs to refresh a NASA
+credential mid-read.</p>
+
+<h2 id="next">What comes next</h2>
+
+<p>The platform above is the first of four steps. Each is useful on its own, and none needs EC2.</p>
+
+<div class="tw">
+<table>
+<thead><tr><th>Step</th><th>Orchestrator</th><th>Work</th><th>Trigger</th><th>Status</th></tr></thead>
+<tbody>
+<tr><td>S3 storage root</td><td>your laptop</td><td>your laptop</td><td>you</td><td><span class="chip chip-open">not started</span></td></tr>
+<tr><td>Image and Lambda worker</td><td>your laptop</td><td><strong>Lambda</strong></td><td>you</td><td><span class="chip chip-open">not started</span></td></tr>
+<tr><td>Detached orchestrator</td><td><strong>Fargate</strong></td><td>Lambda</td><td>you</td><td><span class="chip chip-open">not started</span></td></tr>
+<tr><td>Scheduled runs</td><td>Fargate</td><td>Lambda</td><td><strong>EventBridge</strong></td><td><span class="chip chip-open">not started</span></td></tr>
+</tbody>
+</table>
+</div>
+
+<p>The second row is the one that matters: a genuine cloud-native run, with every work item
+executing in Lambda, orchestrated from a laptop and needing no orchestration infrastructure at all.
+Only the third row introduces a container that is not a worker.</p>
+
+<p>Once the storage root exists, pointing a run at the deployment is a one-field change — the
+executor is never a manifest field, so the same science runs in both places:</p>
+
+<pre><code><span class="k">outputs</span>:
+  <span class="k">bucket</span>: s3://stratum-dev-&lt;account-id&gt;/     <span class="c"># was: ./out</span></code></pre>
+
+<h2 id="teardown">Teardown</h2>
+
+<p><code>terraform destroy</code> deliberately will <strong>not</strong> take the data bucket: it
+carries <code>prevent_destroy</code>, because the cache is expensive to rebuild and the products are
+the deliverable. A genuinely clean slate needs a manual step, which is the intended friction.
+Everything else in a deployment is reconstructible from this repository — which is what makes an
+experimental deployment safe to tear down at all.</p>
+
+</div>
+<nav class="pager" aria-label="Pagination"></nav>
+<footer class="site">
+  Specified in <a href="../specs/08-execution.md"><code>specs/08-execution.md</code></a>,
+  <a href="../decisions/ADR-0002-terraform-manifest-boundary.md">ADR-0002</a>
+</footer>
+</main>
+</div>
+<script src="../assets/stratum.js"></script>
+</body>
+</html>

@@ -35,7 +35,7 @@ them.</p>
 <tbody>
 <tr><td><code>local</code></td><td>A process pool on this machine. <strong>Default.</strong></td><td>Development, a zone, a few tiles, anything you want to debug</td></tr>
 <tr><td><code>slurm</code></td><td>A job array on a shared filesystem</td><td>An institutional cluster you already have an allocation on</td></tr>
-<tr><td><code>aws</code></td><td>Step Functions, fanning out to Lambda and Batch</td><td>Continental or global runs; bursty campaigns with nothing to keep warm</td></tr>
+<tr><td><code>aws</code></td><td>Fans out to Lambda, one invocation per work item</td><td>Continental or global runs; bursty campaigns with nothing to keep warm</td></tr>
 </tbody>
 </table>
 </div>
@@ -132,34 +132,83 @@ running single-threaded wastes three of them for the whole regrid phase.</p>
 
 <h2 id="aws">AWS</h2>
 
-<p>For runs where the fan-out is the point. Serverless is right for the two cheap stages and wrong
-for the three that carry the data, so the answer is a split rather than a choice.</p>
+<p>For runs where the fan-out is the point. The unit of work is a block, not a tile, and blocks are
+sized so that the work fits a serverless worker — which turns out to settle the architecture.</p>
+
+<div class="key">
+  <span class="label">Standing one up</span>
+  <p>This section is what the AWS executor <em>is</em>. <a href="deploying.html">Deploying to
+  AWS</a> is how you build one: the private <code>.env</code>, the state bucket, the platform
+  Terraform root, and who is allowed to apply which part.</p>
+</div>
+
+<h3 id="fits">Everything fits Lambda</h3>
+
+<p>Measured from the reference archive run — one tile, eight months, 33 granules — against Lambda's
+ceilings of 15 minutes, 10&nbsp;GB of memory and 10&nbsp;GB of <code>/tmp</code>:</p>
 
 <div class="tw">
 <table>
-<thead><tr><th>Plane</th><th>Service</th><th>Stages</th><th>Profile</th></tr></thead>
+<thead><tr><th>Stage</th><th>Items</th><th>Total</th><th>Worst single item</th><th>Headroom</th></tr></thead>
 <tbody>
-<tr><td><strong>Control</strong></td><td>Step Functions + Lambda</td><td>1, 5, all cache probes</td><td>Seconds, hundreds of MB, thousands of invocations</td></tr>
-<tr><td><strong>Data</strong></td><td>AWS Batch on EC2 Spot</td><td>2, 3, 4 when large</td><td>Minutes to hours, GBs of RAM, GDAL in the image</td></tr>
-<tr><td><strong>Either</strong></td><td>Routed per work item</td><td>2, 3, 4 when small</td><td>Blocks are sized so most work fits Lambda</td></tr>
+<tr><td>plan</td><td>1</td><td>93&nbsp;s</td><td>93&nbsp;s, stages 1.55&nbsp;GB to <code>/tmp</code></td><td>10&times;</td></tr>
+<tr><td>regrid</td><td>33</td><td>99&nbsp;s</td><td>19&nbsp;s per granule plus its download</td><td>22&times;</td></tr>
+<tr><td>resolve</td><td>146</td><td>6&nbsp;s</td><td>~0.5&nbsp;s per 720&times;720 block</td><td>900&times;</td></tr>
+<tr><td>reduce</td><td>25</td><td>21&nbsp;s</td><td>~0.5&nbsp;s per block</td><td>300&times;</td></tr>
+<tr><td>publish</td><td>1</td><td>4&nbsp;s</td><td>~1.6&nbsp;s per tile</td><td>225&times;</td></tr>
 </tbody>
 </table>
 </div>
 
-<p>Placement is a routing decision the planner makes from measured properties, not a static
-configuration:</p>
+<p>Memory is not close either: a whole-tile GLT is 0.14&nbsp;GB and the compute unit is a block.
+Three consequences, each of which removes work:</p>
 
-<pre><code><span class="k">def</span> route(item, plan) -&gt; Literal[<span class="k">"lambda"</span>, <span class="k">"batch"</span>]:
-    <span class="k">if</span> plan.capability == <span class="k">"tile"</span>:       <span class="k">return</span> <span class="k">"batch"</span>   <span class="c"># needs a global view</span>
-    <span class="k">if</span> item.est_peak_bytes &gt; 7 * GB:    <span class="k">return</span> <span class="k">"batch"</span>
-    <span class="k">if</span> item.est_seconds    &gt; 600:       <span class="k">return</span> <span class="k">"batch"</span>   <span class="c"># 15-min ceiling, with margin</span>
-    <span class="k">if</span> item.est_bytes_read &gt; 8 * GB:    <span class="k">return</span> <span class="k">"batch"</span>
-    <span class="k">return</span> <span class="k">"lambda"</span></code></pre>
+<ul>
+<li><strong>No Batch</strong>, and therefore no EC2 to provision.</li>
+<li><strong>No router.</strong> A <code>route()</code> function exists to choose between Lambda and
+Batch; with one destination there is no choice, so the per-stage cost constants it would need stop
+being on the critical path.</li>
+<li><strong>No state machine</strong>, for the reason below.</li>
+</ul>
+
+<p>This is a property of this workload, not a general result. A continental run will exceed fifteen
+minutes somewhere — most likely in plan, which is why plan is routed like any other work item and
+checkpoints per-tile work lists as it goes. Batch returns then, on Fargate, so the deployment stays
+free of EC2.</p>
+
+<h3 id="fanout">Inline fan-out</h3>
+
+<p>The <code>aws</code> executor walks the stages in order and invokes one Lambda per work item,
+concurrently, collecting outcomes. That is the shape <code>executors/local.py</code> already has —
+per stage, submit every item, collect per-item outcomes, fail all-or-nothing — with a thread pool
+over <code>lambda:InvokeFunction</code> in place of a process pool.</p>
+
+<p><strong>The orchestrator is not infrastructure.</strong> It is the CLI, so it runs wherever the
+CLI runs: on a laptop, which needs nothing deployed at all, or in a Fargate task when a run should
+survive a closed laptop. Identical code either way.</p>
+
+<div class="tw">
+<table>
+<thead><tr><th></th><th>Inline fan-out</th><th>Step Functions</th></tr></thead>
+<tbody>
+<tr><td>IAM roles</td><td>~3</td><td>~5+, including Distributed Map</td></tr>
+<tr><td>Orchestration logic</td><td>Python, debuggable locally</td><td>ASL and JSONata</td></tr>
+<tr><td>Runs from a laptop</td><td>Yes</td><td>No</td></tr>
+<tr><td>Retry and backoff</td><td>Ours — content addressing makes retry safe</td><td>Managed</td></tr>
+<tr><td>Per-item outcomes</td><td><code>work/{stage}.results.jsonl</code>, already written</td><td><code>ResultWriter</code></td></tr>
+<tr><td>Survives orchestrator death</td><td>No — but a resumed run is nearly all cache hits</td><td>Yes</td></tr>
+</tbody>
+</table>
+</div>
+
+<p>The first row decides it wherever IAM role creation is a rationed privilege. A quieter benefit:
+the orchestrator never reads granules — the workers do — and no worker runs past fifteen minutes, so
+the one-hour Earthdata credential expiry never arises on this path.</p>
 
 <h3 id="image">The container image</h3>
 
 <p>One image, two entrypoints: a Lambda Runtime Interface Client entrypoint and the same plain CLI
-you run locally. That is what keeps the three executors honest — identical code, so a stage can be
+you run locally. That is what keeps the executors honest — identical code, so a stage can be
 reproduced on a laptop from its <code>.inputs.json</code> with no AWS involvement.</p>
 
 <p>Lambda <strong>container images</strong> are required, not zip layers: layers cap at 250 MB
@@ -178,7 +227,13 @@ Container image Lambdas allow 10 GB.</p>
 </table>
 </div>
 
-<h3 id="state-machine">The state machine</h3>
+<h3 id="state-machine">Step Functions, when it earns its place</h3>
+
+<p>Deferred, not rejected. It becomes the right answer at item counts beyond a thread pool's
+comfort, or for a delivered product that needs a managed audit trail — <em>not</em> for scheduling,
+which is an EventBridge rule against the orchestrator task and needs no state machine. Adopting it
+later replaces the orchestrator and nothing else, because the work lists are already the S3 JSONL
+that <code>ItemReader</code> consumes.</p>
 
 <pre><code>Plan                <span class="c"># Lambda: manifest -&gt; frozen index -&gt; work list -&gt; S3</span>
 BudgetGate          <span class="c"># Choice: within budget? else -&gt; ApprovalWait (task token)</span>
@@ -190,9 +245,6 @@ EpochMap            <span class="c"># Distributed Map over epochs</span>
 ReduceMap           <span class="c"># Distributed Map over (tile x block)</span>
 PublishMap          <span class="c"># Distributed Map over tiles: stitch, COG, render, STAC</span>
 Finalize            <span class="c"># provenance record, run report, notification</span></code></pre>
-
-<p>Distributed Map is the same work-list idea as a SLURM array: it reads its item list from an S3
-object rather than from execution state, and fans out to 10,000 concurrent children.</p>
 
 <div class="tw">
 <table>

@@ -61,8 +61,10 @@
 <tr><td>Local executor and CLI</td><td><span class="chip chip-locked">built</span></td><td>Spawn-context process pool, per-item outcomes, budget gate, exit codes. See <a href="reference/cli.html">Commands</a> for what each command supports.</td></tr>
 <tr><td>Aux data (<code>AuxAccessor</code>)</td><td><span class="chip chip-open">not started</span></td><td>The accessor exists and every alias raises; an <code>aux</code> block or a plugin with <code>required_aux</code> is refused at validation.</td></tr>
 <tr><td>SLURM executor</td><td><span class="chip chip-open">not started</span></td><td><code>stratum exec</code>, the array-task entrypoint, exists</td></tr>
-<tr><td>Step Functions orchestration</td><td><span class="chip chip-open">not started</span></td><td>Blocked on AWS account provisioning</td></tr>
-<tr><td>Terraform deployment</td><td><span class="chip chip-open">not started</span></td><td>Blocked on AWS account provisioning</td></tr>
+<tr><td>Terraform &mdash; platform root</td><td><span class="chip chip-locked">built</span></td><td><code>terraform/platform/</code>: data bucket, ECR repository, the Earthdata secret container and three IAM roles; <code>terraform validate</code> passes. Site requirements arrive as two variables with no defaults, filled from a gitignored <code>.env</code>, so nothing tracked names an account, profile, bucket or site rule. <a href="guide/deploying.html">Deploying to AWS</a> is the runbook.</td></tr>
+<tr><td>Terraform &mdash; deployment root</td><td><span class="chip chip-open">not started</span></td><td>The unprivileged root: Lambda function, task definitions, budgets. Creates no IAM, so anyone may apply it.</td></tr>
+<tr><td><code>aws</code> executor &mdash; inline fan-out</td><td><span class="chip chip-open">not started</span></td><td>A thread pool over <code>lambda:InvokeFunction</code>, the same shape as <code>executors/local.py</code>. Blocked on the S3 storage root, not on AWS.</td></tr>
+<tr><td>Step Functions orchestration</td><td><span class="chip chip-open">deferred</span></td><td>Decided against for the first cut: the inline fan-out needs ~3 IAM roles rather than 5+ and runs from a laptop. It becomes right at item counts beyond a thread pool, or for a delivered product needing a managed audit trail &mdash; not for scheduling. Additive: the work lists are already the S3 JSONL <code>ItemReader</code> consumes.</td></tr>
 </tbody>
 </table>
 </div>
@@ -93,7 +95,7 @@
 <tr><td>Example grid</td><td>One arcsecond, 3600 cells per degree, 1&deg; tiles, <code>block_size: 720</code>. Tiles are cut on the cell lattice by cell-centre containment, so any resolution aligns; one that divides the tile keeps every tile the same shape</td></tr>
 <tr><td>Band aliases</td><td><code>band:</code> is a 0-based index, validated against the reader at plan time; <code>match:</code> selects by a reader-reported attribute. EMIT L1B OBS view zenith is band 2, solar zenith band 4</td></tr>
 <tr><td>Plan routing</td><td>The plan is routed like any work item, by manifest-implied size, and checkpoints per-tile work lists</td></tr>
-<tr><td>Execution</td><td>Step Functions + Lambda control plane, Batch on Spot data plane, routed per work item</td></tr>
+<tr><td>Execution</td><td>All-serverless: one Lambda invocation per work item, fanned out inline by the CLI. No Batch and no EC2 &mdash; every work item in the reference run clears Lambda's ceilings by 10&times; to 900&times;, so there is no placement decision to make. Batch, on Fargate, returns only when an item exceeds a ceiling</td></tr>
 <tr><td>Packaging</td><td>Container image Lambdas with a shared CLI entrypoint; not zip layers</td></tr>
 <tr><td>Config boundary</td><td>Terraform owns the platform; the manifest owns the science</td></tr>
 <tr><td>Tech stack</td><td><a href="decisions/index.html">ADR-0001</a></td></tr>
@@ -170,7 +172,8 @@ until the in-region mode and its one-hour credential refresh exist.</p>
 <tr><td>Reduce over class labels, or over continuous quantities first?</td><td>The shape of the baseline reducer</td><td>Science lead</td></tr>
 <tr><td>Zone selection for the pilot</td><td>The zone registry (<code>examples/zones.yaml</code>) holds approximate boxes; confirm before a delivered run</td><td>Science team</td></tr>
 <tr><td>Confirm the 7-column edge trim and slit-dust column counts</td><td>Built-in mask defaults in <code>stratum_emit</code>; <code>SlitDust</code> refuses until confirmed</td><td>Science lead</td></tr>
-<tr><td>AWS account and quota; how the Earthdata credential reaches a cloud worker</td><td>All cloud work. Blocks nothing locally: a <code>~/.netrc</code> or environment credential already serves laptop runs from the archive.</td><td>—</td></tr>
+<tr><td>Whether regrid and resolve are bit-deterministic, so two workers racing on one cache key cannot disagree</td><td>Nothing &mdash; readers open only the members the winning sidecar names. Worth verifying rather than assuming.</td><td>SDS engineering</td></tr>
+<tr><td>Image architecture: add <code>linux-aarch64</code> to the pixi platforms, or cross-build <code>linux/amd64</code> under emulation</td><td>The container image. Lambda and Fargate both support arm64 and it is cheaper, but every conda dependency needs a linux-aarch64 build.</td><td>—</td></tr>
 </tbody>
 </table>
 </div>
