@@ -93,7 +93,11 @@ snapshot:                         # what one month's snapshot holds, and how mon
 
 outputs:
   bucket: ./out                   # the storage root: assets/, cache/, runs/, products/ hang off it
-  formats: [cog]                  # cloud-optimised GeoTIFFs
+  # gtiff, not cog, because this example exists to be looked at. A paletted COG is not readable
+  # by macOS ImageIO - Preview and sips both refuse mineral_1.tif, while the same band written as
+  # a plain tiled GeoTIFF opens fine. Delivered products should use `cog`; this one trades the
+  # overview pyramid for being openable by whatever is already on a reviewer's machine.
+  formats: [gtiff]
   stac: true                      # write a STAC item per product and a collection per run
   render:
     mineral_1:
