@@ -543,6 +543,47 @@ generated file is what executes, and it is gitignored because the root names the
   scheduled runs, which need <code>-p time.start=…</code>.</p>
 </div>
 
+<h2 id="watching">Watching a run</h2>
+
+<p>Three places, answering different questions.</p>
+
+<div class="tw">
+<table>
+<thead><tr><th>Where</th><th>Answers</th></tr></thead>
+<tbody>
+<tr><td>Your terminal</td><td>How far along each stage is. The runner draws a progress bar per stage as items complete</td></tr>
+<tr><td><code>work/{stage}.results.jsonl</code> in the run prefix</td><td>What happened to each item: its key or its error and traceback, whether it was a cache hit, how long it took. One line per item, written whether or not the stage succeeded</td></tr>
+<tr><td>CloudWatch Logs</td><td>What a <em>worker</em> did. Everything a Lambda wrote, including the traceback behind a failed item</td></tr>
+</tbody>
+</table>
+</div>
+
+<pre><code><span class="c"># follow the workers live</span>
+aws logs tail /aws/lambda/&lt;function&gt; --follow --profile <span class="k">$AWS_PROFILE</span>
+
+<span class="c"># just the failures, over the last hour</span>
+aws logs filter-log-events --log-group-name /aws/lambda/&lt;function&gt; \
+  --filter-pattern <span class="k">"ERROR"</span> --start-time <span class="k">$(( ($(date +%s) - 3600) * 1000 ))</span></code></pre>
+
+<p>The log group is created by Terraform rather than left to the function, which would create it
+with no retention and never expire; <code>log_retention_days</code> sets it, defaulting to 30.
+<code>make infra-output</code> prints the function name.</p>
+
+<div class="note">
+  <span class="label">A failed item is a queryable record, not a log grep</span>
+  <p>Content addressing makes a retry safe, so re-running the same manifest recomputes only the
+  items that failed &mdash; everything else is a cache hit. The results file is what tells you
+  which those were. Reach for CloudWatch when you need the traceback behind one of them, not to
+  find out which failed.</p>
+</div>
+
+<div class="warn">
+  <span class="label">`stratum status` takes a path, not an s3:// run id</span>
+  <p><code>--run</code> resolves a directory on this machine, so against a bucket root it needs the
+  path of the local mirror rather than the run id. Addressing a run in a bucket by its id is not
+  built.</p>
+</div>
+
 <h2 id="guardrails">Guardrails worth having on day one</h2>
 
 <p>All cheap now and awkward to retrofit onto a run already in flight.</p>
