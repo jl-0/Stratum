@@ -164,6 +164,45 @@ connection:</p>
 <p>Direct S3 access remains open: <code>prefer: direct</code> and <code>s3://</code> assets refuse
 until the in-region mode and its one-hour credential refresh exist.</p>
 
+<h3 id="multi-tile">Multi-tile run</h3>
+
+<p>The third validation target is fan-out over tiles: <code>examples/emit-cmr-cuprite/</code>, the
+Cuprite&nbsp;/&nbsp;Goldfield district as a <strong>2 wide x 3 tall set of quarter-degree
+tiles</strong>. It is the archive run's manifest with two fields changed &mdash;
+<code>tile_size: 0.25</code> and an <code>aoi.bbox</code> in place of an explicit tile list &mdash;
+so a difference in the result is a difference in the ground, not in the configuration. Measured
+2026-09-14 on the same laptop:</p>
+
+<div class="tw">
+<table>
+<thead><tr><th>Step</th><th>Result</th></tr></thead>
+<tbody>
+<tr><td><code>stratum index build</code></td><td>3.8 s, 44 rows / 22 granules, no login, nothing downloaded</td></tr>
+<tr><td>Fan-out</td><td>6 tiles, 8 epochs, 24 blocks; 104 regrid + 118 resolve + 24 reduce + 6 publish = <strong>252 work items</strong> (the single-tile run is 205)</td></tr>
+<tr><td><code>stratum run</code></td><td>3 min 40 s total: plan about 42 s (23 files, 1.18 GB, 0 granules dropped by the cloud filter), regrid 155 s, resolve 5 s, reduce 15 s, publish 3 s. 3.7 GB and 44 files in <code>out/assets</code></td></tr>
+<tr><td>Cost of tiling</td><td>A GLT is built per granule <em>per tile</em>, so 22 granules become 104 regrid items &mdash; 4.7 tiles touched each. Downloads track the area and time range, not the tile count: a granule landing in four tiles is fetched once</td></tr>
+<tr><td>Products</td><td>Six 900 &times; 900 products, six STAC items, one collection. Every cell of all six observed at least once; 80.8&nbsp;% reach the vote threshold across 35 classes (the Nevada tile reaches 32.9&nbsp;%) &mdash; exposed, arid, altered ground with little to reject</td></tr>
+<tr><td>Tile seams</td><td>Verified on the cell lattice: columns <code>[225000, 225900)</code> and <code>[225900, 226800)</code>, rows <code>[458100, 459000)</code>, <code>[459000, 459900)</code>, <code>[459900, 460800)</code>. Contiguous, no overlap, no gap, every tile exactly 900 cells. The written GeoTIFFs' <code>bounds</code> disagree at one seam by 1.4e-14 degrees, which is float accumulation in the comparison, not a gap</td></tr>
+</tbody>
+</table>
+</div>
+
+<div class="note">
+  <span class="label">macOS Preview reads some product bands and not others</span>
+  <p><code>outputs.formats: [gtiff]</code> exists so a product can be opened with what is already on
+  a reviewer's machine, and at 900 &times; 900 that only half works: <code>mineral_1</code>,
+  <code>mineral_1_runner_up</code>, <code>depth_1</code> and <code>depth_1_spread</code> open on all
+  six tiles, while <code>mineral_1_rgba</code> opens on one, and
+  <code>mineral_1_agreement</code>, <code>n_epochs</code> and <code>depth_1_n</code> are mostly
+  refused. The files are valid &mdash; GDAL, rasterio and QGIS read every one. The trigger is macOS
+  ImageIO's handling of <strong>internally tiled</strong> TIFFs: rewriting any refused file with
+  <code>TILED=NO</code> and the same deflate compression makes it open, and so does
+  <code>n_epochs</code> from the single-tile run. Which tiled files it accepts is data-dependent
+  and not explained by size, dtype, compression or whether the internal tile size divides the
+  raster. Open whether <code>gtiff</code> should therefore write strips rather than tiles;
+  <code>cog</code> is tiled by definition and unaffected.</p>
+</div>
+
 <h2 id="blocking">Open and blocking</h2>
 
 <div class="tw">

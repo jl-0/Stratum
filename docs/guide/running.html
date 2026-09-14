@@ -44,8 +44,9 @@ it.</p>
   directory instead of a bucket: <code>outputs.bucket</code> is a path, relative to the manifest,
   and <code>cache/</code>, <code>runs/</code> and <code>products/</code> are created under it.</p>
   <p>Bigger runs change <em>where the work is dispatched</em>, not the code, the manifest, or the
-  result: <code>--executor slurm</code> or <code>--executor aws</code>. Neither is built yet; both
-  refuse with their spec section. See <a href="scaling.html">Running at scale</a>.</p>
+  result. <code>--executor aws</code> fans the same work items out to Lambda and needs a deployment
+  and an <code>s3://</code> root; <code>--executor slurm</code> is specified but not built and
+  refuses with its spec section. See <a href="scaling.html">Running at scale</a>.</p>
 </div>
 
 <h2 id="manifest">A minimal manifest</h2>
@@ -418,13 +419,15 @@ not built yet; today, re-running the same manifest against the same index gives 
 <p>Nothing about the pipeline changes; only the dispatcher does. Blocks are already sized to fit a
 single worker, so the same code path runs everywhere.</p>
 
-<pre><code>stratum run -m manifest.yaml --executor slurm --max-concurrent 64
-stratum run -m manifest.yaml --executor aws</code></pre>
+<pre><code>stratum run -m manifest.yaml --executor aws                        <span class="c"># built</span>
+stratum run -m manifest.yaml --executor slurm --max-concurrent 64  <span class="c"># specified; not built</span></code></pre>
 
 <p>The cache is content-addressed and shared, so a run you started locally and stopped can be
-finished on a cluster — completed items are hits and get skipped. Neither executor is built yet;
-what exists is the seam they will use, <code>stratum exec --plan DIR --stage STAGE --index N</code>,
-which runs one work item and is what an array task will call. See
+finished in the cloud — completed items are hits and get skipped. Both executors dispatch through
+one seam, <code>stratum exec --plan DIR --stage STAGE --index N</code>, which runs a single work
+item: <code>aws</code> calls it inside a Lambda invocation, and a job array would call it as a task.
+<code>aws</code> needs the infrastructure in <a href="deploying.html">Deploying to AWS</a>;
+<code>slurm</code> is refused with its spec section cited. See
 <a href="scaling.html">Running at scale</a>.</p>
 
 </div>

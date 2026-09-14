@@ -235,7 +235,10 @@ trial-data/        local granules for trial runs - git-ignored, never committed
 `examples/emit-cmr-nevada/` is the worked example in the repository: tile (-118, 41) from CMR,
 January-August 2026, monthly votes, granules downloaded on first touch. Its `README.md` carries
 the credentials walk-through and the measured download volume and timings; its `index/`, `out/`
-(5 GB of assets after a run) are git-ignored. `examples/zones.yaml` is the AOI zone registry.
+(5 GB of assets after a run) are git-ignored. `examples/emit-cmr-cuprite/` is the same science over
+a 2 x 3 tile set - Cuprite/Goldfield at `tile_size: 0.25` with an `aoi.bbox` instead of an explicit
+tile list - and exists to exercise multi-tile fan-out, publish and STAC.
+`examples/zones.yaml` is the AOI zone registry.
 The first-slice trial over the same tile from a local directory (`examples/trial-nevada/`, with
 the SpectralUtil `build_obs_nc` parity script) is **not tracked**; its measurements live in
 `docs/notes/heritage.md`.

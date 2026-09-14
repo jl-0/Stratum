@@ -32,6 +32,7 @@ guide/
   plugins.html            authoring guide for all five science hooks
   caching.html            what invalidates what; inspecting the cache
   scaling.html            local, SLURM and AWS executors; credentials; Terraform's role
+  deploying.html          standing the AWS deployment up and running against it
 reference/
   manifest.html           every manifest field                        [generation candidate]
   types.html              the types plugins receive                   [generation candidate]
@@ -112,6 +113,7 @@ account is in [`notes/heritage.md`](notes/heritage.md).
 |---|---|
 | [0001 — Tech stack](decisions/ADR-0001-tech-stack.md) | Python, pixi, xarray, DuckDB, Step Functions, Terraform |
 | [0002 — Terraform/manifest boundary](decisions/ADR-0002-terraform-manifest-boundary.md) | Platform vs science configuration |
+| [0003 — Image build and digest](decisions/ADR-0003-image-build-and-digest.md) | One image from `pixi.lock`; `stratum-emit` as a separate distribution; deploy by digest |
 
 ## Notes
 
@@ -119,6 +121,7 @@ account is in [`notes/heritage.md`](notes/heritage.md).
 |---|---|
 | [heritage.md](notes/heritage.md) | Prior art, and which observations forced which design choices |
 | [2026-08-28-mines-tagup.md](notes/2026-08-28-mines-tagup.md) | External group building the same thing; detector-edge numbers, FRCOV, the bare-earth scorer |
+| [2026-09-02-first-slice-plan.md](notes/2026-09-02-first-slice-plan.md) | The build contract the first slice was written against |
 
 > **Everything under `docs/` is published.** Pages serves this directory from `main`, and the site
 > is public even while the repository is not. `notes/` is no exception — it is a note in the sense

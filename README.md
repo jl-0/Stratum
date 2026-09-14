@@ -11,7 +11,10 @@ NASA's archive — see [`.devcontainer/README.md`](.devcontainer/README.md).
 > streaming scorer, the built-in reducer, published COGs with STAC and provenance — exists and is
 > tested, and so does a run from NASA's CMR catalogue with granules downloaded on first touch:
 > see [`examples/emit-cmr-nevada/README.md`](examples/emit-cmr-nevada/README.md) for the credentials setup
-> and the measured sizes and times. The cloud and cluster paths are specified but not built. See
+> and the measured sizes and times, and [`examples/emit-cmr-cuprite/README.md`](examples/emit-cmr-cuprite/README.md)
+> for the same science over a 2 x 3 tile set. The cloud path is built — a Terraform deployment and
+> `--executor aws`, which fans the work out to Lambda ([`docs/guide/deploying.html`](docs/guide/deploying.html));
+> the cluster path is specified but not built. See
 > [`docs/status.html`](docs/status.html). "Stratum" is a working name.
 
 ## What this is

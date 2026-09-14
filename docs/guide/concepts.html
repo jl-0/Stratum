@@ -181,7 +181,10 @@ degrees confused;</li>
 <pre><code>{grid_id}/{tile_x}_{tile_y}          <span class="c">e.g.  emit30/-111_32</span></code></pre>
 
 <p>Tiles need not cover the world. An area of interest resolves to the set of tiles intersecting
-it, so a global EMIT run should clip to the coverage band rather than iterate dead cells.</p>
+it, so a global EMIT run should clip to the coverage band rather than iterate dead cells.
+<code>examples/emit-cmr-cuprite/</code> is that resolution worked through: one
+<code>aoi.bbox</code> and a quarter-degree <code>tile_size</code> become six tiles, six products
+and six STAC items, with no other change from the single-tile example beside it.</p>
 
 <h3 id="halos">Halos</h3>
 
