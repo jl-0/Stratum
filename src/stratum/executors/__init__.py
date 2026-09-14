@@ -16,6 +16,32 @@ from stratum.executors.worker import exec_item, load_cached, product_key
 EXECUTORS: tuple[str, ...] = ("local", "aws")
 
 
+def executor_suits_root(manifest_path: str, executor: str) -> None:
+    """Refuse an executor that cannot reach this manifest's storage root, BEFORE planning.
+
+    The pairing is one-directional: `aws` needs a bucket root because a Lambda cannot read the
+    submitting machine's filesystem, while `local` runs against either. That asymmetry is why the
+    executor is a flag and not a manifest field (08 section 1) - an `s3://` manifest is runnable
+    both ways, and running one manifest on two executors and diffing the products is how the
+    cloud path is validated at all.
+
+    `aws.run_stage` checks the same thing again from the frozen plan, which is the authoritative
+    check; this one exists so the refusal costs nothing. Planning a catalogue run downloads
+    assets, and being told the root is wrong afterwards is a needless bill.
+    """
+    if executor != "aws":
+        return
+    from stratum.manifest import load_manifest
+    from stratum.storage import parse_s3
+    bucket = load_manifest(manifest_path).outputs.bucket
+    if parse_s3(str(bucket)) is None:
+        raise NotImplementedError(
+            f"--executor aws needs a bucket storage root, but outputs.bucket is {bucket!r}. "
+            "A Lambda cannot read this machine's filesystem: point outputs.bucket at the "
+            "deployment's s3:// root (`make infra-output` prints it), or run with "
+            "--executor local, which works against either (06 section 4, 08 section 1)")
+
+
 def executor_available(name: str) -> None:
     """Refuse an executor this build does not ship, naming the section."""
     if name not in EXECUTORS:
@@ -42,4 +68,5 @@ def run_all(run_dir: Path | str, workers: int | None = None,
 
 
 __all__ = ["EXECUTORS", "ExecutionError", "budget_gate", "exec_item", "executor_available",
+           "executor_suits_root",
            "load_cached", "product_key", "run_all", "run_stage", "stage_runner"]
