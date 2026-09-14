@@ -32,6 +32,7 @@ from stratum.cache import CacheRoot
 from stratum.classes import Remap
 from stratum.plugins import resolve
 from stratum.resolve import AliasBinding, PlanContext, PluginBinding, RoleBinding
+from stratum.storage import Workspace, local_workspace
 from stratum.time import DeliveryPeriod
 from stratum.types import (
     Aggregation,
@@ -226,15 +227,20 @@ def context_to_doc(ctx: PlanContext) -> dict[str, Any]:
     }
 
 
-def context_from_doc(doc: Mapping[str, Any], root: Path) -> PlanContext:
-    """The worker's `PlanContext`: a real `CacheRoot` under `root` and a real `AssetStore`
-    staging remote assets into `asset_cache_for(root)` - `$STRATUM_ASSET_CACHE`, else
+def context_from_doc(doc: Mapping[str, Any], root: Path | Workspace) -> PlanContext:
+    """The worker's `PlanContext`: a real `CacheRoot` over `root` and a real `AssetStore`
+    staging remote assets into `asset_cache_for(...)` - `$STRATUM_ASSET_CACHE`, else
     `{root}/assets` (12 section 4). The store logs in through `stratum.access.auth` on the
-    first https open, never here, so a spawned worker builds this cheaply."""
+    first https open, never here, so a spawned worker builds this cheaply.
+
+    `root` may be a `Workspace`, and is one whenever the storage root is a bucket. The asset
+    cache is always node-local - granule bytes are staged, never stored - so it hangs off the
+    workspace's local path and is not mirrored."""
+    ws = root if isinstance(root, Workspace) else local_workspace(root)
     return PlanContext(
         grid=grid_from_doc(doc["grid"]),
-        cache=CacheRoot(root),
-        store=AssetStore(asset_cache_for(root)),
+        cache=CacheRoot(ws),
+        store=AssetStore(asset_cache_for(ws.path)),
         granules={gid: granule_from_doc(g) for gid, g in doc["granules"].items()},
         roles={name: RoleBinding(**r) for name, r in doc["roles"].items()},
         aliases={name: AliasBinding(**a) for name, a in doc["aliases"].items()},
@@ -275,6 +281,13 @@ class RunPlan:
     def index_hash(self) -> str:
         return str(self.document["index"]["hash"])
 
+    @property
+    def workspace(self) -> Workspace:
+        """The storage root this run reads and writes. A stage that produces something outside
+        the content-addressed cache - a published product tree, the outcome records - pushes it
+        through here; the cache pushes its own artifacts."""
+        return self.context.cache.workspace
+
     def tile(self, tx: int, ty: int) -> TileRef:
         return TileRef(self.context.grid, int(tx), int(ty))
 
@@ -299,12 +312,15 @@ def load_run(run_dir: Path) -> RunPlan:
     if doc.get("plan_schema_version") != PLAN_SCHEMA_VERSION:
         raise PlanError(f"{run_dir / PLAN_NAME}: plan_schema_version "
                         f"{doc.get('plan_schema_version')!r} is not {PLAN_SCHEMA_VERSION!r}")
-    root = Path(doc["root"])
-    ctx = context_from_doc(doc["context"], root)
+    # `root` is the durable name, so a bucket root reconstitutes the same workspace - and the
+    # same mirror directory - in every process that loads this plan. `products_dir` is recorded
+    # durably too and maps back to a local path here.
+    ws = Workspace.for_root(doc["root"])
+    ctx = context_from_doc(doc["context"], ws)
     return RunPlan(
         run_id=doc["run_id"], run_label=doc["run_label"], manifest_hash=doc["manifest_hash"],
-        manifest_path=Path(doc["manifest_path"]), root=root, run_dir=run_dir,
-        products_dir=Path(doc["products_dir"]), context=ctx, outputs=dict(doc["outputs"]),
+        manifest_path=Path(doc["manifest_path"]), root=ws.path, run_dir=run_dir,
+        products_dir=ws.local(doc["products_dir"]), context=ctx, outputs=dict(doc["outputs"]),
         tiles=[TileRef(ctx.grid, int(tx), int(ty)) for tx, ty in doc["tiles"]],
         epochs=[epoch_from_doc(e) for e in doc["epochs"]],
         periods=[period_from_doc(p) for p in doc["periods"]],

@@ -24,6 +24,9 @@ dependencies = [
   "scipy>=1.11",
   "duckdb>=0.10",
   "earthaccess>=0.9",
+  # the storage root may be a bucket (stratum.storage); imported lazily, never on a
+  # local run
+  "boto3>=1.34",
   "netCDF4>=1.6,<1.7.1",
   # spectral-util is NOT listed here: it has no PyPI release, and a non-editable install of
   # the upstream repo ships no subpackages (its pyproject lists packages = ["spectral_util"]
@@ -70,6 +73,7 @@ click = "*"
 pyyaml = "*"
 affine = "*"
 earthaccess = "*"
+boto3 = "*"
 pytest = "*"
 ruff = "*"
 

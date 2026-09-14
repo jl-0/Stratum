@@ -57,7 +57,7 @@ sequenceDiagram
 <thead><tr><th></th><th>The planner</th><th>A worker</th></tr></thead>
 <tbody>
 <tr><td><strong>Runs</strong></td><td>Once per run</td><td>Once per work item &mdash; thousands of times</td></tr>
-<tr><td><strong>Entry</strong></td><td><a class="src" data-sym="def plan_run" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/plan/run.py#L677">plan_run</a></td><td><a class="src" data-sym="def exec_item" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/executors/worker.py#L186">exec_item</a></td></tr>
+<tr><td><strong>Entry</strong></td><td><a class="src" data-sym="def plan_run" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/plan/run.py#L685">plan_run</a></td><td><a class="src" data-sym="def exec_item" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/executors/worker.py#L189">exec_item</a></td></tr>
 <tr><td><strong>Reads</strong></td><td>The manifest, the index, and a handful of real granules</td><td><code>plan.json</code>, one work list line, and the assets that line names</td></tr>
 <tr><td><strong>Decides</strong></td><td>Everything: tiles, epochs, granules, plugins, schema, class lumping, fan-out</td><td>Nothing. It executes a decision already recorded</td></tr>
 <tr><td><strong>Writes</strong></td><td>The run directory</td><td>One cache artifact, and one outcome line</td></tr>
@@ -94,10 +94,10 @@ sequenceDiagram
 <thead><tr><th>Step</th><th>Does</th><th>Code</th></tr></thead>
 <tbody>
 <tr><td>Refuse unknown executors</td><td><code>slurm</code> and <code>aws</code> are declared in the CLI's choices but not shipped; the refusal names the spec section rather than failing obscurely later</td><td><a class="src" data-sym="def executor_available" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/executors/__init__.py#L11">executors:11</a></td></tr>
-<tr><td>Budget gate</td><td>Re-checked here, against the written plan, because <code>plan_run</code> <em>reports</em> an exceeded budget rather than raising — <code>stratum plan</code> should still produce a report you can read</td><td><a class="src" data-sym="def budget_gate" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/executors/local.py#L86">budget_gate</a></td></tr>
-<tr><td>Stage loop</td><td>Strictly sequential over the four stages; parallelism is <em>within</em> a stage. A stage's items are independent by construction</td><td><a class="src" data-sym="for stage in STAGES:" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/executors/local.py#L112">local.py:112</a></td></tr>
+<tr><td>Budget gate</td><td>Re-checked here, against the written plan, because <code>plan_run</code> <em>reports</em> an exceeded budget rather than raising — <code>stratum plan</code> should still produce a report you can read</td><td><a class="src" data-sym="def budget_gate" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/executors/local.py#L87">budget_gate</a></td></tr>
+<tr><td>Stage loop</td><td>Strictly sequential over the four stages; parallelism is <em>within</em> a stage. A stage's items are independent by construction</td><td><a class="src" data-sym="for stage in STAGES:" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/executors/local.py#L113">local.py:112</a></td></tr>
 <tr><td>Pool</td><td><code>spawn</code> context, not <code>fork</code>: each worker imports cleanly and rebuilds its own <code>RunPlan</code>, which is exactly what a SLURM array task or a Lambda would do</td><td><a class="src" data-sym="multiprocessing.get_context" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/executors/local.py#L62">local.py:62</a></td></tr>
-<tr><td>Finalize</td><td>The only step that sees the whole run: the STAC collection over every item, then <code>provenance.json</code>, then an execution section appended to the report</td><td><a class="src" data-sym="def provenance_record" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/executors/local.py#L142">provenance_record</a></td></tr>
+<tr><td>Finalize</td><td>The only step that sees the whole run: the STAC collection over every item, then <code>provenance.json</code>, then an execution section appended to the report</td><td><a class="src" data-sym="def provenance_record" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/executors/local.py#L149">provenance_record</a></td></tr>
 </tbody>
 </table>
 </div>
@@ -112,7 +112,7 @@ sequenceDiagram
 
 <h2 id="plan">3. What planning decides, in order</h2>
 
-<p><a class="src" data-sym="def plan_run" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/plan/run.py#L677">plan_run</a>
+<p><a class="src" data-sym="def plan_run" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/plan/run.py#L685">plan_run</a>
 is about two hundred lines of sequence, and the order is load-bearing.</p>
 
 <div class="tw">
@@ -139,7 +139,7 @@ is about two hundred lines of sequence, and the order is load-bearing.</p>
   <span class="label">Step 8 before step 9 is not an accident</span>
   <p>Swapping them would make an over-budget plan download granules before refusing. The comment
   at
-  <a class="src" data-sym="the budget gate (09 section 4) comes BEFORE" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/plan/run.py#L776">plan/run.py:776</a>
+  <a class="src" data-sym="the budget gate (09 section 4) comes BEFORE" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/plan/run.py#L788">plan/run.py:776</a>
   says so explicitly; treat it as a constraint on any reordering.</p>
 </div>
 
@@ -162,7 +162,7 @@ which is what you ship. A run directory is disposable; the cache is not.</p>
 <h2 id="work-lists">4. The four work lists</h2>
 
 <p>A work item is one JSON object on one line, and it is the entire input to a worker besides
-<code>plan.json</code>. <a class="src" data-sym="def build_work_lists" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/plan/run.py#L904">build_work_lists</a>
+<code>plan.json</code>. <a class="src" data-sym="def build_work_lists" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/plan/run.py#L923">build_work_lists</a>
 emits all four in a single pass over the tiles.</p>
 
 <div class="tw">
@@ -274,7 +274,7 @@ flowchart TB
 
 <h3 id="cache-writes">Why a partial write can never read as a hit</h3>
 
-<p><a class="src" data-sym="def hit(self, key: CacheKey)" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/cache/__init__.py#L80">CacheRoot.hit</a>
+<p><a class="src" data-sym="def hit(self, key: CacheKey)" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/cache/__init__.py#L101">CacheRoot.hit</a>
 requires both the artifact and its <code>.inputs.json</code> sidecar. Both write paths commit the
 artifact first and the sidecar last &mdash; a file via <code>os.replace</code> onto the key path,
 a directory by filling a sibling temp directory and renaming it whole. A worker killed mid-write
@@ -286,8 +286,8 @@ leaves either nothing or a temp name, never a half-artifact that the next run wo
 <table>
 <thead><tr><th>Raised</th><th>Means</th><th>Surfaces as</th></tr></thead>
 <tbody>
-<tr><td><a class="src" data-sym="class PlanError" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/plan/document.py#L55">PlanError</a></td><td>The manifest, the data or the index make the run impossible</td><td>A clean CLI message; nothing is written</td></tr>
-<tr><td><a class="src" data-sym="class BudgetExceeded" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/plan/document.py#L59">BudgetExceeded</a></td><td>Fan-out exceeds the manifest's budget and <code>on_exceed</code> is not <code>warn</code></td><td>Exit 2, with the plan and report still written so you can see <em>why</em></td></tr>
+<tr><td><a class="src" data-sym="class PlanError" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/plan/document.py#L56">PlanError</a></td><td>The manifest, the data or the index make the run impossible</td><td>A clean CLI message; nothing is written</td></tr>
+<tr><td><a class="src" data-sym="class BudgetExceeded" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/plan/document.py#L60">BudgetExceeded</a></td><td>Fan-out exceeds the manifest's budget and <code>on_exceed</code> is not <code>warn</code></td><td>Exit 2, with the plan and report still written so you can see <em>why</em></td></tr>
 <tr><td><code>FileNotFoundError</code> from a handler</td><td>An upstream stage did not run for this item</td><td>One failed outcome record, naming the missing key path and the stage to run</td></tr>
 <tr><td><a class="src" data-sym="class ExecutionError" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/executors/local.py#L37">ExecutionError</a></td><td>One or more items of a stage failed</td><td>The stage stops the run; up to ten failures listed, plus the first traceback in full</td></tr>
 <tr><td><code>FilterError</code></td><td>A <code>granule_filter</code> met missing metadata under <code>on_missing: fail</code></td><td>Wrapped into a <code>PlanError</code> — a policy decision, not a traceback</td></tr>

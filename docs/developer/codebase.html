@@ -202,7 +202,10 @@ months and days only &mdash; no time components.</td><td><a class="src" data-sym
 granule's raw class table: the lumping from raw keys to product ids.</td><td><a class="src" data-sym="class Enumeration" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/classes.py#L74">Enumeration</a></td></tr>
 <tr><td><code>cache/</code></td><td>Content addressing: key construction, the
 <code>.inputs.json</code> sidecar, atomic file and directory writes,
-<code>explain</code>/<code>diff</code>.</td><td><a class="src" data-sym="def key(self, artifact: str, grid_id: str, tile: TileRef" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/cache/__init__.py#L69">CacheRoot.key</a></td></tr>
+<code>explain</code>/<code>diff</code>.</td><td><a class="src" data-sym="def key(self, artifact: str, grid_id: str, tile: TileRef" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/cache/__init__.py#L90">CacheRoot.key</a></td></tr>
+<tr><td><code>storage.py</code></td><td>The storage root, as one object: a local directory, or an
+<code>s3://</code> prefix with a node-local mirror. Everything above it is handed a real
+<code>pathlib.Path</code>, so no stage handles a URI.</td><td><a class="src" data-sym="class Workspace" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/storage.py#L125">Workspace</a></td></tr>
 <tr><td><code>filters.py</code></td><td>The built-in <code>GranuleFilter</code> predicates and the
 <code>on_missing</code> policy machinery. Runs against the index at plan time, never against
 pixels.</td><td><a class="src" data-sym="def apply_filters" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/filters.py#L220">apply_filters</a></td></tr>
@@ -270,16 +273,16 @@ record.</td><td><a class="src" data-sym="def publish_period" href="https://githu
 <tbody>
 <tr><td><code>plan/run.py</code></td><td>The plan stage end to end: load, validate, index, filter,
 freeze, budget-gate, inspect real granules, build the work lists. About a thousand lines and the
-largest module in the tree.</td><td><a class="src" data-sym="def plan_run" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/plan/run.py#L677">plan_run</a></td></tr>
+largest module in the tree.</td><td><a class="src" data-sym="def plan_run" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/plan/run.py#L685">plan_run</a></td></tr>
 <tr><td><code>plan/document.py</code></td><td>The serialisation seam: <code>plan.json</code>, the
 work lists, and the paired <code>*_to_doc</code> / <code>*_from_doc</code> functions that let a
-worker rebuild a planner's context from plain JSON.</td><td><a class="src" data-sym="class RunPlan" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/plan/document.py#L255">RunPlan</a></td></tr>
+worker rebuild a planner's context from plain JSON.</td><td><a class="src" data-sym="class RunPlan" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/plan/document.py#L261">RunPlan</a></td></tr>
 <tr><td><code>executors/worker.py</code></td><td>The portability seam: one handler per stage, and
 the single <code>exec_item</code> entry point every executor
-reduces to.</td><td><a class="src" data-sym="def exec_item" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/executors/worker.py#L186">exec_item</a></td></tr>
+reduces to.</td><td><a class="src" data-sym="def exec_item" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/executors/worker.py#L189">exec_item</a></td></tr>
 <tr><td><code>executors/local.py</code></td><td>The only executor that exists today: a spawn-context
 process pool over the work lists, the budget gate, and
-Finalize.</td><td><a class="src" data-sym="def run_all" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/executors/local.py#L104">run_all</a></td></tr>
+Finalize.</td><td><a class="src" data-sym="def run_all" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/executors/local.py#L105">run_all</a></td></tr>
 <tr><td><code>cli.py</code></td><td>The click command tree. Every command body imports its
 dependencies locally, which is what keeps <code>stratum --help</code>
 fast.</td><td><a class="src" data-sym="def main() -> None" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/cli.py#L65">main</a></td></tr>

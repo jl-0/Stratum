@@ -147,10 +147,17 @@ def test_write_dir_commits_whole_directory(root: CacheRoot) -> None:
 
     root.write_dir(key, write)
     assert root.hit(key)
-    assert sorted(p.name for p in key.path.iterdir()) == [".inputs.json", "layer.tif", "score.tif"]
+    # `.members.json` is the artifact's own list of what it covers, written before the sidecar
+    assert sorted(p.name for p in key.path.iterdir()) == [
+        ".inputs.json", ".members.json", "layer.tif", "score.tif"]
+    assert json.loads(key.members_path.read_text()) == ["layer.tif", "score.tif"]
     # a rewrite over an existing entry replaces it whole
     root.write_dir(key, lambda d: (d / "only.tif").write_bytes(b"z"))
-    assert sorted(p.name for p in key.path.iterdir()) == [".inputs.json", "only.tif"]
+    assert sorted(p.name for p in key.path.iterdir()) == [
+        ".inputs.json", ".members.json", "only.tif"]
+    # a member that goes missing is not a hit, however intact the sidecar looks
+    (key.path / "only.tif").unlink()
+    assert not root.hit(key)
 
 
 def test_write_dir_is_atomic_when_writer_raises(root: CacheRoot) -> None:

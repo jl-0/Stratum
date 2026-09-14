@@ -25,12 +25,18 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from stratum.storage import Workspace, local_workspace
 from stratum.types import GridDef, TileRef, canonical_hash
 
 # artifact_type -> kind. A file artifact carries a suffix; a directory artifact is renamed whole.
 ARTIFACT_KINDS: Mapping[str, str] = {"glt": "file", "snapshot": "dir", "product": "dir"}
 FILE_SUFFIX: Mapping[str, str] = {"glt": ".tif"}
 INPUTS_NAME = ".inputs.json"
+# A directory artifact also carries the list of its own members. Locally it is redundant - the
+# commit is a whole-directory rename and cannot tear - but a remote commit is N uploads, and
+# without the list a reader cannot tell a complete artifact from a prefix that lost an object.
+# It is written BEFORE the sidecar, so `.inputs.json` remains the single commit marker.
+MEMBERS_NAME = ".members.json"
 
 
 @dataclass(frozen=True)
@@ -58,12 +64,27 @@ class CacheKey:
             return self.path / INPUTS_NAME
         return self.path.with_name(f"{self.hash16}{INPUTS_NAME}")
 
+    @property
+    def members_path(self) -> Path:
+        """`.members.json` inside a directory artifact. Meaningless for a file artifact, which
+        is its own member."""
+        if not self.is_dir:
+            raise ValueError(f"{self.artifact!r} is a file artifact and lists no members")
+        return self.path / MEMBERS_NAME
+
 
 class CacheRoot:
-    """A content-addressed store under one root directory (06 section 4: one per deployment)."""
+    """A content-addressed store under one root (06 section 4: one per deployment).
 
-    def __init__(self, root: Path) -> None:
-        self.root = Path(root)
+    The root is a directory, or a `Workspace` over an `s3://` prefix with a node-local mirror
+    (`stratum.storage`). Everything below writes files: what a remote workspace changes is that a
+    probe falls back to the bucket before it is a miss, and a commit is followed by an upload in
+    the same order the local write used - members first, `.inputs.json` last.
+    """
+
+    def __init__(self, root: Path | str | Workspace) -> None:
+        self.workspace = root if isinstance(root, Workspace) else local_workspace(root)
+        self.root = self.workspace.path
 
     # ------------------------------------------------------------------------------ addressing
     def key(self, artifact: str, grid_id: str, tile: TileRef, inputs: Mapping[str, Any]) -> CacheKey:
@@ -79,12 +100,42 @@ class CacheRoot:
 
     def hit(self, key: CacheKey) -> bool:
         """True when the artifact AND its `.inputs.json` exist. A write commits the artifact
-        first and the sidecar last, so a partial write never reads as a hit (06 section 3, rule 6)."""
+        first and the sidecar last, so a partial write never reads as a hit (06 section 3, rule 6).
+
+        On a remote workspace a local miss is not yet a miss: the sidecar is probed in the bucket
+        and, when it is there, the artifact is mirrored and the answer is yes. The sidecar is
+        probed *first* for the same reason it is written last - it is the commit."""
+        if self._present(key):
+            return True
+        return self.workspace.remote and self._mirror(key)
+
+    def _present(self, key: CacheKey) -> bool:
+        """The artifact and its commit marker are both here - and, for a directory, every member
+        the artifact says it has."""
+        if not key.inputs_path.is_file():
+            return False
+        if not key.is_dir:
+            return key.path.is_file()
+        if not (key.path.is_dir() and key.members_path.is_file()):
+            return False
+        members = json.loads(key.members_path.read_text())
+        return all((key.path / name).is_file() for name in members)
+
+    def _mirror(self, key: CacheKey) -> bool:
+        """Fetch a committed artifact from the bucket into the mirror. A directory artifact whose
+        sidecar is present but whose members are not is a torn write, not a hit: the mirror is
+        cleared and the stage recomputes."""
+        if not self.workspace.exists(key.inputs_path):
+            return False
         if key.is_dir:
-            present = key.path.is_dir()
+            self.workspace.pull_tree(key.path)
         else:
-            present = key.path.is_file()
-        return present and key.inputs_path.is_file()
+            self.workspace.pull_file(key.path)
+            self.workspace.pull_file(key.inputs_path)
+        if self._present(key):
+            return True
+        self.workspace.drop_mirror(key.path)
+        return False
 
     # --------------------------------------------------------------------------------- writing
     def write_file(self, key: CacheKey, write: Callable[[Path], None]) -> Path:
@@ -102,6 +153,8 @@ class CacheRoot:
             tmp.unlink(missing_ok=True)
             raise
         self._write_inputs(key.inputs_path, key.inputs)
+        self.workspace.push_file(key.path)
+        self.workspace.push_file(key.inputs_path)   # the commit: last, here as locally
         return key.path
 
     def write_dir(self, key: CacheKey, write: Callable[[Path], None]) -> Path:
@@ -115,6 +168,8 @@ class CacheRoot:
         try:
             tmp.mkdir()
             write(tmp)
+            members = sorted(p.relative_to(tmp).as_posix() for p in tmp.rglob("*") if p.is_file())
+            (tmp / MEMBERS_NAME).write_text(json.dumps(members, indent=2) + "\n")
             self._write_inputs(tmp / INPUTS_NAME, key.inputs)
             if key.path.exists():  # a rewrite of an existing entry; rename cannot replace a dir
                 shutil.rmtree(key.path)
@@ -122,6 +177,7 @@ class CacheRoot:
         except BaseException:
             shutil.rmtree(tmp, ignore_errors=True)
             raise
+        self.workspace.push_tree(key.path, last=key.inputs_path)
         return key.path
 
     @staticmethod
@@ -242,6 +298,6 @@ def product_inputs(snapshot_keys: Sequence[CacheKey | str], aux_keys: Sequence[C
 
 
 __all__ = [
-    "ARTIFACT_KINDS", "CacheKey", "CacheRoot", "glt_inputs", "grid_def_fields",
-    "product_inputs", "snapshot_inputs",
+    "ARTIFACT_KINDS", "INPUTS_NAME", "MEMBERS_NAME", "CacheKey", "CacheRoot", "glt_inputs",
+    "grid_def_fields", "product_inputs", "snapshot_inputs",
 ]

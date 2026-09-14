@@ -141,8 +141,6 @@ def test_plan_time_problems_fail_loudly(root: Path) -> None:
     (root / "bad2.yaml").write_text(yaml.safe_dump(doc, sort_keys=False))
     with pytest.raises(PlanError, match="group_9_band_depth"):
         plan_run(root / "bad2.yaml")
-    with pytest.raises(NotImplementedError, match="12 section 4"):
-        plan_run(write_manifest(root / "m.yaml", bucket="s3://somewhere/products"))
 
 
 def test_on_missing_fail_is_a_plan_error_not_a_traceback(root: Path) -> None:

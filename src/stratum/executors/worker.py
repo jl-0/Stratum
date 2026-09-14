@@ -173,6 +173,9 @@ def publish_item(item: Mapping[str, Any], run: RunPlan) -> tuple[Path, bool]:
     publish_period(out_dir, product_dirs, tile, period, ctx.schema, run.outputs,
                    run_id=run.run_id, manifest_hash=run.manifest_hash,
                    band_counts=run.band_counts or None, run_dir=run.run_dir)
+    # products are run-prefixed and never a cache hit, so publish is the one stage that always
+    # rewrites - and the one that has to push what it wrote (08 section 1)
+    run.workspace.push_tree(out_dir)
     return out_dir, False
 
 

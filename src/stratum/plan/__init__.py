@@ -45,6 +45,7 @@ from stratum.plan.run import (
     resolve_local,
     roles_needed,
     storage_root,
+    workspace_for,
 )
 
 __all__ = [
@@ -53,5 +54,6 @@ __all__ = [
     "build_index_from_manifest", "build_work_lists", "context_from_doc", "context_to_doc",
     "index_path", "inspect_granules", "load_run", "plan_run", "read_plan", "read_results",
     "read_work", "render_report", "resolve_local", "results_path", "roles_needed",
-    "schema_from_doc", "schema_to_doc", "storage_root", "work_path", "write_plan", "write_work",
+    "schema_from_doc", "schema_to_doc", "storage_root", "work_path", "workspace_for",
+    "write_plan", "write_work",
 ]

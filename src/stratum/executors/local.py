@@ -73,6 +73,7 @@ def run_stage(run_dir: Path | str, stage: str, workers: int | None = None) -> li
     path = results_path(run_dir, stage)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text("".join(json.dumps(r, sort_keys=True) + "\n" for r in results))
+    load_cached(run_dir).workspace.push_file(path)   # no-op on a local root
     failed = [r for r in results if not r["ok"]]
     if failed:
         shown = "\n".join(f"  [{r['index']}] {r['error']}" for r in failed[:10])
@@ -121,8 +122,10 @@ def run_all(run_dir: Path | str, workers: int | None = None) -> dict[str, Any]:
     if run.outputs.get("stac", True):
         items = sorted(run.products_dir.glob("*/*/item.json"))
         if items:
-            write_stac_collection(run.products_dir, items, description=run.document.get(
-                "description") or f"Stratum products for run {run.run_id}")
+            collection = write_stac_collection(run.products_dir, items,
+                                               description=run.document.get("description")
+                                               or f"Stratum products for run {run.run_id}")
+            run.workspace.push_file(collection)
 
     counts = run.document["counts"]
     store_cache = getattr(run.context.store, "asset_cache", None)
@@ -136,6 +139,10 @@ def run_all(run_dir: Path | str, workers: int | None = None) -> dict[str, Any]:
     prov = write_provenance(run_dir, record)
     with (run_dir / REPORT_NAME).open("a") as fh:
         fh.write(render_execution(execution, prov))
+    # Finalize's own outputs: the run record and the report. The product trees went up as each
+    # publish item finished, and the collection just above. On a local root every push is a no-op.
+    run.workspace.push_file(prov)
+    run.workspace.push_file(run_dir / REPORT_NAME)
     return execution
 
 

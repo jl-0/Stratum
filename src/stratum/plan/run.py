@@ -84,6 +84,7 @@ from stratum.resolve import (
     plugin_version,
 )
 from stratum.resolve.observation import is_lonlat
+from stratum.storage import Workspace
 from stratum.types import (
     BlockRef,
     ClassTable,
@@ -144,9 +145,16 @@ def resolve_local(m: Manifest, value: str, what: str) -> Path:
     return path if path.is_absolute() else (m.base_dir / path).resolve()
 
 
+def workspace_for(m: Manifest) -> Workspace:
+    """`outputs.bucket` as a `Workspace`: cache/, runs/ and products/ hang off it, whether it is
+    a directory or an `s3://` prefix. A bucket root gets a node-local mirror and the stages see
+    a path either way (`stratum.storage`)."""
+    return Workspace.for_root(m.outputs.bucket, base_dir=m.base_dir)
+
+
 def storage_root(m: Manifest) -> Path:
-    """`outputs.bucket` locally is the storage root: cache/, runs/, products/ hang off it."""
-    return resolve_local(m, m.outputs.bucket, "outputs.bucket")
+    """Where this process reads and writes the root: the directory itself, or its mirror."""
+    return workspace_for(m).path
 
 
 # ------------------------------------------------------------------------------------------ index
@@ -686,9 +694,13 @@ def plan_run(manifest_path: Path | str, out_dir: Path | str | None = None,
     if problems:
         raise PlanError("manifest is not runnable (09 section 5):\n  - " + "\n  - ".join(problems))
 
-    root = storage_root(m)
+    ws = workspace_for(m)
+    root = ws.path
     mhash = manifest_hash(m)
     run_id = m.run_id
+    if out_dir is not None and ws.remote:
+        raise PlanError(f"--out is for a local root; outputs.bucket is {ws.uri}, where the run "
+                        f"directory is {ws.uri}runs/{run_id}/ by definition (06 section 4)")
     run_dir = Path(out_dir).resolve() if out_dir is not None else root / "runs" / run_id
     run_dir.mkdir(parents=True, exist_ok=True)
     (run_dir / MERGED_NAME).write_text(yaml.safe_dump(m.document(), sort_keys=False))
@@ -790,13 +802,15 @@ def plan_run(manifest_path: Path | str, out_dir: Path | str | None = None,
     doc: dict[str, Any] = {
         "plan_schema_version": PLAN_SCHEMA_VERSION,
         "run_id": run_id, "run_label": m.run_label, "manifest_hash": mhash,
-        "manifest_path": str(manifest_path), "root": str(root), "run_dir": str(run_dir),
-        "products_dir": str(root / "products" / run_id),
+        # durable names: what `plan.json` records must be the same on every machine, so a
+        # bucket root records the URI and never this process's mirror (`stratum.storage`)
+        "manifest_path": str(manifest_path), "root": ws.uri, "run_dir": ws.url(run_dir),
+        "products_dir": ws.url(root / "products" / run_id),
         "planned_at": iso(datetime.now(UTC)),
         "tiles": [[t.tx, t.ty] for t in tiles],
         "epochs": [epoch_to_doc(e) for e in epochs],
         "periods": [period_to_doc(p) for p in periods],
-        "index": {"source": str(idx_path), "built": built, "frozen": str(frozen_path),
+        "index": {"source": str(idx_path), "built": built, "frozen": ws.url(frozen_path),
                   "hash": frozen_hash, "granule_count": len(refs),
                   "rows": len(selected)},
         "filters": [dataclasses.asdict(r) for r in reports],
@@ -816,6 +830,7 @@ def plan_run(manifest_path: Path | str, out_dir: Path | str | None = None,
         write_plan(run_dir, doc)
         report = render_report(doc)
         (run_dir / REPORT_NAME).write_text(report)
+        ws.push_tree(run_dir)
         return PlanResult(run_id=run_id, run_dir=run_dir, root=root, document=doc,
                           report=report, over_budget=True, budget_problems=budget_problems,
                           counts=counts)
@@ -838,7 +853,7 @@ def plan_run(manifest_path: Path | str, out_dir: Path | str | None = None,
     except (ValueError, TypeError, NotImplementedError) as e:
         raise PlanError(f"outputs are not publishable (07 section 3): {e}") from None
     ctx = PlanContext(
-        grid=grid, cache=CacheRoot(root), store=store, granules=refs,
+        grid=grid, cache=CacheRoot(ws), store=store, granules=refs,
         roles={name: bindings[name] for name in m.inputs.roles},
         aliases=inspection.aliases, geolocation_role=geolocation_role, schema=inspection.schema,
         scorer=scorer, masks=masks, remaps=inspection.remaps, max_distance=max_distance,
@@ -871,6 +886,10 @@ def plan_run(manifest_path: Path | str, out_dir: Path | str | None = None,
     write_plan(run_dir, doc)
     report = render_report(doc)
     (run_dir / REPORT_NAME).write_text(report)
+    # the run directory is the run's durable record - the merged manifest, the frozen index, the
+    # plan and the work lists. A worker rebuilds everything from it, so it goes up before any
+    # work item is dispatched (08 section 1).
+    ws.push_tree(run_dir)
     return PlanResult(run_id=run_id, run_dir=run_dir, root=root, document=doc, report=report,
                       over_budget=bool(budget_problems), budget_problems=budget_problems,
                       counts=counts)
@@ -1026,5 +1045,5 @@ __all__ = [
     "index_scope", "inspect_granules", "instantiate", "is_uri",
     "local_patterns", "local_source", "outputs_document", "pin_role_versions", "pin_versions",
     "plan_run", "render_report", "resolve_local", "roles_needed", "source_from_manifest",
-    "source_patterns", "storage_root", "strip_none", "tile_lonlat_bounds",
+    "source_patterns", "storage_root", "strip_none", "tile_lonlat_bounds", "workspace_for",
 ]
