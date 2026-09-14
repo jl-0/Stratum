@@ -240,8 +240,9 @@ a 2 x 3 tile set - Cuprite/Goldfield at `tile_size: 0.5` with an `aoi.bbox` inst
 tile list - and exists to exercise multi-tile fan-out, publish and STAC (719 work items, 6.4 GB).
 `examples/zones.yaml` is the AOI zone registry.
 The first-slice trial over the same tile from a local directory (`examples/trial-nevada/`, with
-the SpectralUtil `build_obs_nc` parity script) is **not tracked**; its measurements live in
-`docs/notes/heritage.md`.
+the SpectralUtil `build_obs_nc` parity script) IS tracked - its manifests and `parity.py` are
+source - but it cannot run without `trial-data/`, which is git-ignored and never committed. Its
+measurements live in `docs/notes/heritage.md`.
 
 ---
 

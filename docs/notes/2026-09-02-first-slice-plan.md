@@ -104,6 +104,8 @@ load_manifest(path: Path, patches: Sequence[Path] = ()) -> Manifest   # patches 
 manifest_hash(m: Manifest) -> str              # canonical_hash of model_dump(mode="json")
 m.run_label: str                               # the `run_id` field as written
 m.run_id: str                                  # f"{run_label}-{manifest_hash[7:15]}"
+                                               #   (a {YYYYMMDD} was added between label and
+                                               #   hash on 2026-09-14, for sorting - 09 section 5)
 m.grid_def() -> GridDef
 m.epochs() -> list[Epoch]                      # from time.start by time.epoch, half-open, UTC
 m.delivery_periods() -> list[DeliveryPeriod]   # (start, end, epochs) honouring deliver.{every,window,align}

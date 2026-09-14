@@ -8,7 +8,8 @@ Opens a codespace with the environment built and a walkthrough that runs a real 
 NASA's archive — see [`.devcontainer/README.md`](.devcontainer/README.md).
 
 > **Status: first slice built (2026-09-02).** A local run — staged granules, one grid, the
-> streaming scorer, the built-in reducer, published COGs with STAC and provenance — exists and is
+> streaming scorer, the built-in reducer, products published as COGs or plain GeoTIFFs with STAC
+> and provenance — exists and is
 > tested, and so does a run from NASA's CMR catalogue with granules downloaded on first touch:
 > see [`examples/emit-cmr-nevada/README.md`](examples/emit-cmr-nevada/README.md) for the credentials setup
 > and the measured sizes and times, and [`examples/emit-cmr-cuprite/README.md`](examples/emit-cmr-cuprite/README.md)

@@ -14,7 +14,16 @@ __pycache__/
 !refs/**/*.parquet
 trial-data/
 
-# ---- Terraform / AWS (docs/notes/2026-09-03-aws-deployment-playbook.md section 7) ----
+# ---- run outputs ----
+# Every example writes its storage root and its built index beside its manifest. Kept here as
+# well as in each example's own .gitignore, so a NEW example is covered before anyone runs it -
+# examples/emit-critical-minerals/ had no .gitignore of its own and would have committed its
+# products the first time it ran.
+examples/*/out/
+examples/*/index/
+examples/*/assets/
+
+# ---- Terraform / AWS (docs/guide/deploying.html, "What must never be committed") ----
 # NOTHING in this block may ever be committed. Terraform state holds every value Terraform
 # touches, in plaintext.
 .terraform/
