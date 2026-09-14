@@ -156,7 +156,35 @@ polygon, which is what CMR searches on.
   only the vote (`min_count`, `tie_break`) or the render re-runs reduce and publish, about half
   a minute here.
 
-## 6. Where things are
+## 6. The same run in the cloud
+
+Nothing about the science changes — the executor is never a manifest field. Two things do: where
+the storage root is, and which dispatcher runs the items.
+
+```bash
+# 1. the storage root becomes the deployment's bucket
+#    outputs.bucket: s3://stratum-dev-<account-id>/          (was: ./out)
+#    `make tf-output` prints the exact value
+
+# 2. point the CLI at the worker function
+export STRATUM_LAMBDA_FUNCTION=$(make -s tf-deploy-output | grep function_name | cut -d'"' -f2)
+
+stratum run -m manifest.yaml --executor aws
+```
+
+Your laptop plans, dispatches one invocation per work item, and collects the outcomes; every
+result is in the bucket before its invocation returns. Cache hits work the same way across
+machines — whichever worker built a GLT, every other worker finds it — so a second experiment over
+this tile skips regrid entirely, exactly as it does locally.
+
+Granules are still fetched over HTTPS with Earthdata Login, from the worker rather than from here,
+using a credential the worker reads from Secrets Manager at run time. `--workers` is how many
+invocations are in flight (default 32).
+
+Standing the deployment up is [Deploying to AWS](../../docs/guide/deploying.html); a local storage
+root with `--executor aws` is refused by name before the first invocation.
+
+## 7. Where things are
 
 ```
 examples/emit-cmr-nevada/
