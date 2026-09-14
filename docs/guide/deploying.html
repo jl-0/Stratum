@@ -215,6 +215,50 @@ scoped to that bucket, valid about an hour. Those read the granules.</p>
   band with <code>aws secretsmanager put-secret-value</code>.</p>
 </div>
 
+<h3 id="secret-shape">What to put in it</h3>
+
+<p><strong>Key-value JSON — not the contents of a <code>.netrc</code>.</strong> The credential
+resolver tries two strategies in order: the <code>netrc</code> file, then the environment. A cloud
+worker has no <code>.netrc</code>, so it takes the environment path, and JSON keys map onto it
+directly:</p>
+
+<div class="tw">
+<table>
+<thead><tr><th>Secret value</th><th>Becomes</th><th>When</th></tr></thead>
+<tbody>
+<tr><td><code>{"username": "…", "password": "…"}</code></td><td><code>EARTHDATA_USERNAME</code> and <code>EARTHDATA_PASSWORD</code></td><td>The default. Same two values your <code>~/.netrc</code> holds</td></tr>
+<tr><td><code>{"token": "…"}</code></td><td><code>EARTHDATA_TOKEN</code></td><td>An Earthdata user token. Avoids storing a password, but tokens expire and must be renewed</td></tr>
+</tbody>
+</table>
+</div>
+
+<pre><code>aws secretsmanager put-secret-value \
+  --secret-id stratum/<span class="k">$STRATUM_DEPLOYMENT</span>/earthdata \
+  --secret-string <span class="k">'{"username":"…","password":"…"}'</span> \
+  --profile <span class="k">"$AWS_PROFILE"</span></code></pre>
+
+<p>Both shapes are already supported — no code change either way. Which one to standardise on is
+still <a href="../status.html#open">open</a>: the password pair is simpler, the token avoids holding
+a password but adds a renewal obligation.</p>
+
+<div class="warn">
+  <span class="label">Do not wire it into the function's environment block</span>
+  <p>It is tempting to pass the secret into the Lambda as a configured environment variable. Do not:
+  a value in Terraform's <code>environment</code> block lands in Terraform state <em>and</em> in the
+  function configuration, where anyone with <code>lambda:GetFunction</code> can read it. The handler
+  fetches the secret at run time and sets the variables in its own process, before the first login.</p>
+</div>
+
+<div class="note">
+  <span class="label">Why plaintext netrc is the worse option</span>
+  <p>Storing the file's contents and writing them to <code>/tmp/.netrc</code> does work — the
+  resolver honours <code>$NETRC</code> — but it puts credential material on a filesystem for no
+  benefit, and Secrets Manager's console and rotation tooling both assume JSON. The one thing it
+  buys, an identical code path to a laptop, you already have: the resolver tries
+  <code>netrc</code> then environment on every platform, so a laptop and a Lambda differ only in
+  which strategy answers first.</p>
+</div>
+
 <p>The one-hour expiry is why the orchestrator never reads granules — the workers do, and no worker
 runs past Lambda's 15-minute ceiling, so nothing on this path ever needs to refresh a NASA
 credential mid-read.</p>
