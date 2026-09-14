@@ -6,8 +6,8 @@ as the statement of intent; run [`../emit-cmr-nevada/`](../emit-cmr-nevada/READM
 this manifest reduced to what the framework builds today, and
 [`../emit-cmr-cuprite/`](../emit-cmr-cuprite/README.md), which is that same reduction over a
 multi-tile AOI. The four zones below cover 11 one-degree tiles (1, 2, 2 and 6), and
-`south-central-az` is itself a 2 x 3 set — exactly the shape the Cuprite example exercises at a
-quarter degree, so the fan-out this product needs is the one that already runs.
+`south-central-az` is itself a 2 x 3 set — exactly the shape the Cuprite example exercises at half
+a degree, so the fan-out this product needs is the one that already runs.
 
 ## What it declares
 
@@ -59,7 +59,7 @@ emit-critical-minerals/manifest.yaml     the product as designed        <- this 
         |  drop aux, masks, lumping, netcdf, S3, approval; one tile, one year
         v
 emit-cmr-nevada/manifest.yaml            the same shape, runnable today, one tile
-        |  quarter-degree tiles and a bbox AOI; same science
+        |  half-degree tiles and a bbox AOI; same science
         v
 emit-cmr-cuprite/manifest.yaml           the same shape, runnable today, six tiles
 ```

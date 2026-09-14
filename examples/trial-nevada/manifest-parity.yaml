@@ -1,0 +1,98 @@
+# Parity variant of the trial manifest (first-slice plan section 1: a SpectralUtil
+# `build_obs_nc` fused-GLT run stands in for the V002 cell). Identical grid, tile, epoch,
+# granules and scorer to manifest.yaml; two deliberate differences so the product is
+# cell-comparable with a fused GLT applied to `group_1_mineral_id`:
+#
+#   * `pixel_mask: []` - build_obs_nc has no detector-edge trim (the GLTs are shared with the
+#     main run: the GLT key has no mask term, so regrid is all cache hits);
+#   * `ignore: []` on the vote - with one epoch and `ignore: [none]` every cell whose only
+#     observation is class 0 ("observed, nothing identified") is delivered as nodata (04 section
+#     5 step 4), which is 73% of this tile; the fused mosaic carries 0 there.
+#
+# Run from the repo root; the comparison script is examples/trial-nevada/parity.py.
+#
+#     pixi run stratum run -m examples/trial-nevada/manifest-parity.yaml
+
+run_id: trial-nevada-parity
+description: Parity variant - no edge trim, `none` counted, for the build_obs_nc comparison
+
+grid:
+  crs: EPSG:4326
+  resolution: [0.000277777777777778, -0.000277777777777778]   # one arcsecond
+  tile_size: 1.0
+  origin: [-180, -90]
+  block_size: 720
+
+aoi:
+  tiles: [[-118, 41]]
+
+time:
+  start: 2026-06-01
+  end:   2026-07-01
+  epoch: P1M
+  deliver: P1M
+
+inputs:
+  index_location: ./index
+  source:
+    kind: local
+    root: ../../trial-data
+    patterns:
+      EMITL2BMIN:
+        MIN: "EMIT_L2B_MIN_001_*.nc"
+        MINUNCERT: "EMIT_L2B_MINUNCERT_001_*.nc"
+      EMITL1BRAD:
+        OBS: "EMIT_L1B_OBS_001_*.nc"
+  roles:
+    geometry: {collection: EMITL1BRAD, asset: OBS, var: obs}
+    mineral:
+      collection: EMITL2BMIN
+      var: group_1_mineral_id
+      class_table:
+        source: embedded
+        path: /mineral_metadata
+        key: index
+        attributes: [name, record, library, group, url]
+    mineral_depth: {collection: EMITL2BMIN, var: group_1_band_depth}
+  band_aliases:
+    view_zenith:  {role: geometry, band: 2}
+    solar_zenith: {role: geometry, band: 4}
+
+granule_filter: []
+
+pixel_mask: []
+
+scorer:
+  ref: min_view_zenith
+
+snapshot:
+  name: trial-v1
+  layers:
+    mineral_1:
+      kind: categorical
+      source: mineral
+      classes: source
+      aggregate: {method: vote, min_count: 1, ignore: [], tie_break: highest_score}
+    depth_1:
+      kind: continuous
+      source: mineral_depth
+      aggregate: {method: median, conditional_on: mineral_1}
+    view_zenith:
+      kind: continuous
+      source: view_zenith
+      aggregate: {method: none}
+
+outputs:
+  bucket: ./out
+  formats: [cog]
+  stac: true
+  render:
+    mineral_1:
+      mapper: categorical
+      on_unmapped: grey
+
+budget:
+  max_tiles: 1
+  max_granules: 100
+  max_vcpu_hours: 4
+  on_exceed: fail

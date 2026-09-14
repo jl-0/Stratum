@@ -1,7 +1,7 @@
 # emit-cmr-cuprite: six tiles from the archive
 
 A Stratum run over the Cuprite / Goldfield district of Nevada as a **2 wide x 3 tall set of
-quarter-degree tiles**, January to August 2026, with the granules found in NASA's CMR catalogue
+half-degree tiles**, January to August 2026, with the granules found in NASA's CMR catalogue
 and downloaded from LP DAAC as they are needed. Nothing has to be staged by hand.
 
 **What it is for.** [`../emit-cmr-nevada/`](../emit-cmr-nevada/README.md) proves the pipeline end
@@ -11,11 +11,11 @@ and the manifest differs in three fields, all of them about geometry:
 
 | | `emit-cmr-nevada` | `emit-cmr-cuprite` |
 |---|---|---|
-| `grid.tile_size` | `1.0` — 3600 x 3600 cells | `0.25` — 900 x 900 cells |
-| `grid.block_size` | `720` — 5 x 5 blocks in one tile | `450` — 2 x 2 blocks per tile |
-| `aoi` | `tiles: [[-118, 41]]` | `bbox: [-117.5, 37.25, -117.0, 38.0]` |
+| `grid.tile_size` | `1.0` — 3600 x 3600 cells | `0.5` — 1800 x 1800 cells |
+| `grid.block_size` | `720` — 5 x 5 blocks in one tile | `450` — 4 x 4 blocks per tile |
+| `aoi` | `tiles: [[-118, 41]]` | `bbox: [-118.0, 37.0, -117.0, 38.5]` |
 | Tiles | 1 | **6** |
-| Blocks | 25 | 24 |
+| Blocks | 25 | **96** |
 | Products | 1 | **6** |
 
 Everything else is copied. If a result differs, it is because the ground differs.
@@ -41,23 +41,26 @@ north then west to east. The box sits exactly on tile edges, so it produces a cl
 pulls in no seventh tile:
 
 ```
-        38.00 +-----------+-----------+
+        38.50 +-----------+-----------+
               |           |           |
-              | -470,151  | -469,151  |
-        37.75 +-----------+-----------+
-              |           |     x     |   x = Cuprite, 37.52 N 117.23 W
-              | -470,150  | -469,150  |
+              | -236,76   | -235,76   |
+        38.00 +-----------+-----------+
+              |     x     |           |   x = Cuprite, 37.52 N 117.23 W
+              | -236,75   | -235,75   |
         37.50 +-----------+-----------+
               |           |           |
-              | -470,149  | -469,149  |
-        37.25 +-----------+-----------+
-           -117.50     -117.25     -117.00
+              | -236,74   | -235,74   |
+        37.00 +-----------+-----------+
+           -118.00     -117.50     -117.00
 ```
 
-A tile index is a **count of `tile_size` steps from the grid origin**, not a number of degrees —
-they coincide only when `tile_size` is `1.0`. At a quarter degree the indices are four times the
-degree value, which is why `bbox` is the readable way to write this AOI and the equivalent
-`tiles:` list is only a comment in the manifest.
+**The folder names are tile indices, not degrees, and this is the one thing about this example
+that reliably surprises people.** A tile index is a *count of `tile_size` steps from the grid
+origin*; it equals the degree value only when `tile_size` is `1.0`. At a half degree the indices
+are doubled, so the directory `-236_75` holds lon [-118.0, -117.5), lat [37.5, 38.0) — not
+anything at -236. Nevada's `-118_41` only looks like coordinates because its tiles are one degree.
+That is why `bbox` is the readable way to write this AOI and the equivalent `tiles:` list is left
+as a comment. `item.json` in every product directory carries the real bbox.
 
 Two properties matter and both are worth checking in the output:
 
@@ -90,65 +93,71 @@ pixi run stratum report --run emit-cmr-cuprite-<hash> --root examples/emit-cmr-c
 
 ## 4. Sizes and times measured
 
-First run, 2026-09-14, laptop on a home connection. `stratum run` re-plans first, so the plan's
-1,184 MB of downloads happen inside it.
+Run 2026-09-14, laptop on a home connection. `stratum run` re-plans first, so the plan's downloads
+happen inside it. **3.7 GB of the granules were already staged from an earlier run over a smaller
+box**, so the wall clock below is not a cold start; a first run downloads about 6.4 GB and takes
+proportionally longer in regrid.
 
-| step | items | wall clock | downloaded | notes |
-|---|---|---|---|---|
-| `index build` | — | 3.8 s | 0 | 44 rows, 22 granules, 2026-03-26 to 2026-08-18 |
-| `run`: plan | — | ~42 s | 1.18 GB, 23 files | 22 MIN for the class-table check + 1 OBS for the sample check; **0 granules dropped** by the cloud filter |
-| `run`: regrid | 104 | 155.5 s | 2.5 GB, 21 files | the remaining OBS files, fetched by parallel workers |
-| `run`: resolve | 118 | 5.2 s | 0 | 24 blocks x up to 8 months, where observed |
-| `run`: reduce | 24 | 14.5 s | 0 | |
-| `run`: publish | 6 | 2.6 s | 0 | six products, six STAC items, one collection |
-| **total** | **252** | **3 min 40 s** | **3.7 GB, 44 files** | `out/cache` 90 MB, `out/products` 17 MB |
+| step | items | wall clock | notes |
+|---|---|---|---|
+| `index build` | — | 4 s | 90 rows, 45 granules, no login, nothing downloaded |
+| `run`: plan | — | ~65 s | 42 assets, 2,115 MB staged; **4 granules dropped** by the cloud filter, 41 survive |
+| `run`: regrid | 146 | 97.8 s | one GLT per granule per tile |
+| `run`: resolve | 471 | 9.5 s | 96 blocks x up to 8 months, where observed |
+| `run`: reduce | 96 | 35.9 s | |
+| `run`: publish | 6 | 4.2 s | six products, six STAC items, one collection |
+| **total** | **719** | **3 min 33 s** | `out/assets` 6.4 GB / 82 files, `out/cache` 345 MB, `out/products` 47 MB |
 
-Set beside the single-tile example, the shape of the cost is the point:
+Set beside the single-tile example:
 
 | | `emit-cmr-nevada` | `emit-cmr-cuprite` |
 |---|---|---|
-| Granules | 37 (4 dropped by cloud) | 22 (0 dropped) |
-| Downloaded | 5.0 GB, 66 files | 3.7 GB, 44 files |
-| regrid items | 33 | **104** |
-| Total work items | 205 | **252** |
-| Wall clock | 4 min | 3 min 40 s |
+| Tiles | 1 x 3600² | **6 x 1800²** |
+| Blocks | 25 | **96** |
+| Granules | 37, 4 dropped by cloud | 45, 4 dropped by cloud |
+| Downloaded | 5.0 GB, 66 files | 6.4 GB, 82 files |
+| regrid items | 33 | **146** |
+| Total work items | 205 | **719** |
 
-**Fewer granules, three times the regrid work.** A GLT is built per *granule per tile*, so the 22
-granules produce 104 regrid items — an average of 4.7 tiles touched each. That is the only place
-the tile count shows up as cost, and it is why regrid dominates the run. Download volume tracks
-the *area* and the time range, not the tile count: a granule landing in four tiles is fetched
-once.
+**Similar granule count, four and a half times the regrid work.** A GLT is built per *granule per
+tile*, so 41 surviving granules produce 146 regrid items — 3.6 tiles touched each. That is the
+only place the tile count shows up as cost. Download volume tracks the *area* and the time range,
+not the tile count: a granule landing in four tiles is fetched once.
+
+Why not one-degree tiles, to match the delivered product? Because a 2 x 3 set of them is a
+2 x 3 degree box, which CMR answers with **89 granules** and roughly 15 GB — measured, not
+guessed. Half-degree tiles keep the fan-out and a fifth of the bytes.
 
 ## 5. What came out
 
-Six products under `out/products/<run_id>/<tile>/20260101_20260901/`, each 900 x 900, each with
+Six products under `out/products/<run_id>/<tile>/20260101_20260901/`, each 1800 x 1800, each with
 its own STAC item; one `collection.json` for the run.
 
 | tile | observed | reached the vote (`min_count: 2`) | max `n_epochs` |
 |---|---|---|---|
-| `-470_151` | 100 % | 91.3 % | 5 |
-| `-469_151` | 100 % | 68.7 % | 5 |
-| `-470_150` | 100 % | 76.2 % | 4 |
-| `-469_150` | 100 % | 78.0 % | 4 |
-| `-470_149` | 100 % | 80.8 % | 4 |
-| `-469_149` | 100 % | 89.5 % | 4 |
+| `-236_76` | 100 % | 61.9 % | 4 |
+| `-235_76` | 100 % | 70.3 % | 5 |
+| `-236_75` | 100 % | 60.1 % | 5 |
+| `-235_75` | 100 % | 78.5 % | 5 |
+| `-236_74` | 100 % | **31.1 %** | 5 |
+| `-235_74` | 100 % | 72.4 % | 4 |
 
-Every cell of all six tiles was observed at least once, and 80.8 % of them (3,924,625 of
-4,860,000) got a mineral that two or more months agreed on, across 35 distinct classes. That is
-far denser than the Nevada tile's 32.9 %, and it is the ground rather than the code: this is
-exposed, arid, hydrothermally altered terrain with little vegetation or snow to reject.
+Every cell of all six was observed at least once, and 62.4 % (12,131,396 of 19,440,000) got a
+mineral two or more months agreed on, across 49 classes — against 32.9 % on the Nevada tile. The
+spread between tiles is the useful part: `-236_74` reaches only 31.1 % while `-235_75`, one tile
+east and one north, reaches 78.5 %. That is ground, not machinery, and it is exactly the kind of
+thing a single-tile example cannot show you.
 
 The leading classes over all six tiles:
 
 | cells | class |
 |---|---|
-| 1,406,437 | `Goethite_Thin_Film WS222 W1R1Ba` |
-| 612,785 | `Nanohematite BR93-34B2 W1R1BbS` |
-| 588,707 | `nHematit+fg-Goethit 34B2+MPC W1R1Hb` |
-| 556,667 | `Nanohematite FBR93-34B2b ed1 W1R1Hb` |
-| 354,299 | `Cummingtonite HS294.3B W1R1Bc` |
-| 156,223 | `Goethite CU91-252 coatedchip W1R1H_` |
-| 154,128 | `Basalt_weathered BR93-43 W1R1Bb` |
+| 4,013,583 | `Goethite_Thin_Film WS222 W1R1Ba` |
+| 2,389,703 | `Cummingtonite HS294.3B W1R1Bc` |
+| 1,335,981 | `Nanohematite BR93-34B2 W1R1BbS` |
+| 1,334,149 | `nHematit+fg-Goethit 34B2+MPC W1R1Hb` |
+| 1,331,182 | `Nanohematite FBR93-34B2b ed1 W1R1Hb` |
+| 987,390 | `Basalt_weathered BR93-43 W1R1Bb` |
 
 > **Iron, not alunite.** If you know Cuprite from the AVIRIS literature you are expecting alunite,
 > kaolinite and buddingtonite. They are not here, and nothing is wrong: this manifest reads
@@ -165,60 +174,56 @@ means anything:
 
 ```
 tile          columns              rows
--470_*        [225000, 225900)
--469_*        [225900, 226800)
-*_149                              [458100, 459000)
-*_150                              [459000, 459900)
-*_151                              [459900, 460800)
+-236_*        [223200, 225000)
+-235_*        [225000, 226800)
+*_74                               [457200, 459000)
+*_75                               [459000, 460800)
+*_76                               [460800, 462600)
 ```
 
-Contiguous, half-open, no overlap and no gap, every tile exactly 900 x 900 at one arcsecond.
-Comparing the written GeoTIFFs' `bounds` instead will show two seams agreeing exactly and one
-disagreeing by about 1.4e-14 degrees — 5e-11 of a pixel — because `bounds` is reconstructed as
-`top + height * -resolution` in one file and as `origin + n * resolution` in the other. That is
-float accumulation in the comparison, not a gap in the data.
+Contiguous, half-open, no overlap and no gap, every tile exactly 1800 x 1800 at one arcsecond.
+Comparing the written GeoTIFFs' `bounds` instead can show a seam disagreeing by ~1e-14 degrees,
+because `bounds` is reconstructed as `top + height * -resolution` in one file and as
+`origin + n * resolution` in the other. That is float accumulation in the comparison, not a gap in
+the data.
 
-## 6. Looking at the output on macOS
+## 6. Looking at the output
 
-`outputs.formats: [gtiff]` is set so the products can be opened with whatever is already on a
-reviewer's machine. That works for the bands you actually look at, and **does not** work for all
-of them:
+`outputs.formats: [gtiff]` is set so the products open with whatever is already on a reviewer's
+machine, and every band does — all 48 files, in Preview, QGIS, GDAL and rasterio alike.
 
-| band | Preview / `sips` |
-|---|---|
-| `mineral_1`, `mineral_1_runner_up`, `depth_1`, `depth_1_spread` | all six tiles open |
-| `mineral_1_rgba` | opens on 1 of 6 |
-| `mineral_1_agreement`, `n_epochs`, `depth_1_n` | mostly refused |
+That took a fix, and the reason is worth knowing because it is easy to misdiagnose. **A plain
+GeoTIFF and an internally tiled one are not opposites**: "COG" means header-first plus an overview
+pyramid, but a GeoTIFF can be cut into internal tiles without being a COG at all. Stratum used to
+write `gtiff` that way, and macOS ImageIO refuses *some* internally tiled TIFFs —
+data-dependently, so `mineral_1` would open and `n_epochs` beside it would not, at every size
+tried — 900 x 900, 1800 x 1800 and 3600 x 3600 alike. It looked like the files were broken or the products were COGs; they were
+neither. `gtiff` now writes **strips**, which ImageIO reads in every case, for about 3 % more
+bytes.
 
-The files are fine — GDAL, rasterio and QGIS read every one of them. The trigger is macOS
-ImageIO's handling of **internally tiled** TIFFs: rewriting any refused file with `TILED=NO` and
-the same deflate compression makes it open. The single-tile example behaves the same way — in
-`emit-cmr-nevada` run `emit-cmr-nevada-7aa1f818` seven of the eight bands open at 3600 and only
-`n_epochs` is refused, and `TILED=NO` fixes that one too.
+`cog` is unaffected and still tiled — a range-reading tile server is the entire point of that
+format, and `formats: [cog]` is what a delivered product uses.
 
-Which tiled files ImageIO accepts is data-dependent and not explained by size, dtype, compression
-or whether the internal tile size divides the raster — `mineral_1` and `n_epochs` here are both
-uint16, both 900 x 900, both 256 x 256 deflate tiles, and only one of them opens. It is not
-resolution either: the same `n_epochs` band is refused at 900 x 900 with 256-cell tiles and at
-3600 x 3600 with 400-cell tiles, where the tiling divides the raster exactly.
+| | `gtiff` (this example) | `cog` (delivered products) |
+|---|---|---|
+| Internal layout | strips | 256- or 400-cell tiles |
+| Overviews | none | built, decimated for categorical bands |
+| Opens in Preview | yes | no (paletted bands) |
+| STAC media type | `image/tiff; application=geotiff` | `…; profile=cloud-optimized` |
 
-```bash
-# if you need one of the refused bands in Preview
-gdal_translate -co TILED=NO -co COMPRESS=DEFLATE n_epochs.tif /tmp/n_epochs_strips.tif
-```
-
-Use QGIS, `gdalinfo` or rasterio for anything quantitative. Delivered products
-(`outputs.formats: [cog]`) are tiled by definition and are meant for a tile server, not Preview.
+Use QGIS, `gdalinfo` or rasterio for anything quantitative — Preview will show you the picture,
+not the values.
 
 ## 7. Narrowing it
 
-- **Fewer tiles.** Shrink `aoi.bbox` to a quarter-degree multiple — `[-117.25, 37.5, -117.0,
-  37.75]` is the single tile Cuprite itself sits in — and lower `budget.max_tiles` to match.
+- **Fewer tiles.** Shrink `aoi.bbox` to a half-degree multiple — `[-118.0, 37.5, -117.5, 38.0]`
+  is the single tile Cuprite itself sits in — and lower `budget.max_tiles` to match.
 - **One month.** `time.start: 2026-06-01`, `time.end: 2026-07-01`, `deliver: P1M`. Votes are cast
   per month, so `min_count: 2` can never be met by a single month: lower it to 1.
-- **A bigger area at the delivered tiling.** Set `tile_size: 1.0` and `block_size: 720` to match
-  `../emit-critical-minerals/`; the same bbox then becomes one tile, and the AOI has to grow to
-  fan out again.
+- **The delivered tiling.** Set `tile_size: 1.0` and `block_size: 720` to match
+  `../emit-critical-minerals/`. The tile folders then read as degrees (`-118_37`), which is worth
+  something; the same 2 x 3 set becomes a 2 x 3 degree box, which CMR answers with 89 granules and
+  about 15 GB. Raise `budget.max_granules` from 100 if you do.
 
 Caching behaves as it does in the Nevada example, with one addition: `tile_size` is part of the
 grid id, so changing it invalidates every GLT, snapshot and product block. Changing only the
@@ -228,9 +233,11 @@ grid id, so changing it invalidates every GLT, snapshot and product block. Chang
 
 Identical to [`../emit-cmr-nevada/README.md` §6](../emit-cmr-nevada/README.md#6-the-same-run-in-the-cloud):
 point `outputs.bucket` at the deployment's S3 root, set `$STRATUM_LAMBDA_FUNCTION`, and run with
-`--executor aws`. Six tiles make it a slightly more interesting test — 252 invocations rather than
-205, and six workers writing six products into one bucket — but nothing about the manifest or the
-code changes. [Deploying to AWS](../../docs/guide/deploying.html) is the runbook.
+`--executor aws`. Six tiles make it a considerably more interesting test — **719 invocations**
+rather than 205, and six workers writing six products into one bucket — but nothing about the
+manifest or the code changes. It is also the first case where fan-out concurrency matters: 719
+items at the default `--workers 32` is the scale at which the open question about exhausting
+account Lambda concurrency starts to bite. [Deploying to AWS](../../docs/guide/deploying.html) is the runbook.
 
 ## 9. Where things are
 
@@ -238,13 +245,13 @@ code changes. [Deploying to AWS](../../docs/guide/deploying.html) is the runbook
 examples/emit-cmr-cuprite/
   manifest.yaml                 the run definition
   index/granules.parquet        the CMR index: URLs, checksums, footprints, cloud cover
-  out/assets/                   downloaded granules, named by checksum (3.7 GB after a run)
+  out/assets/                   downloaded granules, named by checksum (6.4 GB after a run)
   out/cache/{glt,snapshot,product}/   content-addressed intermediates, shared by every run
   out/runs/<run_id>/            frozen index, plan.json, work lists, report.md, provenance.json
   out/products/<run_id>/
     collection.json             one STAC collection for the run
-    -470_149/20260101_20260901/ ... and five more tiles, each with eight rasters,
-    -469_149/...                    mineral_1_legend.json, classes.json and item.json
+    -236_74/20260101_20260901/  ... and five more tiles, each with eight rasters,
+    -235_74/...                     mineral_1_legend.json, classes.json and item.json
 ```
 
 `index/`, `out/` and `assets/` are git-ignored. The 1.85 GB radiance files are never downloaded:

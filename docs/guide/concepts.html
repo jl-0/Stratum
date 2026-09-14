@@ -183,8 +183,10 @@ degrees confused;</li>
 <p>Tiles need not cover the world. An area of interest resolves to the set of tiles intersecting
 it, so a global EMIT run should clip to the coverage band rather than iterate dead cells.
 <code>examples/emit-cmr-cuprite/</code> is that resolution worked through: one
-<code>aoi.bbox</code> and a quarter-degree <code>tile_size</code> become six tiles, six products
-and six STAC items, with no other change from the single-tile example beside it.</p>
+<code>aoi.bbox</code> and a half-degree <code>tile_size</code> become six tiles, six products and
+six STAC items, with no other change from the single-tile example beside it. It also shows the
+trap in tile names &mdash; an index is a count of <code>tile_size</code> steps, so at half a degree
+<code>-236_75</code> means lon [-118.0, -117.5), not degree -236.</p>
 
 <h3 id="halos">Halos</h3>
 

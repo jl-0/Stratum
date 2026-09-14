@@ -1,0 +1,86 @@
+# L2B-only run over the same tile as manifest.yaml: every 2026 granule in trial-data/, monthly
+# epochs voted into one product. No L1B OBS files are needed - `max_band_depth` ranks on the L2B
+# band depth alone, and regrid takes its geolocation from the first sensor-space role
+# (`mineral`, spec 03 section 3) because no `geometry` role is declared.
+#
+#     pixi run stratum run -m examples/trial-nevada/manifest-l2b-only.yaml
+#
+# The index under ./index is shared with manifest.yaml (same source, same directory), and
+# so is the cache under ./out: the 14 June granules' GLTs are cache hits here even though their
+# geolocation was read from the OBS file there and from the MIN file here - the two carry one
+# geolocation, and the GLT key is (granule, grid, max_distance), not the asset (06 section 2).
+
+run_id: trial-nevada-l2b
+description: L2B-only trial - tile (-118, 41), Jan-Aug 2026, strongest feature wins, monthly vote
+
+grid:
+  crs: EPSG:4326
+  resolution: [0.000277777777777778, -0.000277777777777778]   # one arcsecond
+  tile_size: 1.0
+  origin: [-180, -90]
+  block_size: 720
+
+aoi:
+  tiles: [[-118, 41]]
+
+time:
+  start: 2026-01-01
+  end:   2026-09-01
+  epoch: P1M                  # eight monthly votes
+  deliver: P8M                # one product over the whole range
+
+inputs:
+  index_location: ./index
+  source:
+    kind: local
+    root: ../../trial-data
+    patterns:
+      EMITL2BMIN:
+        MIN: "EMIT_L2B_MIN_001_*.nc"
+        MINUNCERT: "EMIT_L2B_MINUNCERT_001_*.nc"
+      EMITL1BRAD:                       # CMR short name; OBS is its second asset, RAD is not listed
+        OBS: "EMIT_L1B_OBS_001_*.nc"     # indexed if present; not read by this manifest
+  roles:
+    mineral:
+      collection: EMITL2BMIN
+      var: group_1_mineral_id
+      class_table: {source: embedded, path: /mineral_metadata, key: index,
+                    attributes: [name, record, library, group, url]}
+    mineral_depth: {collection: EMITL2BMIN, var: group_1_band_depth}
+
+granule_filter: []            # no cloud fraction in a local index (02 section 4)
+
+pixel_mask:
+  - {ref: edge_trim, columns: 7}
+
+scorer:
+  ref: max_band_depth
+
+snapshot:
+  name: trial-l2b-v1
+  layers:
+    mineral_1:
+      kind: categorical
+      source: mineral
+      classes: source
+      aggregate: {method: vote, min_count: 2, ignore: [none], tie_break: highest_score}
+    depth_1:
+      kind: continuous
+      source: mineral_depth
+      aggregate: {method: median, conditional_on: mineral_1, spread: iqr}
+
+outputs:
+  bucket: ./out
+  formats: [cog]
+  stac: true
+  render:
+    mineral_1:
+      mapper: categorical
+      on_unmapped: grey
+      alpha_from: {band: mineral_1_agreement, domain: [0.25, 1.0], range: [60, 255]}
+
+budget:
+  max_tiles: 1
+  max_granules: 100
+  max_vcpu_hours: 4
+  on_exceed: fail

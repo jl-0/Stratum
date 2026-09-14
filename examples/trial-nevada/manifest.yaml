@@ -1,0 +1,107 @@
+# The first-slice trial run (first-slice plan section 2): one tile, one epoch, MinViewZenith,
+# staged granules on local disk. Run from the repo root:
+#
+#     pixi run stratum run -m examples/trial-nevada/manifest.yaml
+#
+# `inputs.index_location` is filled by `stratum plan` from `inputs.source` when its index does not exist
+# (`stratum index build -m ...` is the explicit way); the root `outputs.bucket` is a path
+# relative to this file, so cache/, runs/ and products/ land under examples/trial-nevada/out/.
+#
+# The L1B OBS granules matching the June 2026 MIN granules over the tile must be present in
+# trial-data/ (fetched 2026-09-02: 14 files); without them every MIN granule lacks the
+# `geometry` role and the plan refuses with "no granule survives selection". The collection is
+# EMITL1BRAD, as in CMR (there is no EMITL1BOBS short name): the OBS file is the second asset of
+# an EMITL1BRAD.001 record beside the 1.85 GB RAD file, which no pattern names and so is never
+# indexed or fetched. The same patterns shape drives a `kind: cmr` source (12 section 5).
+# manifest-parity.yaml is the variant compared against SpectralUtil's fused GLT by parity.py.
+
+run_id: trial-nevada
+description: First-slice trial - tile (-118, 41), June 2026, most-nadir look wins
+
+grid:
+  crs: EPSG:4326
+  resolution: [0.000277777777777778, -0.000277777777777778]   # one arcsecond
+  tile_size: 1.0
+  origin: [-180, -90]
+  block_size: 720                  # 3600-cell tile -> 5 x 5 blocks
+
+aoi:
+  tiles: [[-118, 41]]         # lon [-118, -117), lat [41, 42): northern Nevada
+
+time:
+  start: 2026-06-01
+  end:   2026-07-01
+  epoch: P1M
+  deliver: P1M                # == {every: P1M, window: P1M, align: exact}
+
+inputs:
+  index_location: ./index
+  source:
+    kind: local
+    root: ../../trial-data
+    patterns:                 # {collection: {asset: glob}}; the id is what `*` matched
+      EMITL2BMIN:
+        MIN: "EMIT_L2B_MIN_001_*.nc"
+        MINUNCERT: "EMIT_L2B_MINUNCERT_001_*.nc"
+      EMITL1BRAD:                       # CMR short name; OBS is its second asset, RAD is not listed
+        OBS: "EMIT_L1B_OBS_001_*.nc"
+  roles:
+    geometry: {collection: EMITL1BRAD, asset: OBS, var: obs}
+    mineral:
+      collection: EMITL2BMIN
+      var: group_1_mineral_id
+      class_table:            # the product's own table (11 section 9)
+        source: embedded
+        path: /mineral_metadata
+        key: index
+        attributes: [name, record, library, group, url]
+    mineral_depth: {collection: EMITL2BMIN, var: group_1_band_depth}
+  # Band indices are 0-BASED into the L1B OBS `obs` variable, whose bands are:
+  #   0 path length, 1 to-sensor azimuth, 2 to-sensor zenith, 3 to-sun azimuth,
+  #   4 to-sun zenith, 5 phase, 6 slope, 7 aspect, 8 cosine i, 9 UTC time,
+  #   10 earth-sun distance.
+  band_aliases:
+    view_zenith:  {role: geometry, band: 2}
+    solar_zenith: {role: geometry, band: 4}
+
+# No cloud filter: a local source has no cloud fraction (02 section 4), and on_missing: fail
+# would refuse every granule.
+granule_filter: []
+
+pixel_mask:
+  - {ref: edge_trim, columns: 7}
+
+scorer:
+  ref: min_view_zenith
+
+snapshot:
+  name: trial-v1
+  layers:
+    mineral_1:
+      kind: categorical
+      source: mineral
+      classes: source           # the granules' own table; all must agree by fingerprint
+      aggregate: {method: vote, min_count: 1, ignore: [none], tie_break: highest_score}
+    depth_1:
+      kind: continuous
+      source: mineral_depth
+      aggregate: {method: median, conditional_on: mineral_1}
+    view_zenith:
+      kind: continuous
+      source: view_zenith
+      aggregate: {method: none}
+
+outputs:
+  bucket: ./out
+  formats: [cog]
+  stac: true
+  render:
+    mineral_1:
+      mapper: categorical
+      on_unmapped: grey
+
+budget:
+  max_tiles: 1
+  max_granules: 100
+  max_vcpu_hours: 4
+  on_exceed: fail

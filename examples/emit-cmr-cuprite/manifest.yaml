@@ -7,9 +7,10 @@
 #     pixi run stratum run         -m examples/emit-cmr-cuprite/manifest.yaml
 #
 # This is emit-cmr-nevada's science over a MULTI-TILE area: the same collections, roles, masks,
-# scorer and monthly vote, changed in exactly two places - a quarter-degree `tile_size` and a
-# `bbox` instead of an explicit tile list. Everything else being identical is the point: the
-# fan-out over tiles is a property of the grid and the AOI, never of the pipeline.
+# scorer and monthly vote, changed only in geometry - a half-degree `tile_size`, the `block_size`
+# that follows from it, and a `bbox` instead of an explicit tile list. Everything else being
+# identical is the point: the fan-out over tiles is a property of the grid and the AOI, never of
+# the pipeline. 719 work items against the single-tile example's 205.
 #
 # Every path below is relative to this file. README.md has the tile map and the measured cost.
 
@@ -20,14 +21,16 @@ grid:
   crs: EPSG:4326                                                # geographic degrees; every unit below is degrees
   resolution: [0.000277777777777778, -0.000277777777777778]   # one arcsecond - IDENTICAL to emit-cmr-nevada
   origin: [-180, -90]             # the same lattice too: cell edges fall at origin + n * resolution
-  tile_size: 0.25                 # a quarter degree per tile: 900 x 900 cells (nevada uses 1.0)
+  tile_size: 0.5                  # a half degree per tile: 1800 x 1800 cells (nevada uses 1.0)
                                   #   Tiles are cut on the CELL lattice, not on a lattice of their
                                   #   own, so changing tile_size re-cuts the same cells into
                                   #   different rectangles - no pixel moves, and no tile straddles
-                                  #   a cell. Six quarter-degree tiles cost far less to download
-                                  #   than six whole-degree ones while still exercising the fan-out.
-  block_size: 450                 # cells per block edge: a tile is 2 x 2 blocks, so 24 blocks in all
-                                  #   (nevada: 5 x 5 blocks in one tile = 25). Comparable work,
+                                  #   a cell. Six half-degree tiles cover 1.0 x 1.5 degrees; the
+                                  #   same 2 x 3 set at the delivered 1.0 would be 2 x 3 degrees
+                                  #   and 89 granules instead of 45 (measured against CMR), which
+                                  #   is more than an example should ask anyone to download.
+  block_size: 450                 # cells per block edge: a tile is 4 x 4 blocks, so 96 blocks in all
+                                  #   (nevada: 5 x 5 blocks in one tile = 25). Four times the work,
                                   #   spread over six products instead of one.
 
 aoi:
@@ -35,21 +38,22 @@ aoi:
   # intersect the box, ordered south to north then west to east. This box sits exactly on tile
   # edges, so it resolves to a clean 2 wide x 3 tall set and pulls in no seventh tile:
   #
+  #       38.50 +---------+---------+
+  #             | -236,76 | -235,76 |
   #       38.00 +---------+---------+
-  #             | -470,151| -469,151|
-  #       37.75 +---------+---------+
-  #             | -470,150| -469,150|  <- Cuprite (37.52 N, 117.23 W) is in this one
+  #             | -236,75 | -235,75 |  <- Cuprite (37.52 N, 117.23 W) is in this one
   #       37.50 +---------+---------+
-  #             | -470,149| -469,149|
-  #       37.25 +---------+---------+
-  #          -117.50   -117.25   -117.00
+  #             | -236,74 | -235,74 |
+  #       37.00 +---------+---------+
+  #          -118.00   -117.50   -117.00
   #
-  bbox: [-117.5, 37.25, -117.0, 38.0]
-  # tiles: [[-470, 149], [-469, 149], [-470, 150], [-469, 150], [-470, 151], [-469, 151]]
+  bbox: [-118.0, 37.0, -117.0, 38.5]
+  # tiles: [[-236, 74], [-235, 74], [-236, 75], [-235, 75], [-236, 76], [-235, 76]]
   #                                 # the same six, named outright. A tile index is a COUNT of
   #                                 # tile_size steps from the origin, which reads as whole degrees
-  #                                 # only when tile_size is 1.0 - at 0.25 the indices are x4.
-  #                                 # Prefer bbox when the tiling is a consequence of the area.
+  #                                 # only when tile_size is 1.0 - at 0.5 the indices are x2, which
+  #                                 # is why `-236_75` names lon [-118.0, -117.5) and not degree
+  #                                 # -236. Prefer bbox when the tiling follows from the area.
   # zones: [cuprite-nv]             # alternative: ../zones.yaml has an approximate district box.
   # registry: ../zones.yaml         #   It is 0.6 x 0.6 degrees, so it does NOT cut into 2 x 3;
   #                                 #   it is the delivered-product zone, not this demo's AOI.
