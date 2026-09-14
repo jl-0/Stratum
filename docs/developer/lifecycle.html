@@ -139,7 +139,7 @@ is about two hundred lines of sequence, and the order is load-bearing.</p>
   <span class="label">Step 8 before step 9 is not an accident</span>
   <p>Swapping them would make an over-budget plan download granules before refusing. The comment
   at
-  <a class="src" data-sym="the budget gate (09 section 4) comes BEFORE" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/plan/run.py#L788">plan/run.py:776</a>
+  <a class="src" data-sym="the budget gate (09 section 4) comes BEFORE" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/plan/run.py#L791">plan/run.py:776</a>
   says so explicitly; treat it as a constraint on any reordering.</p>
 </div>
 
@@ -162,7 +162,7 @@ which is what you ship. A run directory is disposable; the cache is not.</p>
 <h2 id="work-lists">4. The four work lists</h2>
 
 <p>A work item is one JSON object on one line, and it is the entire input to a worker besides
-<code>plan.json</code>. <a class="src" data-sym="def build_work_lists" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/plan/run.py#L923">build_work_lists</a>
+<code>plan.json</code>. <a class="src" data-sym="def build_work_lists" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/plan/run.py#L926">build_work_lists</a>
 emits all four in a single pass over the tiles.</p>
 
 <div class="tw">

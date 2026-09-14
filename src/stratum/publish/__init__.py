@@ -8,7 +8,9 @@ from __future__ import annotations
 
 from stratum.publish.cogs import (
     COG_MEDIA_TYPE,
+    COG_MIN_BLOCKSIZE,
     check_formats,
+    cog_block_size,
     internal_tile_size,
     is_categorical,
     write_data_cogs,
@@ -60,6 +62,7 @@ from stratum.publish.stitch import read_band, stitch, write_product_block
 
 __all__ = [
     "COG_MEDIA_TYPE",
+    "COG_MIN_BLOCKSIZE",
     "RAMPS",
     "AlphaFrom",
     "CategoricalMapper",
@@ -74,6 +77,7 @@ __all__ = [
     "check_formats",
     "class_table_record",
     "classification_classes",
+    "cog_block_size",
     "internal_tile_size",
     "is_categorical",
     "item_id",

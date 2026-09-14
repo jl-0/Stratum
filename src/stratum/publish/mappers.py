@@ -22,6 +22,7 @@ import rasterio
 from rasterio.enums import ColorInterp
 
 from stratum.hooks import ImageSpec, Legend
+from stratum.publish.cogs import cog_block_size
 from stratum.publish.colors import (
     ON_UNMAPPED,
     apply_ramp,
@@ -274,9 +275,13 @@ def write_image(path: Path, rgba: np.ndarray, tile: TileRef, *,
                 tags: Mapping[str, Any], cog: bool = False) -> Path:
     """A 4-band uint8 RGBA GeoTIFF on the tile's grid, alpha declared as alpha.
 
-    `cog=True` rewrites it through the COG driver. Overviews decimate rather than average: these
-    colours come from a legend, and averaging two of them produces a third that is in no legend
-    and means nothing.
+    Written in strips, for the reason in `cogs.write_geotiff`: a plain GeoTIFF is the one a
+    reviewer opens with what they already have, and macOS ImageIO refuses some internally tiled
+    TIFFs.
+
+    `cog=True` rewrites it through the COG driver, which tiles it. Overviews decimate rather than
+    average: these colours come from a legend, and averaging two of them produces a third that is
+    in no legend and means nothing.
     """
     rgba = np.asarray(rgba)
     if rgba.dtype != np.uint8 or rgba.ndim != 3 or rgba.shape[-1] != 4:
@@ -286,8 +291,8 @@ def write_image(path: Path, rgba: np.ndarray, tile: TileRef, *,
     rows, cols = tile.shape
     bs = 256 if min(rows, cols) >= 256 else 16
     profile = {"driver": "GTiff", "height": rows, "width": cols, "count": 4, "dtype": "uint8",
-               "crs": tile.grid.crs, "transform": tile.transform, "tiled": True,
-               "blockxsize": bs, "blockysize": bs, "compress": "deflate",
+               "crs": tile.grid.crs, "transform": tile.transform, "tiled": False,
+               "blockysize": bs, "compress": "deflate",
                "photometric": "RGB", "alpha": "YES"}      # ALPHA=YES marks band 4 as alpha
     path = Path(path)
     if cog:
@@ -297,7 +302,7 @@ def write_image(path: Path, rgba: np.ndarray, tile: TileRef, *,
         with tempfile.TemporaryDirectory(dir=path.parent) as tmp:
             staged = write_image(Path(tmp) / path.name, rgba, tile, tags=tags, cog=False)
             rio_copy(str(staged), str(path), driver="COG", COMPRESS="DEFLATE",
-                     OVERVIEW_RESAMPLING="NEAREST", BLOCKSIZE=str(bs))
+                     OVERVIEW_RESAMPLING="NEAREST", BLOCKSIZE=str(cog_block_size((rows, cols))))
         return path
     with rasterio.open(path, "w", **profile) as dst:
         dst.write(np.moveaxis(rgba, -1, 0))

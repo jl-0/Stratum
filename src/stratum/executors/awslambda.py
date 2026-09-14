@@ -11,7 +11,7 @@
 The event is four scalars, because a Step Functions child execution input is capped at 256 KiB
 and a work item must never carry geometry:
 
-    {"root": "s3://bucket/prefix/", "run_id": "cm-a1b2c3d4", "stage": "regrid", "index": 41}
+    {"root": "s3://bucket/prefix/", "run_id": "cm-20260914-a1b2c3d4", "stage": "regrid", "index": 41}
 
 **No credential is ever configured into the function.** A value in Terraform's `environment`
 block lands in Terraform state and in the function configuration, where `lambda:GetFunction` can

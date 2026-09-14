@@ -31,7 +31,7 @@ stratum plan -m manifest.yaml
 stratum run -m manifest.yaml
 
 <span class="c"># 3. Read the report. --run is the run directory, or the run id under --root.</span>
-stratum report --run cuprite-2024-3f9a1c2e --root ./out</code></pre>
+stratum report --run cuprite-2024-20260914-3f9a1c2e --root ./out</code></pre>
 
 <p>The manifest is the entire interface. It is versioned in git, reviewed like code, and hashed
 into the provenance record — so a run can be traced back to the exact document that produced
@@ -188,10 +188,10 @@ prints:</p>
 
 <pre><code>$ stratum plan -m manifest.yaml
 
-# Stratum plan report: cuprite-2024-3f9a1c2e
+# Stratum plan report: cuprite-2024-20260914-3f9a1c2e
 
 - manifest_hash: `sha256:3f9a1c2e…`
-- run_dir: `…/out/runs/cuprite-2024-3f9a1c2e`
+- run_dir: `…/out/runs/cuprite-2024-20260914-3f9a1c2e`
 
 ## Selection
 

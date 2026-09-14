@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import math
 from collections.abc import Callable, Mapping
-from datetime import date, datetime
+from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import Annotated, Any, Literal
 
@@ -537,7 +537,7 @@ class BudgetSpec(Strict):
 # -------------------------------------------------------------------------------------- manifest
 class Manifest(Strict):
     """The whole document (09 section 2). `run_id` as written is `run_label`; the derived
-    `run_id` is `{run_label}-{manifest_hash[:8]}` (09 section 6)."""
+    `run_id` is `{run_label}-{YYYYMMDD}-{manifest_hash[7:15]}` (09 section 5)."""
 
     model_config = ConfigDict(extra="forbid", populate_by_name=True)
 
@@ -600,10 +600,27 @@ class Manifest(Strict):
         strings, `deliver` in long form. What `manifest_hash` hashes."""
         return self.model_dump(mode="json", by_alias=True)
 
+    def run_id_on(self, day: date) -> str:
+        """The run id for a run planned on `day` (UTC): `{label}-{YYYYMMDD}-{hash[7:15]}`.
+
+        The hash is what gives a run its identity - edit the manifest and you get a different
+        directory, so a changed vote threshold cannot overwrite the previous product ([00 §5]
+        invariant 4). The date is in front of it only so that `ls` sorts a label's runs in the
+        order they were made; it carries no identity of its own and nothing keys off it.
+
+        Explicit rather than "today", because `run_id` must not change under a run: `plan_run`
+        freezes one from the same clock reading it records as `planned_at`, writes it into
+        `plan.json`, and every worker reads it from there rather than recomputing. A run started
+        seconds before midnight therefore stays in one directory.
+        """
+        from stratum.manifest import manifest_hash  # avoids a cycle at import time
+        return f"{self.run_label}-{day:%Y%m%d}-{manifest_hash(self)[7:15]}"
+
     @property
     def run_id(self) -> str:
-        from stratum.manifest import manifest_hash  # avoids a cycle at import time
-        return f"{self.run_label}-{manifest_hash(self)[7:15]}"
+        """The run id as of now (UTC). A convenience for `stratum validate`; a run uses the one
+        `plan_run` froze, not this."""
+        return self.run_id_on(datetime.now(UTC).date())
 
     # -- grid and area ----------------------------------------------------------------------
     def grid_def(self) -> GridDef:

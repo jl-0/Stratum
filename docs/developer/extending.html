@@ -227,7 +227,7 @@ confusing failure rather than a clean one:</p>
 <tbody>
 <tr><td>1</td><td>The stage name, in pipeline order</td><td><a class="src" data-sym="STAGES: tuple[str, ...]" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/plan/document.py#L52">STAGES</a></td></tr>
 <tr><td>2</td><td>An artifact kind, if it writes to the cache</td><td><a class="src" data-sym="ARTIFACT_KINDS" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/cache/__init__.py#L32">ARTIFACT_KINDS</a> and a <code>*_inputs</code> function beside it</td></tr>
-<tr><td>3</td><td>A work list, with the fan-out rule that decides when an item exists</td><td><a class="src" data-sym="def build_work_lists" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/plan/run.py#L923">build_work_lists</a></td></tr>
+<tr><td>3</td><td>A work list, with the fan-out rule that decides when an item exists</td><td><a class="src" data-sym="def build_work_lists" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/plan/run.py#L926">build_work_lists</a></td></tr>
 <tr><td>4</td><td>A handler returning <code>(key_or_path, hit)</code></td><td><a class="src" data-sym="HANDLERS" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/executors/worker.py#L182">HANDLERS</a></td></tr>
 <tr><td>5</td><td>A key function the <em>next</em> stage can call to recompute this stage's output address without doing the work</td><td>beside the handler — <code>snapshot_key</code> and <code>product_key</code> are the models</td></tr>
 <tr><td>6</td><td>The CLI's <code>--stage</code> choices, and the docs</td><td><a class="src" data-sym="def exec_" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/cli.py#L172">cli.py:150</a>, <a href="../reference/cli.html">Commands</a></td></tr>

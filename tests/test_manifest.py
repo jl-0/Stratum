@@ -3,7 +3,7 @@ and the built-in granule filters (04 section 2)."""
 from __future__ import annotations
 
 import copy
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import Any
 
@@ -100,6 +100,7 @@ def test_example_manifest_loads_and_derives():
     m = load_manifest(EXAMPLE)
     assert m.run_label == "cm-zones-2026-annual-r3"
     assert m.run_id.startswith("cm-zones-2026-annual-r3-") and len(m.run_id.split("-")[-1]) == 8
+    assert m.run_id_on(date(2026, 9, 14)).startswith("cm-zones-2026-annual-r3-20260914-")
     assert len(m.epochs()) == 48 and len(m.delivery_periods()) == 4
     assert m.time.deliver is not None and str(m.time.deliver.window) == "P1Y"
     schema = m.snapshot_schema()
@@ -123,7 +124,12 @@ def test_example_manifest_loads_and_derives():
 def test_synthetic_manifest_is_clean(tmp_path):
     m = loaded(tmp_path)
     assert validate_static(m) == []
-    assert m.run_id == f"trial-{manifest_hash(m)[7:15]}"
+    # `{label}-{YYYYMMDD}-{hash}`: the hash is the identity, the date is only so a label's runs
+    # sort in the order they were made. `run_id_on` is explicit so a run cannot straddle midnight.
+    assert m.run_id_on(date(2026, 9, 14)) == f"trial-20260914-{manifest_hash(m)[7:15]}"
+    assert m.run_id_on(date(2027, 1, 2)) == f"trial-20270102-{manifest_hash(m)[7:15]}"
+    assert sorted([m.run_id_on(date(2026, 12, 31)), m.run_id_on(date(2026, 2, 1))]) == [
+        m.run_id_on(date(2026, 2, 1)), m.run_id_on(date(2026, 12, 31))]   # sorts chronologically
     assert m.grid_def() == GridDef("EPSG:4326", (ARC, -ARC), (-180.0, -90.0), 1.0, 720)
     assert m.base_dir == tmp_path.resolve()
 

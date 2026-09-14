@@ -697,7 +697,10 @@ def plan_run(manifest_path: Path | str, out_dir: Path | str | None = None,
     ws = workspace_for(m)
     root = ws.path
     mhash = manifest_hash(m)
-    run_id = m.run_id
+    # One clock reading for both, so the date in the run id is the date in the report and a run
+    # started just before midnight cannot straddle two directories (09 section 5).
+    planned_at = datetime.now(UTC)
+    run_id = m.run_id_on(planned_at.date())
     if out_dir is not None and ws.remote:
         raise PlanError(f"--out is for a local root; outputs.bucket is {ws.uri}, where the run "
                         f"directory is {ws.uri}runs/{run_id}/ by definition (06 section 4)")
@@ -806,7 +809,7 @@ def plan_run(manifest_path: Path | str, out_dir: Path | str | None = None,
         # bucket root records the URI and never this process's mirror (`stratum.storage`)
         "manifest_path": str(manifest_path), "root": ws.uri, "run_dir": ws.url(run_dir),
         "products_dir": ws.url(root / "products" / run_id),
-        "planned_at": iso(datetime.now(UTC)),
+        "planned_at": iso(planned_at),
         "tiles": [[t.tx, t.ty] for t in tiles],
         "epochs": [epoch_to_doc(e) for e in epochs],
         "periods": [period_to_doc(p) for p in periods],

@@ -59,6 +59,13 @@ def check_formats(formats: Sequence[str]) -> None:
                                       "slice; only `cog` is (07 section 2)")
 
 
+#: GDAL's COG driver refuses a smaller BLOCKSIZE ("should be >= 128") and, having refused it,
+#: writes STRIPS - so a raster narrower than this would be handed back as a plain GeoTIFF that
+#: `formats: [cog]` had promised was a COG. Delivered tiles are 900 or 3600 cells and never come
+#: near it; small ones do, and the failure is a warning on stderr rather than an error.
+COG_MIN_BLOCKSIZE = 128
+
+
 def internal_tile_size(shape: tuple[int, int]) -> int:
     """The GeoTIFF internal tile edge for a raster of `shape`: the largest multiple of 16 up to
     512 that divides both dimensions, so block-aligned reads touch only their own bytes; 256 when
@@ -69,6 +76,11 @@ def internal_tile_size(shape: tuple[int, int]) -> int:
         if rows % d == 0 and cols % d == 0:
             best = d
     return best or 256
+
+
+def cog_block_size(shape: tuple[int, int]) -> int:
+    """`internal_tile_size`, never below what the COG driver will accept."""
+    return max(COG_MIN_BLOCKSIZE, internal_tile_size(shape))
 
 
 def is_categorical(spec: BandSpec) -> bool:
@@ -100,20 +112,27 @@ def _band_first(data: np.ndarray, spec: BandSpec) -> np.ndarray:
 def write_geotiff(path: Path, data: np.ndarray, spec: BandSpec, *, transform: Affine, crs: str,
                   tags: Mapping[str, Any], colormap: Mapping[int, RGBA] | None = None,
                   cog: bool = False) -> Path:
-    """One delivered band as a tiled deflate GeoTIFF: nodata, description, units and the tags
+    """One delivered band as a deflate GeoTIFF in STRIPS: nodata, description, units and the tags
     from `spec` and `tags`; a GDAL colour table on band 1 when `colormap` is given.
 
-    `cog=True` writes it through GDAL's COG driver, which puts the header at the front of the
-    file and builds internal overviews - the two things a range-reading tile server needs and
-    that a plain tiled GeoTIFF does not provide. It costs roughly twice the bytes, nearly all of
-    it the overview pyramid.
+    `cog=True` writes it through GDAL's COG driver instead, which tiles it, puts the header at
+    the front of the file and builds internal overviews - the three things a range-reading tile
+    server needs and that a plain GeoTIFF does not provide. It costs roughly twice the bytes,
+    nearly all of it the overview pyramid.
+
+    Strips rather than internal tiles, because `outputs.formats: [gtiff]` exists to be opened by
+    whatever a reviewer already has, and macOS ImageIO refuses SOME internally tiled TIFFs while
+    reading every stripped one - data-dependently, so `mineral_1` would open and `n_epochs`
+    beside it would not. Nothing pays for it: no caller reads one of these windowed (`stitch`
+    reads a product block whole), the COG driver re-tiles its input anyway, and deflate over
+    `blockysize` rows costs about 3 % more bytes than square tiles.
     """
     arr = _band_first(data, spec).astype(spec.dtype, copy=False)
     count, rows, cols = arr.shape
     bs = internal_tile_size((rows, cols))
     profile = {"driver": "GTiff", "height": rows, "width": cols, "count": count,
                "dtype": spec.dtype, "nodata": spec.nodata, "crs": crs, "transform": transform,
-               "tiled": True, "blockxsize": bs, "blockysize": bs, "compress": "deflate"}
+               "tiled": False, "blockysize": bs, "compress": "deflate"}
     path = Path(path)
     if cog:
         # GDAL's COG driver is create-copy only, so the file is written once as a plain GeoTIFF
@@ -125,7 +144,7 @@ def write_geotiff(path: Path, data: np.ndarray, spec: BandSpec, *, transform: Af
             # decimates. A continuous one averages, which is what makes a zoomed-out view honest.
             resampling = "NEAREST" if is_categorical(spec) else "AVERAGE"
             rio_copy(str(staged), str(path), driver="COG", COMPRESS="DEFLATE",
-                     OVERVIEW_RESAMPLING=resampling, BLOCKSIZE=str(internal_tile_size(
+                     OVERVIEW_RESAMPLING=resampling, BLOCKSIZE=str(cog_block_size(
                          (int(data.shape[0]), int(data.shape[1])))))
         return path
     with rasterio.open(path, "w", **profile) as dst:

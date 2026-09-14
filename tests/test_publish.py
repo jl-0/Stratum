@@ -18,6 +18,7 @@ import rasterio
 
 from stratum import __version__
 from stratum.publish import (
+    COG_MIN_BLOCKSIZE,
     RAMPS,
     AlphaFrom,
     CategoricalMapper,
@@ -26,6 +27,7 @@ from stratum.publish import (
     build_mapper,
     build_provenance,
     check_formats,
+    cog_block_size,
     internal_tile_size,
     palette_color,
     publish_period,
@@ -156,7 +158,8 @@ def test_write_data_cogs_round_trip(tmp_path, product_dirs):
         assert src.descriptions == (bands[0].description,)
         assert src.tags()["run_id"] == RUN_ID and src.tags()["manifest_hash"] == TAGS["manifest_hash"]
         assert src.tags()["grid_id"] == GRID.id and src.tags(1)["units"] == "unitless"
-        assert src.block_shapes == [(32, 32)]
+        assert src.block_shapes == [(128, 128)]     # COG_MIN_BLOCKSIZE: 32 is below what the
+                                                   # COG driver accepts, so cog_block_size clamps
         assert src.transform == TILE.transform and src.crs.to_epsg() == 4326
         cmap = src.colormap(1)
         assert cmap[1][:3] == tuple(COLORS["goethite"]) and cmap[3][:3] == tuple(COLORS["pyrite"])
@@ -186,8 +189,37 @@ def test_write_data_cogs_requires_run_tags(tmp_path):
         write_data_cogs(tmp_path, stack, TILE, class_table=None, tags={"run_id": "x"})
 
 
+def test_gtiff_is_stripped_and_cog_is_tiled(tmp_path):
+    """`gtiff` writes strips, `cog` writes internal tiles, and nothing may quietly swap them.
+
+    The split is not cosmetic. `cog` MUST be tiled - a range-reading tile server is the whole
+    point of the format - while `gtiff` exists to be opened by whatever a reviewer already has,
+    and macOS ImageIO refuses some internally tiled TIFFs while reading every stripped one. The
+    failure is data-dependent, so it cannot be caught by looking at one file: `mineral_1` opens
+    and `n_epochs` beside it does not, at both 900 x 900 and 3600 x 3600.
+    """
+    spec = BandSpec("m", "uint16", "m", nodata=ND)
+    stack = stack_from({"m": np.zeros((32, 32), np.uint16)}, [spec])
+
+    gt = tmp_path / "gt"
+    write_data_cogs(gt, stack, TILE, class_table=None, tags=TAGS, fmt="gtiff")
+    with rasterio.open(gt / "m.tif") as src:
+        assert not src.profile["tiled"], "gtiff must be stripped, not internally tiled"
+        assert src.block_shapes[0][1] == src.width, "a strip spans the full width"
+        assert src.overviews(1) == []
+
+    cg = tmp_path / "cog"
+    write_data_cogs(cg, stack, TILE, class_table=None, tags=TAGS, fmt="cog")
+    with rasterio.open(cg / "m.tif") as src:
+        assert src.profile["tiled"], "a COG is tiled by definition"
+        # Not (32, 32): GDAL refuses a BLOCKSIZE under 128 and, having refused it, writes strips -
+        # which would hand back a plain GeoTIFF under the name of a COG. cog_block_size clamps.
+        assert src.block_shapes[0] == (COG_MIN_BLOCKSIZE, COG_MIN_BLOCKSIZE)
+
+
 def test_internal_tile_size_and_formats():
     assert internal_tile_size((3600, 3600)) == 400
+    assert cog_block_size((3600, 3600)) == 400 and cog_block_size((32, 32)) == COG_MIN_BLOCKSIZE
     assert internal_tile_size((512, 512)) == 512
     assert internal_tile_size((720, 720)) == 240
     assert internal_tile_size((33, 33)) == 256

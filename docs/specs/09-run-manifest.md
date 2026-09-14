@@ -301,8 +301,18 @@ in the YAML never changes it, `deliver` always in long form — **plus** `resolv
 fingerprint of every enumeration a `@ref:` resolved to. Editing a classes file under the same
 path therefore yields a new `run_id`, as [00 §5](00-overview.md) invariant 4 requires; a manifest
 without `@ref:` hashes as its document alone. The zone registry's contents do not enter the
-hash. `run_id` is `f"{run_label}-{hash[7:15]}"` — the YAML `run_id` plus the first eight hex
-digits after the `sha256:` prefix.
+hash. `run_id` is `f"{run_label}-{YYYYMMDD}-{hash[7:15]}"` — the YAML `run_id`, the UTC date the
+run was planned, and the first eight hex digits after the `sha256:` prefix.
+
+The **hash is the identity**: edit the manifest and the run lands in a different directory, which
+is what stops a changed vote threshold overwriting the product before it ([00 §5](00-overview.md)
+invariant 4). The **date carries no identity** — it is in front of the hash only so that a listing
+of `runs/` or `products/` sorts a label's runs in the order they were made, and nothing keys off
+it. Two consequences worth stating: re-running an unchanged manifest on a later day writes a new
+run and product directory (every regrid, resolve and reduce item is still a cache hit, because
+cache keys never contain `run_id`); and `Manifest.run_id_on(day)` takes the date explicitly, so
+`plan_run` can freeze one from the same clock reading it records as `planned_at` and a run
+started seconds before midnight cannot straddle two directories.
 
 ---
 
@@ -315,7 +325,7 @@ digits after the `sha256:` prefix.
 3. ~~Do we version the manifest schema itself, so old manifests keep parsing?~~ **Resolved:** yes —
    `schema_version` at the top, `1.0`; any other value is refused.
 4. ~~Should `run_id` be user-supplied or derived from the manifest hash?~~ **Resolved:** both:
-   `{label}-{hash[7:15]}` (§5).
+   `{label}-{YYYYMMDD}-{hash[7:15]}` (§5) — the date added 2026-09-14, for sorting only.
 5. `aoi.geometry` — a polygon file — appears in the example on the site but is not modelled;
    `extra="forbid"` rejects it. Add it when a consumer needs it.
 6. ~~`EMITL1BOBS` is a local collection name only: CMR has no such short name — the OBS file is

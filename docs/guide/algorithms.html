@@ -135,7 +135,7 @@ of metadata: URLs, footprints, times, cloud cover, checksums. It reads no pixel 
   <td>The surviving granule set is written to the run directory and hashed. Every later stage
       reads the frozen set, never the live catalogue, so a re-run cannot silently include a
       granule that appeared since</td>
-  <td><a class="src" data-sym="# -- freeze (02 section 6)" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/plan/run.py#L785">plan/run.py:773</a></td>
+  <td><a class="src" data-sym="# -- freeze (02 section 6)" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/plan/run.py#L788">plan/run.py:773</a></td>
 </tr>
 </tbody>
 </table>
@@ -487,9 +487,9 @@ then:</p>
   <li><strong>Data COGs</strong> — one tiled, deflate-compressed GeoTIFF per delivered band, with
   nodata, band descriptions, units, and the run's provenance tags. Categorical bands carry a GDAL
   colour table so a plain viewer can render them.
-  <a class="src" data-sym="write_geotiff" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/publish/cogs.py#L100">cogs.py:77</a></li>
+  <a class="src" data-sym="write_geotiff" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/publish/cogs.py#L112">cogs.py:77</a></li>
   <li><strong>Images</strong> — a categorical mapper is a class → RGBA lookup
-  (<a class="src" data-sym="CategoricalMapper" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/publish/mappers.py#L91">mappers.py:91</a>);
+  (<a class="src" data-sym="CategoricalMapper" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/publish/mappers.py#L92">mappers.py:91</a>);
   a continuous mapper clips to a domain and interpolates a ramp
   (<a class="src" data-sym="apply_ramp" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/publish/colors.py#L156">colors.py:156</a>).
   Optional <code>alpha_from</code> interpolates a confidence band linearly into an alpha range, so
