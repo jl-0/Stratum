@@ -10,7 +10,7 @@ terraform {
       version = ">= 5.0" # the committed .terraform.lock.hcl is what actually pins this
     }
   }
-  backend "s3" {} # values come from -backend-config=../backend.hcl (gitignored)
+  backend "s3" {} # values come from -backend-config=./backend.hcl, generated per root (gitignored)
 }
 
 provider "aws" {

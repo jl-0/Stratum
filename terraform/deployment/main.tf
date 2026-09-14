@@ -14,7 +14,7 @@ terraform {
       version = ">= 5.0"
     }
   }
-  backend "s3" {} # ../backend.hcl, generated for THIS root: a separate state key from platform/
+  backend "s3" {} # ./backend.hcl, generated for THIS root: a separate state key from platform/
 }
 
 provider "aws" {
