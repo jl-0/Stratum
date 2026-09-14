@@ -19,6 +19,6 @@ fi
 
 if [ "${1:-}" = "init" ]; then
   "$REPO_ROOT/scripts/write-backend.sh" "$ROOT"
-  exec terraform -chdir="$DIR" init -backend-config="$REPO_ROOT/terraform/backend.hcl" "${@:2}"
+  exec terraform -chdir="$DIR" init -backend-config="$DIR/backend.hcl" "${@:2}"
 fi
 exec terraform -chdir="$DIR" "$@"

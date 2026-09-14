@@ -6,7 +6,7 @@ SHELL := /usr/bin/env bash
 
 help:
 	@echo "bootstrap  create the Terraform state bucket (once per account)"
-	@echo "tf-init    write backend.hcl from .env and terraform init the platform root"
+	@echo "tf-init    write platform/backend.hcl from .env and init the platform root"
 	@echo "tf-plan    terraform plan the platform root"
 	@echo "tf-apply   terraform apply the platform root  (PRIVILEGED - creates IAM)"
 	@echo "tf-output  show the platform root's outputs"

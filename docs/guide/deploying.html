@@ -128,12 +128,24 @@ state file), default encryption, and a public-access block.</p>
 
 <h2 id="apply">3. Apply the platform root</h2>
 
-<pre><code>make tf-init     <span class="c"># generates terraform/backend.hcl from .env, then terraform init</span>
+<pre><code>make tf-init     <span class="c"># generates this root's backend.hcl from .env, then terraform init</span>
 make tf-plan     <span class="c"># read this before applying</span>
 make tf-apply    <span class="c"># PRIVILEGED — creates IAM roles</span></code></pre>
 
-<p><code>make tf-init</code> writes <code>terraform/backend.hcl</code> from <code>.env</code> plus the
-account id resolved at run time, so even the state bucket name is never hand-written or committed.</p>
+<p><code>make tf-init</code> writes <code>terraform/platform/backend.hcl</code> from <code>.env</code>
+plus the account id resolved at run time, so even the state bucket name is never hand-written or
+committed.</p>
+
+<div class="note">
+  <span class="label">Each root has its own backend file, and its own state key</span>
+  <p>The deployment root is initialised separately with <code>make tf-deploy-init</code>, which
+  writes <code>terraform/deployment/backend.hcl</code> against
+  <code>key = deployment/terraform.tfstate</code>. They are deliberately not one shared file: a
+  shared one is rewritten on every init, so a hand-run <code>terraform init -backend-config=…</code>
+  could point one root at the other root's state. If Terraform says backend initialisation is
+  required, you are almost certainly in a root that has not been initialised yet &mdash; most often
+  <code>deployment/</code> after the platform root was already done.</p>
+</div>
 
 <div class="note">
   <span class="label">Federated sessions expire mid-apply</span>
@@ -512,7 +524,7 @@ are what keep it that way.</p>
 <tr><td><code>.env</code></td><td><strong>The one private file.</strong> <code>.env.example</code> is committed</td></tr>
 <tr><td><code>*.tfvars</code>, <code>*.tfvars.json</code></td><td>The likeliest place for a value to be typed by hand</td></tr>
 <tr><td><code>terraform.tfstate*</code></td><td>Local state should never exist; if it does it must never be committed</td></tr>
-<tr><td><code>terraform/backend.hcl</code></td><td>Generated, and names the account</td></tr>
+<tr><td><code>backend.hcl</code> (in each root)</td><td>Generated, and names the account</td></tr>
 <tr><td><code>.terraform/</code>, <code>crash.*.log</code></td><td>Provider binaries; crash dumps embed variable values</td></tr>
 <tr><td><code>.netrc</code>, <code>*.pem</code>, <code>credentials</code></td><td>Credential material of any kind</td></tr>
 </tbody>
