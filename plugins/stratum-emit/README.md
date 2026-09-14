@@ -25,7 +25,9 @@ environment or an image actually provides.
    `filters`, `mappers`, `reducers`) mapping a name to `module:Class`.
 2. Classes satisfying the protocols in `stratum.hooks` / `stratum.types`.
 3. Install it beside `stratum` — in the container image at build time, so the deployment's image
-   digest identifies the code that ran.
+   digest identifies the code that ran. Either as a directory here, named as a path dependency in
+   the root `pyproject.toml`, or as a built wheel dropped into
+   [`plugins/wheels/`](../wheels/README.md), which edits no framework file.
 
 No infrastructure change is involved at any point: a plugin is code and configuration, never a
 Terraform resource ([ADR-0003](../../docs/decisions/ADR-0003-image-build-and-digest.md)).

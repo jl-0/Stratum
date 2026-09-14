@@ -181,6 +181,11 @@ Established by reading code and data. Do not re-derive; do not assume the opposi
 - **Terraform never builds; a plugin is never a Terraform resource.** `make image` builds and
   pushes, and `terraform/deployment/` points a Lambda at the digest. A project ships a Python
   distribution with `stratum.*` entry points and writes no HCL — [`ADR-0003`](docs/decisions/ADR-0003-image-build-and-digest.md).
+- **The root `pyproject.toml` is the workspace manifest**, not just the `stratum` distribution:
+  `[tool.pixi.pypi-dependencies]` names `stratum-emit` and `spectral-util` as path dependencies and
+  `pixi.lock` pins all three. That is how the image gets the plugin — the Dockerfile copies the
+  manifest, the lock and the sources and runs `pixi install --locked`, resolving nothing twice.
+  A plugin from another repo goes in as a wheel in `plugins/wheels/` instead (`--no-deps`).
 - **A mirror is never the record.** A bucket storage root gets a node-local mirror under
   `$STRATUM_SCRATCH`, derived from a hash of the URI so every process agrees on it. `plan.json`
   records `root`, `run_dir` and `products_dir` as URIs; nothing durable may name a mirror path.
@@ -208,6 +213,8 @@ src/stratum/       the framework - no EMIT, Tetracorder or mineral knowledge, ev
 plugins/           plugin distributions, installed beside the framework, never imported by it
   stratum-emit/    the EMIT plugin: readers, instrument masks, mineral scorers
                    (`src/stratum_emit/` + its own pyproject.toml carrying the entry points)
+  wheels/          drop-in plugin wheels from other repos; installed --no-deps,
+                   git-ignored, never a place for a plugin needing new dependencies
 tests/             pytest; fixtures resolve from STRATUM_TRIAL_DATA / STRATUM_FIXTURE_URL
 examples/          example manifests and classes files - configuration, not core
 docs/index.html    site landing page (GitHub Pages serves docs/)

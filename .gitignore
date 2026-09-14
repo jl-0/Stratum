@@ -43,3 +43,6 @@ credentials
 *.p12
 *.pfx
 *.key
+
+# Dropped-in plugin wheels are built artifacts, not source (see plugins/wheels/README.md).
+plugins/wheels/*.whl

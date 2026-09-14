@@ -35,6 +35,20 @@ digest as an input variable and creates a Lambda from it. The ECR repository kee
 points. The framework's distribution registers only `stratum.sources`. The image installs the two
 distributions separately, which is precisely what a project's own plugin package will do.
 
+The root `pyproject.toml` is the workspace manifest that ties them together: its `[project]` table
+is the `stratum` distribution, and its `[tool.pixi.pypi-dependencies]` table names the others as
+path dependencies, which `pixi.lock` pins. There are therefore **two routes into the image**, and
+the difference between them is dependencies, not preference:
+
+| Route | Add | New third-party dependencies | Reproducible |
+|---|---|---|---|
+| A directory in `plugins/` | The directory, plus one line in the root `pyproject.toml` | Yes — pixi solves, the lock covers it | Fully |
+| A wheel in `plugins/wheels/` | The built wheel; **no framework file is edited** | No — installed `--no-deps` so it cannot move a locked version | Only as far as the wheel is recorded |
+
+The second exists because the first requires a project to edit a file in this repository, which is
+not much of a boundary to claim. A plugin that needs a dependency the environment lacks is not a
+drop-in and has to take the first route; that limit is the price of one lock file.
+
 Consequences for a project, in full:
 
 | To… | Do | Privilege needed |

@@ -70,12 +70,14 @@ to provision. <a href="scaling.html#aws">Running at scale</a> has the measuremen
 <tr><td>3</td><td><strong>Someone permitted to create IAM roles</strong>, and any site requirements they must satisfy</td><td>Ask before planning</td></tr>
 <tr><td>4</td><td>An Earthdata Login account</td><td>Log in at <code>urs.earthdata.nasa.gov</code></td></tr>
 <tr><td>5</td><td><strong>The LP DAAC EULA accepted by that account</strong></td><td>Without it, downloads fail <code>401</code> with no useful message</td></tr>
+<tr><td>6</td><td>The <code>vendor/SpectralUtil</code> submodule checked out &mdash; the image build copies it</td><td><code>git submodule update --init</code></td></tr>
 </tbody>
 </table>
 </div>
 
-<p>Row 3 is the one that sets the shape of everything else, and row 5 is the one that is forgotten
-until a download fails for a reason the error does not explain.</p>
+<p>Row 3 is the one that sets the shape of everything else, row 5 is the one that is forgotten
+until a download fails for a reason the error does not explain, and row 6 is the one that makes
+<code>make image</code> fail at the <code>COPY</code> if you skipped it after cloning.</p>
 
 <h2 id="env">1. One private file</h2>
 
@@ -272,9 +274,14 @@ credential mid-read.</p>
 
 <pre><code>make image</code></pre>
 
-<p>It builds for <code>linux/arm64</code>, pushes to the repository the platform root created, and
-prints the digest. Put that digest in <code>.env</code> as <code>STRATUM_IMAGE_DIGEST</code>; the
-deployment pins it.</p>
+<p>It builds for <code>linux/arm64</code>, logs in to the repository the platform root created,
+pushes, and prints the digest. That digest is the one thing the next step needs, so record it now
+— <code>make image</code> prints this line ready to paste:</p>
+
+<pre><code>echo 'STRATUM_IMAGE_DIGEST=sha256:&lt;64 hex&gt;' &gt;&gt; .env     <span class="c"># replacing any earlier line</span></code></pre>
+
+<p>Nothing else in the deployment changes when your code does. Every later build is
+<code>make image</code>, a new digest in <code>.env</code>, and <code>make tf-deploy</code>.</p>
 
 <div class="tw">
 <table>
@@ -288,11 +295,45 @@ deployment pins it.</p>
 </table>
 </div>
 
-<p>Check what the image actually provides before deploying it — this is the question "did my
-plugin make it in?", answered without guessing:</p>
+<h3 id="image-contents">What goes into it</h3>
+
+<p>Three Python distributions, all installed from <code>pixi.lock</code>, plus anything you drop in:</p>
+
+<div class="tw">
+<table>
+<thead><tr><th>Distribution</th><th>From</th><th>Provides</th></tr></thead>
+<tbody>
+<tr><td><code>stratum</code></td><td><code>pyproject.toml</code> + <code>src/stratum/</code></td><td>The framework, the CLI, the two catalogue sources</td></tr>
+<tr><td><code>stratum-emit</code></td><td><code>plugins/stratum-emit/</code></td><td>The EMIT readers, masks and scorers</td></tr>
+<tr><td><code>spectral-util</code></td><td><code>vendor/SpectralUtil/</code></td><td>The KD-tree nearest-neighbour search regrid uses</td></tr>
+<tr><td>your plugin</td><td><code>plugins/&lt;name&gt;/</code>, or a wheel in <code>plugins/wheels/</code></td><td>Whatever it registers</td></tr>
+</tbody>
+</table>
+</div>
+
+<p>The <strong>root <code>pyproject.toml</code> is the workspace manifest</strong>, and that is what
+ties them together. Its <code>[project]</code> table is the <code>stratum</code> distribution; its
+<code>[tool.pixi.pypi-dependencies]</code> table names the other two as path dependencies, and
+<code>pixi.lock</code> pins all of it:</p>
+
+<pre><code>[tool.pixi.pypi-dependencies]
+stratum       = { path = <span class="k">"."</span>, editable = <span class="k">true</span> }
+stratum-emit  = { path = <span class="k">"plugins/stratum-emit"</span>, editable = <span class="k">true</span> }
+spectral-util = { path = <span class="k">"vendor/SpectralUtil"</span>, editable = <span class="k">true</span> }</code></pre>
+
+<p>So the Dockerfile copies those four things — the manifest, the lock, the sources — and runs
+<code>pixi install --locked</code>. Nothing in the image is resolved a second time, which is the
+property that stops it drifting from the environment your tests ran in.</p>
+
+<p><a href="plugins.html#packaging">Packaging a plugin</a> has the two routes in and the whole
+<code>pyproject.toml</code> a plugin needs. Whichever you used, check the image before deploying it
+— this is "did my plugin make it in?", answered rather than assumed:</p>
 
 <pre><code>make image-local
 docker run --rm stratum-dev:&lt;tag&gt; stratum plugins list</code></pre>
+
+<p><code>make image-local</code> prints the exact <code>docker run</code> line for the tag it
+built.</p>
 
 <div class="key">
   <span class="label">Terraform never builds</span>
@@ -333,15 +374,38 @@ state key.</p>
 <p>All six are platform settings. None of them is a manifest field, and changing one is an apply
 that touches no role.</p>
 
+<h3 id="deploy-trouble">If the apply fails</h3>
+
+<p>Four ways a first deployment goes wrong, and what each looks like.</p>
+
+<div class="tw">
+<table>
+<thead><tr><th>Message</th><th>Cause and fix</th></tr></thead>
+<tbody>
+<tr><td><code>STRATUM_IMAGE_DIGEST is not set</code></td><td>Step 7 has not run, or its digest never reached <code>.env</code>. The check is deliberate: there is nothing to deploy before there is an image</td></tr>
+<tr><td><code>The image manifest, config or layer media type … is not supported</code></td><td>The pushed reference is a manifest <em>list</em>, which Lambda refuses. <code>make image</code> passes <code>--provenance=false</code> to prevent exactly this; you get it by pushing with a bare <code>docker buildx build --push</code> instead</td></tr>
+<tr><td><code>Lambda does not have permission to access the ECR image</code></td><td>Rare in one account and expected across two. Add <code>ecr:BatchGetImage</code> and <code>ecr:GetDownloadUrlForLayer</code> for <code>lambda.amazonaws.com</code> to the repository policy — a change to the <em>platform</em> root, so a privileged apply</td></tr>
+<tr><td><code>InvalidParameterValueException … concurrent executions</code></td><td>The reserved concurrency (64) exceeds what is unreserved in the account. Lower <code>reserved_concurrency</code>, or raise the account limit. It is a guard rail, so lowering it costs only dispatch width</td></tr>
+</tbody>
+</table>
+</div>
+
+<div class="note">
+  <span class="label">A budget with nobody subscribed</span>
+  <p>If <code>STRATUM_BUDGET_ALERT_EMAIL</code> is empty the budget is still created, and still
+  tracks spend you can look at — but nothing is sent to anyone, which is most of the value. Set it
+  before the first real fan-out; a runaway is otherwise discovered by the bill.</p>
+</div>
+
 <h2 id="cloud-run">9. Run it</h2>
 
 <p>Two things beyond the manifest: the function name, and a manifest whose
 <code>outputs.bucket</code> is the deployment's bucket.</p>
 
 <pre><code><span class="k">outputs</span>:
-  <span class="k">bucket</span>: s3://stratum-dev-&lt;account-id&gt;/     <span class="c"># make tf-output prints it</span></code></pre>
+  <span class="k">bucket</span>: s3://stratum-dev-&lt;account-id&gt;/     <span class="c"># ./scripts/tf.sh platform output -raw storage_root</span></code></pre>
 
-<pre><code>export STRATUM_LAMBDA_FUNCTION=$(make -s tf-deploy-output | grep function_name | cut -d'"' -f2)
+<pre><code>export STRATUM_LAMBDA_FUNCTION=$(./scripts/tf.sh deployment output -raw function_name)
 stratum run -m manifest.yaml --executor aws</code></pre>
 
 <p>Every work item of every stage becomes one invocation. Your laptop dispatches and collects

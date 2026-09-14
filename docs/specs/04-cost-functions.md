@@ -547,7 +547,11 @@ A plugin is a **Python distribution**, never an infrastructure resource: a proje
 `pyproject.toml` with these tables and no HCL at any point ([ADR-0003](../decisions/ADR-0003-image-build-and-digest.md)).
 The EMIT plugins are packaged that way — `plugins/stratum-emit/`, its own distribution, installed
 beside `stratum` — so the path a third party's package takes is the one ours takes, rather than a
-claim about a path nothing exercises.
+claim about a path nothing exercises. Two routes into the image: a directory under `plugins/` named
+as a path dependency of the workspace (pixi solves for its dependencies and the lock covers it), or
+a built wheel dropped into `plugins/wheels/`, which needs no edit to any framework file but is
+installed `--no-deps` and so cannot bring a dependency the environment lacks
+([ADR-0003](../decisions/ADR-0003-image-build-and-digest.md)).
 
 Two delivery paths, both recorded in provenance:
 

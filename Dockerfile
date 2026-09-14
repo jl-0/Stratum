@@ -29,6 +29,21 @@ COPY vendor/SpectralUtil/ ./vendor/SpectralUtil/
 
 RUN pixi install --locked --environment default
 
+# Out-of-repo plugin distributions. A project that is not a directory in this repository drops its
+# built wheel into plugins/wheels/ and it is installed beside the framework - no edit to any file
+# here, which is the point (ADR-0003).
+#
+# --no-deps, so a dropped wheel can never move a version the lock decided. Its own third-party
+# dependencies must therefore already be in the environment; a plugin that needs a new one belongs
+# in plugins/ as a path dependency of this workspace, where pixi will solve for it.
+RUN set -eu; \
+    if [ -n "$(find plugins/wheels -name '*.whl' 2>/dev/null)" ]; then \
+      echo "installing plugin wheels:"; ls -1 plugins/wheels/*.whl; \
+      pixi run -e default python -m pip install --no-cache-dir --no-deps plugins/wheels/*.whl; \
+    else \
+      echo "no wheels in plugins/wheels/; the image carries the in-repo plugins only"; \
+    fi
+
 # The Lambda Runtime Interface Client: pip-only, Linux-only, and deliberately not in pixi.lock,
 # which has to solve for macOS too. Pinned, and installed with no dependency resolution of its
 # own so it cannot move anything the lock decided.

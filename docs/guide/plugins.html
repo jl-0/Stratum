@@ -643,16 +643,15 @@ is how data goes missing unnoticed.</p>
 
 <h2 id="registering">Registering and shipping</h2>
 
-<p>Plugins are ordinary Python entry points:</p>
+<p>Plugins are ordinary Python entry points. A manifest's <code>ref</code> is the entry-point
+name when one is registered, and <code>module:Class</code> when it is not — so a class you are
+still writing needs no packaging at all, and one you ship gets a short name:</p>
 
 <pre><code>[project.entry-points.<span class="k">"stratum.scorers"</span>]
-min_view_zenith = <span class="k">"stratum_emit.scorers:MinViewZenith"</span>
-prefer_bare_earth = <span class="k">"stratum_emit.scorers:PreferBareEarth"</span>
+min_view_zenith = <span class="k">"stratum_emit.scorers:MinViewZenith"</span></code></pre>
 
-[project.entry-points.<span class="k">"stratum.reducers"</span>]
-classify_last = <span class="k">"stratum_emit.reducers:ClassifyLast"</span>   <span class="c"># only for what the schema cannot say</span></code></pre>
-
-<pre><code>stratum plugins list        <span class="c"># what this image or environment provides</span></code></pre>
+<pre><code>stratum plugins list        <span class="c"># what this image or environment provides</span>
+stratum plugins show min_view_zenith    <span class="c"># its class, version, capability, halo, required roles</span></code></pre>
 
 <h3 id="packaging">Packaging one</h3>
 
@@ -661,6 +660,93 @@ own version, installed beside <code>stratum</code>. Nothing about it is infrastr
 Terraform at any point, and adding a scorer touches no IAM role. The EMIT plugins are packaged
 exactly this way, in <code>plugins/stratum-emit/</code>, so the path your package takes is the one
 the framework's own plugin takes.</p>
+
+<p>The whole file, with every line that matters:</p>
+
+<pre><code><span class="c"># my-lab-plugin/pyproject.toml</span>
+[build-system]
+requires = [<span class="k">"hatchling"</span>]            <span class="c"># any PEP 517 backend; hatchling is what this repo uses</span>
+build-backend = <span class="k">"hatchling.build"</span>
+
+[project]
+name = <span class="k">"my-lab-plugin"</span>              <span class="c"># the DISTRIBUTION name: what pip installs</span>
+version = <span class="k">"0.2.0"</span>                   <span class="c"># goes into the cache key and provenance - bump it</span>
+requires-python = <span class="k">"&gt;=3.11"</span>
+dependencies = [
+  <span class="k">"stratum&gt;=0.0.1"</span>,               <span class="c"># the protocols and types you import</span>
+  <span class="k">"numpy&gt;=1.26"</span>,
+]
+
+<span class="c"># The registration. The group says which hook; the name is what a manifest's `ref` uses;</span>
+<span class="c"># the value is import path : class. One table per kind, all of them optional.</span>
+[project.entry-points.<span class="k">"stratum.scorers"</span>]
+snow_aware = <span class="k">"my_lab.scorers:SnowAware"</span>
+
+[project.entry-points.<span class="k">"stratum.masks"</span>]
+deep_shadow = <span class="k">"my_lab.masks:DeepShadow"</span>
+
+[tool.hatch.build.targets.wheel]
+packages = [<span class="k">"src/my_lab"</span>]           <span class="c"># the PACKAGE name: what you import. Need not match `name`</span></code></pre>
+
+<div class="note">
+  <span class="label">Two names, and they are different things</span>
+  <p><code>name</code> is the distribution — <code>my-lab-plugin</code>, hyphens allowed, what pip
+  and <code>pip list</code> show. The package under <code>packages</code> is what Python imports —
+  <code>my_lab</code>, underscores, and what the entry-point value starts with. They are related by
+  convention only. <code>version</code> is the distribution's, and it is the version Stratum records
+  in provenance and folds into the cache key, which is why a plugin installed from a source tree
+  with no metadata reports <code>"unversioned"</code> and leaves a hole there.</p>
+</div>
+
+<p>The entry-point groups, in full:</p>
+
+<div class="tw">
+<table>
+<thead><tr><th>Group</th><th>For</th></tr></thead>
+<tbody>
+<tr><td><code>stratum.scorers</code></td><td><a href="#scorer">Scorer</a></td></tr>
+<tr><td><code>stratum.masks</code></td><td><a href="#pixel-mask">PixelMask</a></td></tr>
+<tr><td><code>stratum.reducers</code></td><td><a href="#reducer">Reducer</a></td></tr>
+<tr><td><code>stratum.mappers</code></td><td><a href="#mapper">OutputMapper</a></td></tr>
+<tr><td><code>stratum.filters</code></td><td><a href="#granule-filter">GranuleFilter</a></td></tr>
+<tr><td><code>stratum.readers</code></td><td>A granule reader, keyed by collection</td></tr>
+<tr><td><code>stratum.sources</code></td><td>A catalogue source</td></tr>
+</tbody>
+</table>
+</div>
+
+<h3 id="into-the-image">Getting it into the worker image</h3>
+
+<p>Two routes, and which one you want depends on one question: does your plugin need a third-party
+dependency the environment does not already have?</p>
+
+<div class="tw">
+<table>
+<thead><tr><th></th><th>A directory in <code>plugins/</code></th><th>A wheel in <code>plugins/wheels/</code></th></tr></thead>
+<tbody>
+<tr><td>You add</td><td>The directory, plus one line in the root <code>pyproject.toml</code></td><td>The built wheel. No edit to any framework file</td></tr>
+<tr><td>New dependencies</td><td><strong>Yes</strong> — pixi solves for them and the lock covers them</td><td><strong>No</strong> — installed <code>--no-deps</code>, so it can never move a locked version</td></tr>
+<tr><td>Reproducible</td><td>Fully: the lock pins it</td><td>Only as far as you record which wheel you used</td></tr>
+<tr><td>Lives</td><td>In this repository</td><td>Anywhere; built elsewhere and copied in</td></tr>
+</tbody>
+</table>
+</div>
+
+<pre><code><span class="c"># a directory: the route stratum-emit itself takes</span>
+[tool.pixi.pypi-dependencies]                      <span class="c"># in the ROOT pyproject.toml</span>
+my-lab-plugin = { path = <span class="k">"plugins/my-lab-plugin"</span>, editable = <span class="k">true</span> }
+
+pixi install        <span class="c"># re-locks</span>
+make image
+
+<span class="c"># a wheel: the route a plugin in another repository takes</span>
+cd ../my-lab-plugin &amp;&amp; python -m build --wheel
+cp dist/my_lab_plugin-0.2.0-py3-none-any.whl &lt;stratum&gt;/plugins/wheels/
+cd &lt;stratum&gt; &amp;&amp; make image</code></pre>
+
+<p>Either way, confirm rather than assume:</p>
+
+<pre><code>docker run --rm &lt;image&gt; stratum plugins list</code></pre>
 
 <div class="tw">
 <table>
