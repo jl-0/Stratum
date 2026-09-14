@@ -8,7 +8,8 @@ set -euo pipefail
 . "$(dirname "$0")/common.sh"
 
 SRC="${1:-$REPO_ROOT/examples/emit-cmr-nevada/manifest.yaml}"
-OUT="${SRC%/*}/manifest.cloud.yaml"
+case "$SRC" in *.cloud.yaml) echo "$SRC is already a generated cloud manifest" >&2; exit 1 ;; esac
+OUT="${SRC%.yaml}.cloud.yaml"          # foo.yaml -> foo.cloud.yaml
 
 ROOT="$(terraform -chdir="$REPO_ROOT/terraform" output -raw storage_root)"
 [ -n "$ROOT" ] || { echo "no storage_root output - run 'make stratum-infrastructure' first" >&2; exit 1; }

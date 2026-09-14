@@ -36,6 +36,10 @@ infra-plan:   env-check ; ./scripts/tf.sh plan
 infra-output: env-check ; ./scripts/tf.sh output
 destroy:      env-check ; ./scripts/tf.sh destroy
 
+# A cloud run, end to end. NOT a smoke test: the default manifest is the worked example,
+# which is a real mosaic - granule downloads, a few hundred Lambda invocations, products
+# in S3. `ARGS=--dry-run` plans without executing.
+#
 # A cloud run, end to end: point a copy of the manifest at the deployment's bucket, look the
 # function up in Terraform state, and run. `pixi run` because the CLI is in the pixi environment
 # and not on PATH - make does not activate it for you.
@@ -44,7 +48,7 @@ ARGS     ?=
 cloud-run: env-check
 	./scripts/cloud-manifest.sh $(MANIFEST)
 	STRATUM_LAMBDA_FUNCTION=$$(./scripts/tf.sh output -raw function_name) \
-	  pixi run stratum run -m $(dir $(MANIFEST))manifest.cloud.yaml --executor aws $(ARGS)
+	  pixi run stratum run -m $(MANIFEST:.yaml=.cloud.yaml) --executor aws $(ARGS)
 
 image:       env-check ; ./scripts/build-image.sh
 image-local: env-check ; ./scripts/build-image.sh --local

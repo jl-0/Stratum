@@ -520,9 +520,18 @@ root the workers can reach. One target does both:</p>
 make cloud-run MANIFEST=path/to/manifest.yaml    <span class="c"># another one</span>
 make cloud-run ARGS=--dry-run                    <span class="c"># plan only</span></code></pre>
 
-<p>It writes a <code>manifest.cloud.yaml</code> beside the one you name, identical except that
-<code>outputs.bucket</code> points at this deployment's root, then looks the function up in
-Terraform state and runs. The generated file is gitignored, because the root names the account.</p>
+<p>It writes <code>&lt;name&gt;.cloud.yaml</code> beside the manifest you name &mdash; identical
+except that <code>outputs.bucket</code> points at this deployment's root &mdash; then looks the
+function up in Terraform state and runs that. <code>MANIFEST</code> names the <em>source</em>; the
+generated file is what executes, and it is gitignored because the root names the account.</p>
+
+<div class="warn">
+  <span class="label">This is a real run, not a smoke test</span>
+  <p>The default manifest is the worked example, which is a genuine one-tile, eight-month mosaic:
+  granule downloads, a few hundred Lambda invocations, and products written to S3. It is the
+  cheapest useful run, not a free one. <code>ARGS=--dry-run</code> plans without executing &mdash;
+  though planning a catalogue run still downloads assets for its class-table check.</p>
+</div>
 
 <div class="note">
   <span class="label">Why a generated file and not a flag</span>
