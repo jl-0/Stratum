@@ -173,6 +173,10 @@ until the in-region mode and its one-hour credential refresh exist.</p>
 <tr><td>Zone selection for the pilot</td><td>The zone registry (<code>examples/zones.yaml</code>) holds approximate boxes; confirm before a delivered run</td><td>Science team</td></tr>
 <tr><td>Confirm the 7-column edge trim and slit-dust column counts</td><td>Built-in mask defaults in <code>stratum_emit</code>; <code>SlitDust</code> refuses until confirmed</td><td>Science lead</td></tr>
 <tr><td>Whether regrid and resolve are bit-deterministic, so two workers racing on one cache key cannot disagree</td><td>Nothing &mdash; readers open only the members the winning sidecar names. Worth verifying rather than assuming.</td><td>SDS engineering</td></tr>
+<tr><td>The Earthdata secret: a password pair, or a long-lived bearer token</td><td>Affects how the secret is populated and rotated. <a href="guide/deploying.html#secret">Deploying to AWS</a></td><td>—</td></tr>
+<tr><td>Image pinned by digest (an apply per image, reproducible) or by mutable tag (neither)</td><td>Recommend digest. <a href="guide/deploying.html#roles">Deploying to AWS</a></td><td>—</td></tr>
+<tr><td>Fan-out concurrency: a default that cannot exhaust account Lambda concurrency and starve a concurrent run</td><td>The <code>aws</code> executor. Fine at 205 items, not at a continental run</td><td>—</td></tr>
+<tr><td>Whether the deployer persona needs Terraform at all, or whether updating the function image is enough</td><td>Terraform keeps state honest; the CLI is one fewer tool for a scientist to install</td><td>—</td></tr>
 <tr><td>Image architecture: add <code>linux-aarch64</code> to the pixi platforms, or cross-build <code>linux/amd64</code> under emulation</td><td>The container image. Lambda and Fargate both support arm64 and it is cheaper, but every conda dependency needs a linux-aarch64 build.</td><td>—</td></tr>
 </tbody>
 </table>

@@ -138,9 +138,8 @@ removed, and why, go into the run report ([04 §2](04-cost-functions.md)).
 
 ## 5. Role resolution
 
-`convert_fids.py` maps FIDs to ENVI paths under
-`/store/emit/ops/data/acquisitions/{date}/{name}/{lvl}/` with the build version `b0106_v01`
-hard-coded in a module-level dict. None of that survives the move: ENVI header/binary pairs have
+`convert_fids.py` maps FIDs to ENVI paths under a cluster-local acquisition tree keyed by date,
+scene name and level, with the build version `b0106_v01` hard-coded in a module-level dict. None of that survives the move: ENVI header/binary pairs have
 no meaning in object storage, and the layout is cluster-specific.
 
 Instead the manifest declares roles, and the index resolves them:

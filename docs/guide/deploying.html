@@ -239,11 +239,78 @@ credential mid-read.</p>
 executing in Lambda, orchestrated from a laptop and needing no orchestration infrastructure at all.
 Only the third row introduces a container that is not a worker.</p>
 
+<p>Each step is done when a specific thing is true, not when the code is written:</p>
+
+<div class="tw">
+<table>
+<thead><tr><th>Step</th><th>Done when</th></tr></thead>
+<tbody>
+<tr><td>S3 storage root</td><td>A run completes from the laptop with <code>outputs.bucket</code> on S3, and the product matches the recorded local run cell for cell</td></tr>
+<tr><td>Image and Lambda worker</td><td>The whole run completes with every work item executing in Lambda, and the product still matches</td></tr>
+<tr><td>Detached orchestrator</td><td>A run survives a closed laptop and its result is identical</td></tr>
+<tr><td>Scheduled runs</td><td>A scheduled execution produces the previous period's product with no human involved, and its provenance records a merged manifest that re-runs verbatim</td></tr>
+</tbody>
+</table>
+</div>
+
+<div class="note">
+  <span class="label">The storage root is the long pole</span>
+  <p>The cache layer writes through <code>pathlib.Path</code> with a temp-then-rename, and S3 has no
+  rename. A single <code>PutObject</code> is atomic, so file artifacts get <em>simpler</em>;
+  directory artifacts &mdash; snapshots and product blocks &mdash; have no equivalent, and commit by
+  writing their members first and the <code>.inputs.json</code> sidecar last, with the sidecar
+  listing what it covers. A crash leaves members with no sidecar, which is not a hit, so the stage
+  recomputes. <a href="caching.html">Caching &amp; reruns</a> explains why a partial artifact at a
+  key is the one corruption content addressing cannot detect.</p>
+</div>
+
 <p>Once the storage root exists, pointing a run at the deployment is a one-field change — the
 executor is never a manifest field, so the same science runs in both places:</p>
 
 <pre><code><span class="k">outputs</span>:
   <span class="k">bucket</span>: s3://stratum-dev-&lt;account-id&gt;/     <span class="c"># was: ./out</span></code></pre>
+
+<h2 id="guardrails">Guardrails worth having on day one</h2>
+
+<p>All cheap now and awkward to retrofit onto a run already in flight.</p>
+
+<div class="tw">
+<table>
+<thead><tr><th>Guardrail</th><th>Why</th></tr></thead>
+<tbody>
+<tr><td>Tag every resource and invocation with <code>run_id</code> and deployment</td><td>Cost allocation per run. One deployment serves many runs, so the bill is otherwise unattributable</td></tr>
+<tr><td>A budget with an alarm <em>before</em> the first execution</td><td>A runaway fan-out is discovered by the bill otherwise. This is the one guardrail that cannot be added retroactively</td></tr>
+<tr><td>A concurrency ceiling per run</td><td>So one run cannot exhaust account Lambda concurrency and starve another</td></tr>
+<tr><td>Lifecycle rules on <code>cache/</code></td><td>Content-addressed artifacts accumulate and nothing expires them</td></tr>
+<tr><td>Explicit log retention</td><td>The default is "never expire", which is a real line item at tens of thousands of invocations</td></tr>
+</tbody>
+</table>
+</div>
+
+<h2 id="git">Keeping it out of git</h2>
+
+<p>The repository is designed so that a clone contains nothing account-specific. The ignore rules
+are what keep it that way.</p>
+
+<div class="tw">
+<table>
+<thead><tr><th>Ignored</th><th>Why</th></tr></thead>
+<tbody>
+<tr><td><code>.env</code></td><td><strong>The one private file.</strong> <code>.env.example</code> is committed</td></tr>
+<tr><td><code>*.tfvars</code>, <code>*.tfvars.json</code></td><td>The likeliest place for a value to be typed by hand</td></tr>
+<tr><td><code>terraform.tfstate*</code></td><td>Local state should never exist; if it does it must never be committed</td></tr>
+<tr><td><code>terraform/backend.hcl</code></td><td>Generated, and names the account</td></tr>
+<tr><td><code>.terraform/</code>, <code>crash.*.log</code></td><td>Provider binaries; crash dumps embed variable values</td></tr>
+<tr><td><code>.netrc</code>, <code>*.pem</code>, <code>credentials</code></td><td>Credential material of any kind</td></tr>
+</tbody>
+</table>
+</div>
+
+<div class="key">
+  <span class="label">The provider lock file is committed</span>
+  <p><code>.terraform.lock.hcl</code> is the Terraform peer of <code>pixi.lock</code>. Excluding it
+  defeats reproducible plans, so it is deliberately <em>not</em> ignored.</p>
+</div>
 
 <h2 id="teardown">Teardown</h2>
 

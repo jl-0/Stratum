@@ -19,13 +19,13 @@ The user-facing docs deliberately do not carry any of this. They describe how th
 | — driver | `run_all_aggregate.py` | Loops −55…55; `--criteria_band 5 --criteria_mode min` |
 | — GLT build | `build_cloudy_glts_m4_rev.py` | |
 | — granule selection | `subset_from_coverage.py` | Scans `coverage_pub.json`; three sequential `deepcopy` passes |
-| `EMIT-AMD` | `github.jpl.nasa.gov/jamesmo/EMIT-AMD` | Deferred-reduction precedent; temporal stacking |
+| `EMIT-AMD` | Internal repository, not public | Deferred-reduction precedent; temporal stacking |
 | — pipeline | `pipeline.sh` | One GLT per granule; `steps=(...)` hand-rolled caching; `rm -r` on every run |
 | — tiling | `split.sh` | Region → 1° bins → SLURM array |
 | — FID resolution | `convert_fids.py` | Hard-codes `b0106_v01` in a module-level dict |
 | — post-processing | `gdal.sh` | Coastal mask burns band 4 (alpha); `# Skip counts for now, doesn't work` |
 | — supervision | `watch.sh` | Greps stderr for `error|fail|oom`; matches `*Finished*` against a last line that reads `Done` |
-| `amd` package | `/store/jamesmo/amd/repo/` (cluster) | The Python package behind `pipeline.sh`. Environment only at `/store/jamesmo/micromamba/envs/amd` — that path is **not** the repo. |
+| `amd` package | Internal cluster path | The Python package behind `pipeline.sh`. What is readable on the cluster is the installed **environment**, not the repository — a distinction that cost time to discover. |
 | — config | `configs/config.yml` | Copied verbatim to [`refs/amd-config.yml`](../../refs/amd-config.yml) |
 | `tetracorder-lite` | Submodule of the EMIT monorepo | Upstream L2B producer |
 | — aggregation | `tetrapy/aggregate.py` | Writes `group_{N}_{band_depth,mineral_id,band_depth_unc,fit}` over `downtrack`/`crosstrack` |
@@ -260,8 +260,6 @@ registration*, not as a cheaper `kdtree`.
 
 ## 8. Related documents
 
-- [`2026-08-28-cloud-mosaic-proposal.html`](2026-08-28-cloud-mosaic-proposal.html) — the original
-  research write-up, with the full service-limit analysis. Archived; superseded by the specs.
 - [`2026-08-28-mines-tagup.md`](2026-08-28-mines-tagup.md) — external group building the same thing;
   source of the detector-edge numbers, FRCOV as an input, and the bare-earth scorer.
 - [`../specs/`](../specs/) — the specs carry these citations inline where a contract depends on one.

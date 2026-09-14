@@ -6,7 +6,7 @@ Three layers, with different audiences. Keep them in step — see [`../CLAUDE.md
 |---|---|---|---|
 | **Site** | HTML, [`index.html`](index.html) | How the tool works and how to use it | Anyone using or operating Stratum |
 | **Specs** | Markdown, [`specs/`](specs/) | Contracts, invariants, citations, open questions | Whoever implements a stage |
-| **Notes** | Markdown, [`notes/`](notes/) | Heritage, meeting records, archived proposals | Internal |
+| **Notes** | Markdown, [`notes/`](notes/) | Prior art, and the build contracts the code was written against | Whoever needs the reasoning behind a contract |
 
 The site describes the **current tool**. It does not argue for the design, compare against
 predecessors, or explain what was replaced — that belongs in [`notes/heritage.md`](notes/heritage.md).
@@ -113,13 +113,17 @@ account is in [`notes/heritage.md`](notes/heritage.md).
 | [0001 — Tech stack](decisions/ADR-0001-tech-stack.md) | Python, pixi, xarray, DuckDB, Step Functions, Terraform |
 | [0002 — Terraform/manifest boundary](decisions/ADR-0002-terraform-manifest-boundary.md) | Platform vs science configuration |
 
-## Notes — internal
+## Notes
 
 | Note | Contents |
 |---|---|
-| [heritage.md](notes/heritage.md) | Prior art, **where the historical code lives**, and which observations forced which design choices |
+| [heritage.md](notes/heritage.md) | Prior art, and which observations forced which design choices |
 | [2026-08-28-mines-tagup.md](notes/2026-08-28-mines-tagup.md) | External group building the same thing; detector-edge numbers, FRCOV, the bare-earth scorer |
-| [2026-08-28-cloud-mosaic-proposal.html](notes/2026-08-28-cloud-mosaic-proposal.html) | The original research proposal. Archived; superseded by the specs. |
+
+> **Everything under `docs/` is published.** Pages serves this directory from `main`, and the site
+> is public even while the repository is not. `notes/` is no exception — it is a note in the sense
+> of audience, never of access. Nothing site-specific, internal-only or credential-bearing belongs
+> anywhere under `docs/`.
 
 ## Reference material
 
@@ -127,7 +131,7 @@ account is in [`notes/heritage.md`](notes/heritage.md).
 
 | File | Source | Why it's here |
 |---|---|---|
-| `amd-config.yml` | `/store/jamesmo/amd/repo/configs/config.yml` | The only readable record of `stack` parameters, the lumping `hashmap`, and the RGBA `colors` table |
+| `amd-config.yml` | Internal cluster path | The only readable record of `stack` parameters, the lumping `hashmap`, and the RGBA `colors` table |
 | `2026-08-28-mines-transcript.md` | Voice transcript | Source for the tag-up notes. Attribution is unreliable — see the caveat there |
 | `EMIT_L2B_MIN_001_20260825T151308_2623710_050.nc` | Delivered LP DAAC granule, `V001` / build `010635` | Ground truth for spec 11. **Gitignored** — see `../CLAUDE.md` |
 
