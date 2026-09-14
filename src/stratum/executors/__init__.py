@@ -90,6 +90,17 @@ def run_all(run_dir: Path | str, workers: int | None = None,
     return _run_all(run_dir, workers, stage_runner=stage_runner(executor), executor=executor)
 
 
-__all__ = ["EXECUTORS", "ExecutionError", "budget_gate", "exec_item", "executor_available",
-           "executor_suits_root", "root_is_reachable",
-           "load_cached", "product_key", "run_all", "run_stage", "stage_runner"]
+__all__ = [
+    "EXECUTORS",
+    "ExecutionError",
+    "budget_gate",
+    "exec_item",
+    "executor_available",
+    "executor_suits_root",
+    "load_cached",
+    "product_key",
+    "root_is_reachable",
+    "run_all",
+    "run_stage",
+    "stage_runner",
+]

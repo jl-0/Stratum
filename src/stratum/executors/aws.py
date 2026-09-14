@@ -25,6 +25,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Any
 
+from stratum import console
 from stratum.executors.worker import load_cached
 from stratum.plan.document import read_work
 
@@ -111,7 +112,8 @@ def run_stage(run_dir: Path | str, stage: str, workers: int | None = None, *,
     base = {"root": ws.uri, "run_id": run.run_id, "stage": stage}
     results: list[dict[str, Any]] = []
     if items:
-        with ThreadPoolExecutor(max_workers=min(concurrency(workers), len(items))) as pool:
+        with (ThreadPoolExecutor(max_workers=min(concurrency(workers), len(items))) as pool,
+              console.progress(stage, len(items)) as advance):
             futures = {pool.submit(invoke, cli, name, {**base, "index": i}): i
                        for i in range(len(items))}
             for fut in as_completed(futures):
@@ -121,6 +123,7 @@ def run_stage(run_dir: Path | str, stage: str, workers: int | None = None, *,
                 except Exception as e:  # noqa: BLE001 - a dispatch failure is an outcome too
                     results.append({"index": i, "stage": stage, "ok": False,
                                     "error": f"{type(e).__name__}: {e}"})
+                advance()
     results.sort(key=lambda r: r["index"])
     path = results_path(run_dir, stage)
     path.parent.mkdir(parents=True, exist_ok=True)

@@ -75,11 +75,14 @@ def main() -> None:
               help="Node-local directory the plan stages remote assets into (12 section 4); "
                    "default $STRATUM_ASSET_CACHE, else {root}/assets. Name the same one on run.")
 @click.option("--json", "as_json", is_flag=True, help="Print the plan summary as JSON.")
+@click.option("--plain", is_flag=True, help="Unstyled output. Implied when stdout is not a terminal, or NO_COLOR is set.")
 def plan(manifest: str, patch: tuple[str, ...], out: str | None, asset_cache: str | None,
-         as_json: bool) -> None:
+         as_json: bool, plain: bool) -> None:
     """Resolve a manifest, freeze the granule set, write the work list, report the fan-out."""
+    from stratum import console
     from stratum.plan import plan_run
 
+    console.set_plain(plain)
     _set_asset_cache(asset_cache)
     result = _guarded(plan_run, manifest, out, patch)
     if as_json:
@@ -87,8 +90,8 @@ def plan(manifest: str, patch: tuple[str, ...], out: str | None, asset_cache: st
                                "counts": result.counts, "over_budget": result.over_budget,
                                "budget_problems": result.budget_problems}, indent=2))
     else:
-        click.echo(result.report, nl=False)
-        click.echo(f"\nplan written to {result.run_dir}")
+        click.echo(console.render_markdown(result.report), nl=False)
+        click.echo(f"\nplan written to {console.emphasis(str(result.run_dir))}")
     if result.over_budget:
         click.echo("OVER BUDGET: " + "; ".join(result.budget_problems), err=True)
         sys.exit(2)
@@ -107,14 +110,22 @@ def plan(manifest: str, patch: tuple[str, ...], out: str | None, asset_cache: st
               help="Node-local directory remote assets are staged into (12 section 4); "
                    "default $STRATUM_ASSET_CACHE, else {root}/assets.")
 @click.option("--dry-run", is_flag=True, help="Equivalent to plan.")
+@click.option("--plain", is_flag=True, help="Unstyled output. Implied when stdout is not a terminal, or NO_COLOR is set.")
 def run(manifest: str | None, patch: tuple[str, ...], from_provenance: str | None,
         executor: str, workers: int | None, out: str | None, asset_cache: str | None,
-        dry_run: bool) -> None:
+        dry_run: bool, plain: bool) -> None:
     """Plan and execute every stage."""
-    from stratum.executors import (ExecutionError, executor_available,
-                                   executor_suits_root, root_is_reachable, run_all)
+    from stratum import console
+    from stratum.executors import (
+        ExecutionError,
+        executor_available,
+        executor_suits_root,
+        root_is_reachable,
+        run_all,
+    )
     from stratum.plan import BudgetExceeded, plan_run
 
+    console.set_plain(plain)
     _set_asset_cache(asset_cache)
     _guarded(executor_available, executor)
     if from_provenance is not None:
@@ -124,9 +135,9 @@ def run(manifest: str | None, patch: tuple[str, ...], from_provenance: str | Non
     _guarded(executor_suits_root, manifest, executor)
     _guarded(root_is_reachable, manifest)
     result = _guarded(plan_run, manifest, out, patch)
-    click.echo(result.report, nl=False)
+    click.echo(console.render_markdown(result.report), nl=False)
     if result.over_budget:
-        click.echo("OVER BUDGET: " + "; ".join(result.budget_problems), err=True)
+        click.echo(console.warn("OVER BUDGET: ") + "; ".join(result.budget_problems), err=True)
         if result.refused:
             sys.exit(2)
     if dry_run:
@@ -138,10 +149,16 @@ def run(manifest: str | None, patch: tuple[str, ...], from_provenance: str | Non
         sys.exit(2)
     except ExecutionError as e:
         raise click.ClickException(str(e)) from None
-    for stage, s in execution["stages"].items():
-        click.echo(f"{stage:8} {s['items']:6} item(s)  {s['hits']:6} hit(s)  {s['seconds']:8.2f} s")
-    click.echo(f"run {result.run_id} finished; products under "
-               f"{result.document['products_dir']}")
+    click.echo("")
+    click.echo(console.rule("execution"))
+    rows = [(stage, s["items"], s["hits"], f"{s['seconds']:.2f}")
+            for stage, s in execution["stages"].items()]
+    total = sum(s["seconds"] for s in execution["stages"].values())
+    rows.append(("total", sum(r[1] for r in rows), sum(r[2] for r in rows), f"{total:.2f}"))
+    click.echo(console.summary_table(rows, ("stage", "items", "hits", "seconds")))
+    click.echo("")
+    click.echo(f"{console.ok('finished')}  {console.emphasis(result.run_id)}")
+    click.echo(f"products  {result.document['products_dir']}")
 
 
 @main.command("exec")

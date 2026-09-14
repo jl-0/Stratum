@@ -20,7 +20,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from stratum import __version__
+from stratum import __version__, console
 from stratum.executors.worker import exec_item, load_cached
 from stratum.plan.document import (
     REPORT_NAME,
@@ -60,7 +60,8 @@ def run_stage(run_dir: Path | str, stage: str, workers: int | None = None) -> li
         results = [_attempt(str(run_dir), stage, i) for i in range(n)]
     elif n:
         mp = multiprocessing.get_context("spawn")
-        with ProcessPoolExecutor(max_workers=min(workers, n), mp_context=mp) as pool:
+        with (ProcessPoolExecutor(max_workers=min(workers, n), mp_context=mp) as pool,
+              console.progress(stage, n) as advance):
             futures = {pool.submit(_attempt, str(run_dir), stage, i): i for i in range(n)}
             for fut in as_completed(futures):
                 i = futures[fut]
@@ -69,6 +70,7 @@ def run_stage(run_dir: Path | str, stage: str, workers: int | None = None) -> li
                 except Exception as e:  # noqa: BLE001 - a worker that died before returning
                     results.append({"index": i, "stage": stage, "ok": False,
                                     "error": f"{type(e).__name__}: {e}"})
+                advance()
     results.sort(key=lambda r: r["index"])
     path = results_path(run_dir, stage)
     path.parent.mkdir(parents=True, exist_ok=True)

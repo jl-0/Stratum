@@ -27,6 +27,8 @@ dependencies = [
   # the storage root may be a bucket (stratum.storage); imported lazily, never on a
   # local run
   "boto3>=1.34",
+  # terminal rendering of the plan report; the CLI degrades to plain text without a tty
+  "rich>=13",
   "netCDF4>=1.6,<1.7.1",
   # spectral-util is NOT listed here: it has no PyPI release, and a non-editable install of
   # the upstream repo ships no subpackages (its pyproject lists packages = ["spectral_util"]
@@ -74,6 +76,7 @@ pyyaml = "*"
 affine = "*"
 earthaccess = "*"
 boto3 = "*"
+rich = "*"
 # pip is here for the image build only: the Lambda Runtime Interface Client is a pip-only,
 # Linux-only package and must not enter the lock for every platform (ADR-0003).
 pip = "*"
