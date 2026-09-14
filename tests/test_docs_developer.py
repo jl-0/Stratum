@@ -22,14 +22,22 @@ import pytest
 
 ROOT = Path(__file__).resolve().parent.parent
 SRC = ROOT / "src"
+PLUGIN_SRC = ROOT / "plugins" / "stratum-emit" / "src"
+# Two source roots, because `stratum-emit` is its own distribution (ADR-0003). The framework's
+# modules live under `src/`; the plugin's under `plugins/stratum-emit/src/`.
 MAP = ROOT / "docs" / "developer" / "codebase.html"
-MODULES = sorted(SRC.rglob("*.py"))
+MODULES = sorted(SRC.rglob("*.py")) + sorted(PLUGIN_SRC.rglob("*.py"))
+
+
+def root_of(path: Path) -> Path:
+    """Which source root `path` belongs to."""
+    return PLUGIN_SRC if path.is_relative_to(PLUGIN_SRC) else SRC
 
 
 def unit(path: Path) -> str:
     """How `codebase.html` names the thing this module belongs to: the subpackage directory it
     lives in (`access/`), or the module's own file name when it sits at the package root."""
-    rel = path.relative_to(SRC)
+    rel = path.relative_to(root_of(path))
     if rel.parts[0] == "stratum_emit":
         return "stratum_emit/"
     return f"{rel.parts[1]}/" if len(rel.parts) > 2 else rel.parts[-1]
@@ -85,12 +93,13 @@ def imports_of(path: Path) -> set[str]:
 
 
 def test_the_framework_never_imports_the_plugin_package() -> None:
-    """`src/stratum/` is instrument-agnostic and `src/stratum_emit/` is where EMIT lives; the two
-    meet through entry points at run time, never through an import. One `import stratum_emit` in
-    the framework is all it takes for Stratum to stop being re-targetable."""
+    """`src/stratum/` is instrument-agnostic and `plugins/stratum-emit/` is where EMIT lives; they
+    are two distributions that meet through entry points at run time, never through an import. One
+    `import stratum_emit` in the framework is all it takes for Stratum to stop being
+    re-targetable."""
     offenders = sorted(
         f"{m.relative_to(ROOT)} imports {i}"
-        for m in MODULES if m.relative_to(SRC).parts[0] == "stratum"
+        for m in MODULES if m.is_relative_to(SRC) and m.relative_to(SRC).parts[0] == "stratum"
         for i in imports_of(m) if i.split(".")[0] == "stratum_emit")
     assert not offenders, ("the framework must not know about the EMIT plugin package "
                            f"(docs/developer/codebase.html section 1): {offenders}")
@@ -102,7 +111,7 @@ def test_the_package_import_graph_is_acyclic() -> None:
     belongs to the other - or to `stratum.types`."""
     edges: dict[str, set[str]] = defaultdict(set)
     for path in MODULES:
-        rel = path.relative_to(SRC).with_suffix("")
+        rel = path.relative_to(root_of(path)).with_suffix("")
         parts = rel.parts[:-1] if rel.parts[-1] == "__init__" else rel.parts
         here = package(".".join(parts))
         edges[here] |= {p for i in imports_of(path) if (p := package(i)) != here}

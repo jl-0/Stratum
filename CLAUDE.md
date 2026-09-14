@@ -1,7 +1,7 @@
 # Stratum — working notes for Claude
 
 Cost-function-driven mosaic engine for imaging spectroscopy. **The first slice exists** (built
-2026-09-02, `src/stratum` + `src/stratum_emit`, 285 tests): a local run over staged granules,
+2026-09-02, `src/stratum` + `plugins/stratum-emit`, 285 tests): a local run over staged granules,
 plan through publish, and — the same day — a run from NASA's CMR catalogue with granules
 downloaded over HTTPS on first touch (`examples/emit-cmr-nevada/`). `docs/specs/` is still the
 contract; the build contract it was written against is
@@ -26,7 +26,7 @@ one.
 | **Specs** | `docs/specs/*.md` | The contract. Carries citations, invariants, open questions. **Authoritative.** |
 | **Site** | `docs/*.html` | How the tool works and how to use it. |
 | **Heritage** | `docs/notes/heritage.md` | Prior art, where the old code lives, why choices were made. **Internal.** |
-| **Code** | `src/stratum/`, `src/stratum_emit/` | **Authoritative for signatures.** `11-types.md` is the narrative around them, not a second copy. |
+| **Code** | `src/stratum/`, `plugins/stratum-emit/src/stratum_emit/` | **Authoritative for signatures.** `11-types.md` is the narrative around them, not a second copy. |
 
 **When you make a design decision, record it in the same commit that makes it.**
 
@@ -190,7 +190,10 @@ several agree. Everything domain-specific lives in `stratum_emit`. If you find y
 
 ```
 src/stratum/       the framework - no EMIT, Tetracorder or mineral knowledge, ever
-src/stratum_emit/  the EMIT plugin package: readers, instrument masks, mineral scorers
+                   its own distribution; registers only the two catalogue sources
+plugins/           plugin distributions, installed beside the framework, never imported by it
+  stratum-emit/    the EMIT plugin: readers, instrument masks, mineral scorers
+                   (`src/stratum_emit/` + its own pyproject.toml carrying the entry points)
 tests/             pytest; fixtures resolve from STRATUM_TRIAL_DATA / STRATUM_FIXTURE_URL
 examples/          example manifests and classes files - configuration, not core
 docs/index.html    site landing page (GitHub Pages serves docs/)

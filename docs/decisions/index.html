@@ -99,6 +99,35 @@ but the leak is gradual and a tripwire catches it early.</p>
 it must be recorded in provenance and may vary per workload — accepting that most users will never
 touch it.</p>
 
+<h2 id="adr-0003">ADR-0003 &mdash; The image is built by <code>make</code>, and a plugin is a distribution <span class="chip chip-locked">accepted</span></h2>
+
+<p><a href="ADR-0003-image-build-and-digest.md">Full record</a></p>
+
+<p><strong>Terraform never builds. It points at a digest.</strong> <code>make image</code> builds and
+pushes the container image; the deployment root takes the resulting digest as an input and creates a
+Lambda from it. The image repository keeps immutable tags, so a digest names bytes that cannot be
+replaced under it, and <code>provenance.json</code> records which digest ran.</p>
+
+<p><strong>A plugin is a Python distribution, never a Terraform resource.</strong> The EMIT plugin
+has its own <code>pyproject.toml</code> under <code>plugins/</code> carrying the scorer, mask and
+reader entry points; the framework's distribution registers only the catalogue sources. The image
+installs the two separately &mdash; the same way a project's own plugin package will be installed.</p>
+
+<div class="tw">
+<table>
+<thead><tr><th>To&hellip;</th><th>Do</th><th>Privilege needed</th></tr></thead>
+<tbody>
+<tr><td>Choose among registered plugins</td><td>Edit the manifest</td><td>none</td></tr>
+<tr><td>Add a scorer, mask, reader or mapper</td><td>Add it to a plugin distribution, <code>make image</code>, <code>make deploy</code></td><td>bucket + image repository write</td></tr>
+<tr><td>Change a role, a bucket or a boundary</td><td>Apply the platform root</td><td>IAM</td></tr>
+</tbody>
+</table>
+</div>
+
+<p>A project writes no HCL at any point &mdash; it writes a <code>pyproject.toml</code> with entry
+points. This amends the line in ADR-0001 and ADR-0002 that reads as though Terraform runs the build:
+the image <em>repository</em> is infrastructure, the image is a build artifact.</p>
+
 <h2 id="pending">Not yet recorded</h2>
 
 <p>Decisions currently made implicitly across the specs. They should become ADRs before
@@ -118,7 +147,8 @@ implementation hardens them.</p>
 <nav class="pager" aria-label="Pagination"></nav>
 <footer class="site">
   Full records: <a href="ADR-0001-tech-stack.md">ADR-0001</a>,
-  <a href="ADR-0002-terraform-manifest-boundary.md">ADR-0002</a>
+  <a href="ADR-0002-terraform-manifest-boundary.md">ADR-0002</a>,
+  <a href="ADR-0003-image-build-and-digest.md">ADR-0003</a>
 </footer>
 </main>
 </div>

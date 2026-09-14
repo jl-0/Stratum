@@ -57,7 +57,7 @@ about the repository:</p>
 <tr><td><code>src/stratum/</code></td><td>The framework: grids, tiling, indexing, caching, the
 stages, the executors, the CLI</td><td>Imaging spectroscopy in the abstract. <strong>Never</strong>
 EMIT, Tetracorder, minerals, or any instrument</td></tr>
-<tr><td><code>src/stratum_emit/</code></td><td>The EMIT plugin package: NetCDF readers, instrument
+<tr><td><code>plugins/stratum-emit/</code></td><td>The EMIT plugin package: NetCDF readers, instrument
 masks, mineral scorers</td><td>Everything about EMIT, and only the public types of
 <code>stratum</code></td></tr>
 </tbody>
@@ -69,6 +69,13 @@ thing from the framework &mdash; <code>stratum.types</code> &mdash; and nothing 
 <code>stratum</code> imports <code>stratum_emit</code> at all. The two packages are joined at run
 time by entry points declared in <code>pyproject.toml</code>, never by an import.</p>
 
+<p>They are also two <strong>separate distributions</strong>, each with its own
+<code>pyproject.toml</code>: <code>stratum</code> at the repository root and
+<code>stratum-emit</code> under <code>plugins/</code>. Installing one does not install the other,
+and the framework's distribution registers no scorer, mask or reader &mdash; only the two catalogue
+sources. That is deliberate: it is the same arrangement a plugin package from another project
+would be in, so the seam is exercised rather than asserted.</p>
+
 <figure class="fig">
 <pre class="mermaid">
 flowchart TB
@@ -76,7 +83,7 @@ flowchart TB
     core["cli &middot; plan &middot; executors&lt;br/&gt;stages &middot; cache &middot; index"]
     types["stratum.types"]
   end
-  subgraph PL["src/stratum_emit/"]
+  subgraph PL["plugins/stratum-emit/"]
     plug["readers&lt;br/&gt;masks&lt;br/&gt;scorers"]
   end
   ep["pyproject.toml&lt;br/&gt;entry points"]
@@ -287,16 +294,16 @@ fast.</td><td><a class="src" data-sym="def main() -> None" href="https://github.
 <thead><tr><th>Module</th><th>Owns</th><th>Start at</th></tr></thead>
 <tbody>
 <tr><td><code>stratum_emit/readers/netcdf.py</code></td><td>The shared NetCDF machinery: group
-walking, fill handling, band attributes, the sensor-space read.</td><td><a class="src" data-sym="class EmitNetCDFReader" href="https://github.com/jl-0/Stratum/blob/main/src/stratum_emit/readers/netcdf.py#L85">EmitNetCDFReader</a></td></tr>
+walking, fill handling, band attributes, the sensor-space read.</td><td><a class="src" data-sym="class EmitNetCDFReader" href="https://github.com/jl-0/Stratum/blob/main/plugins/stratum-emit/src/stratum_emit/readers/netcdf.py#L85">EmitNetCDFReader</a></td></tr>
 <tr><td><code>stratum_emit/readers/__init__.py</code></td><td>One subclass per EMIT collection.
 <code>L2BFrcov</code> is the interesting one: already orthorectified, so it overrides the read
-path and reports no geolocation.</td><td><a class="src" data-sym="class L2BFrcov(EmitNetCDFReader)" href="https://github.com/jl-0/Stratum/blob/main/src/stratum_emit/readers/__init__.py#L68">L2BFrcov</a></td></tr>
+path and reports no geolocation.</td><td><a class="src" data-sym="class L2BFrcov(EmitNetCDFReader)" href="https://github.com/jl-0/Stratum/blob/main/plugins/stratum-emit/src/stratum_emit/readers/__init__.py#L68">L2BFrcov</a></td></tr>
 <tr><td><code>stratum_emit/masks/</code></td><td>Four <code>PixelMask</code> implementations.
 <code>EdgeTrim</code> is sensor-space &mdash; it needs the absolute cross-track column &mdash;
-which is why the space declaration matters.</td><td><a class="src" data-sym="class EdgeTrim" href="https://github.com/jl-0/Stratum/blob/main/src/stratum_emit/masks/__init__.py#L16">EdgeTrim</a></td></tr>
+which is why the space declaration matters.</td><td><a class="src" data-sym="class EdgeTrim" href="https://github.com/jl-0/Stratum/blob/main/plugins/stratum-emit/src/stratum_emit/masks/__init__.py#L16">EdgeTrim</a></td></tr>
 <tr><td><code>stratum_emit/scorers/__init__.py</code></td><td>Four <code>Scorer</code>
 implementations, the shipped worked examples. Seventy-odd lines for all four &mdash; a scorer is
-meant to be small.</td><td><a class="src" data-sym="class MinViewZenith" href="https://github.com/jl-0/Stratum/blob/main/src/stratum_emit/scorers/__init__.py#L9">MinViewZenith</a></td></tr>
+meant to be small.</td><td><a class="src" data-sym="class MinViewZenith" href="https://github.com/jl-0/Stratum/blob/main/plugins/stratum-emit/src/stratum_emit/scorers/__init__.py#L9">MinViewZenith</a></td></tr>
 </tbody>
 </table>
 </div>

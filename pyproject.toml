@@ -33,36 +33,24 @@ dependencies = [
 [project.scripts]
 stratum = "stratum.cli:main"
 
-# Plugin registration - spec 04 section 7. Names are what a manifest `ref` uses.
-[project.entry-points."stratum.scorers"]
-min_view_zenith   = "stratum_emit.scorers:MinViewZenith"
-cleanest_nadir    = "stratum_emit.scorers:CleanestNadir"
-prefer_bare_earth = "stratum_emit.scorers:PreferBareEarth"
-max_band_depth    = "stratum_emit.scorers:MaxBandDepth"
-
-[project.entry-points."stratum.masks"]
-edge_trim     = "stratum_emit.masks:EdgeTrim"
-slit_dust     = "stratum_emit.masks:SlitDust"
-l2a_standard  = "stratum_emit.masks:L2AStandard"
-soil_fraction = "stratum_emit.masks:SoilFraction"
-
-[project.entry-points."stratum.readers"]
-EMITL2BMIN   = "stratum_emit.readers:L2BMin"
-EMITL1BRAD   = "stratum_emit.readers:L1BRad"
-EMITL2AMASK  = "stratum_emit.readers:L2AMask"
-EMITL2BFRCOV = "stratum_emit.readers:L2BFrcov"
-
+# Plugin registration - spec 04 section 7. Names are what a manifest `ref` uses. Only the two
+# catalogue sources are registered here: they are framework machinery. Every EMIT scorer, mask and
+# reader is registered by the `stratum-emit` distribution under plugins/, which this package must
+# not depend on and does not import.
 [project.entry-points."stratum.sources"]
 cmr   = "stratum.access.sources:CMRSource"
 local = "stratum.access.sources:LocalSource"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/stratum", "src/stratum_emit"]
+packages = ["src/stratum"]
 
 # ---- environment: pixi / conda-forge (ADR-0001 section 2) ----
 [tool.pixi.workspace]
 channels = ["conda-forge"]
-platforms = ["osx-arm64", "linux-64"]
+# linux-aarch64 is the container image target: Lambda runs arm64 (Graviton), which is also
+# native on an Apple-silicon laptop, so `make image` builds without emulation and the image
+# resolves from this same lock file (ADR-0003).
+platforms = ["osx-arm64", "linux-64", "linux-aarch64"]
 
 [tool.pixi.dependencies]
 python = "3.11.*"
@@ -87,13 +75,16 @@ ruff = "*"
 
 [tool.pixi.pypi-dependencies]
 stratum = { path = ".", editable = true }
+# The EMIT plugin is a separate distribution installed beside the framework - the same way a
+# project's own plugin package is installed into the image (ADR-0003).
+stratum-emit = { path = "plugins/stratum-emit", editable = true }
 # The KD-tree regrid is wrapped, not forked (spec 03 section 4). The submodule pins the
 # commit; editable because upstream's non-editable build drops its subpackages.
 spectral-util = { path = "vendor/SpectralUtil", editable = true }
 
 [tool.pixi.tasks]
 test = "pytest"
-lint = "ruff check src tests"
+lint = "ruff check src plugins tests"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

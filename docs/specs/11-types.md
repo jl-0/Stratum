@@ -259,7 +259,7 @@ so no existing construction changed (`src/stratum/types.py`, `ObsWindow.__init__
 - `sensor_shape` — the *full* `(downtrack, crosstrack)` of the variable the window was cut from,
   `VarSpec.shape[:2]`; `None` in block space. `SensorWindow` says where the window *starts*; only
   the full shape says where the detector *ends*, and `EdgeTrim` needs both to trim the far edge
-  (`src/stratum_emit/masks/__init__.py`). It comes from the geolocation role's variable when that
+  (`plugins/stratum-emit/src/stratum_emit/masks/__init__.py`). It comes from the geolocation role's variable when that
   role is read, else the first role read; every role read must agree on it, because one GLT
   indexes one sensor array ([12 §2](12-data-access.md)).
 - `band_attrs` — per role or alias, the `VarSpec.band_attrs` the reader reported, never

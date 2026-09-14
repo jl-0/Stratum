@@ -171,7 +171,7 @@ affect data are a deliberate cache concern and belong with a discussion of
 <h2 id="add-reader">4. Adding a reader</h2>
 
 <p>A reader owns band meaning and is where sentinel fills die. The four EMIT readers subclass
-<a class="src" data-sym="class EmitNetCDFReader" href="https://github.com/jl-0/Stratum/blob/main/src/stratum_emit/readers/netcdf.py#L85">EmitNetCDFReader</a>,
+<a class="src" data-sym="class EmitNetCDFReader" href="https://github.com/jl-0/Stratum/blob/main/plugins/stratum-emit/src/stratum_emit/readers/netcdf.py#L85">EmitNetCDFReader</a>,
 which is a convenience, not a requirement &mdash; the contract is the
 <code>GranuleReader</code> protocol.</p>
 
@@ -190,7 +190,7 @@ which is a convenience, not a requirement &mdash; the contract is the
   A manifest can override the choice per collection via <code>inputs.readers</code>.</li>
 </ol>
 
-<p><a class="src" data-sym="class L2BFrcov(EmitNetCDFReader)" href="https://github.com/jl-0/Stratum/blob/main/src/stratum_emit/readers/__init__.py#L68">L2BFrcov</a>
+<p><a class="src" data-sym="class L2BFrcov(EmitNetCDFReader)" href="https://github.com/jl-0/Stratum/blob/main/plugins/stratum-emit/src/stratum_emit/readers/__init__.py#L68">L2BFrcov</a>
 is the instructive example: an already-orthorectified product, so it overrides
 <code>read</code> and reports no geolocation at all.</p>
 
