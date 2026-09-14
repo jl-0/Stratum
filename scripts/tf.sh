@@ -10,7 +10,10 @@ DIR="$REPO_ROOT/terraform/$ROOT"
 
 if [ "$ROOT" = "deployment" ]; then
   export_state_bucket   # deployment/ reads platform/'s outputs from it
-  if [ -z "${TF_VAR_image_digest:-}" ] && [ "${1:-}" != "output" ]; then
+  # `init` sets up the backend and `output` reads state; neither reads the digest. Requiring it
+  # for those couples backend setup to having built an image, which are unrelated steps.
+  case "${1:-}" in init|output) needs_digest=false ;; *) needs_digest=true ;; esac
+  if [ "$needs_digest" = true ] && [ -z "${TF_VAR_image_digest:-}" ]; then
     echo "STRATUM_IMAGE_DIGEST is not set in $ENV_FILE." >&2
     echo "Run 'make image', then put the digest it prints in .env." >&2
     exit 1
