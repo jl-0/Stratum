@@ -196,10 +196,14 @@ so a difference in the result is a difference in the ground, not in the configur
   <code>mineral_1_agreement</code>, <code>n_epochs</code> and <code>depth_1_n</code> are mostly
   refused. The files are valid &mdash; GDAL, rasterio and QGIS read every one. The trigger is macOS
   ImageIO's handling of <strong>internally tiled</strong> TIFFs: rewriting any refused file with
-  <code>TILED=NO</code> and the same deflate compression makes it open, and so does
-  <code>n_epochs</code> from the single-tile run. Which tiled files it accepts is data-dependent
-  and not explained by size, dtype, compression or whether the internal tile size divides the
-  raster. Open whether <code>gtiff</code> should therefore write strips rather than tiles;
+  <code>TILED=NO</code> and the same deflate compression makes it open. The single-tile run
+  behaves the same way &mdash; re-measured 2026-09-14 on
+  <code>emit-cmr-nevada-7aa1f818</code>, seven of its eight bands open at 3600 and only
+  <code>n_epochs</code> is refused, which <code>TILED=NO</code> also fixes. Which tiled files
+  ImageIO accepts is data-dependent and not explained by size, dtype, compression, resolution, or
+  whether the internal tile size divides the raster: <code>n_epochs</code> is refused at
+  900 &times; 900 with 256-cell tiles and at 3600 &times; 3600 with 400-cell tiles, where the
+  tiling divides exactly. Open whether <code>gtiff</code> should therefore write strips rather than tiles;
   <code>cog</code> is tiled by definition and unaffected.</p>
 </div>
 

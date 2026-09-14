@@ -192,10 +192,15 @@ of them:
 
 The files are fine — GDAL, rasterio and QGIS read every one of them. The trigger is macOS
 ImageIO's handling of **internally tiled** TIFFs: rewriting any refused file with `TILED=NO` and
-the same deflate compression makes it open, and the same is true of `n_epochs` in the Nevada
-example. Which tiled files ImageIO accepts is data-dependent and not explained by size, dtype,
-compression or whether the internal tile size divides the raster — `mineral_1` and `n_epochs` here
-are both uint16, both 900 x 900, both 256 x 256 deflate tiles, and only one of them opens.
+the same deflate compression makes it open. The single-tile example behaves the same way — in
+`emit-cmr-nevada` run `emit-cmr-nevada-7aa1f818` seven of the eight bands open at 3600 and only
+`n_epochs` is refused, and `TILED=NO` fixes that one too.
+
+Which tiled files ImageIO accepts is data-dependent and not explained by size, dtype, compression
+or whether the internal tile size divides the raster — `mineral_1` and `n_epochs` here are both
+uint16, both 900 x 900, both 256 x 256 deflate tiles, and only one of them opens. It is not
+resolution either: the same `n_epochs` band is refused at 900 x 900 with 256-cell tiles and at
+3600 x 3600 with 400-cell tiles, where the tiling divides the raster exactly.
 
 ```bash
 # if you need one of the refused bands in Preview
