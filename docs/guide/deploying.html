@@ -507,10 +507,13 @@ field, so the same science runs in both places:</p>
 <div class="warn">
   <span class="label">The CLI is in the pixi environment, not on your PATH</span>
   <p><code>stratum</code> lives in <code>.pixi/envs/default/bin/</code>, so a bare
-  <code>stratum run …</code> in a fresh shell is <em>command not found</em>. Use
-  <code>pixi run stratum …</code>, or <code>pixi shell</code> once and then plain
-  <code>stratum</code>. The <code>make</code> targets do not activate it for you: they drive
-  <code>terraform</code>, <code>aws</code> and <code>docker</code>, which are system tools.</p>
+  <code>stratum run …</code> in a fresh shell is <em>command not found</em>. A cloud run needs a
+  second thing too: the same AWS profile Terraform uses, or boto3's credential chain finds nothing
+  and the run dies on <code>NoCredentialsError</code>.</p>
+  <p><code>./scripts/stratum.sh</code> supplies both &mdash; the pixi environment and
+  <code>.env</code> &mdash; and preserves your working directory, so relative manifest paths mean
+  what you typed. <code>pixi run stratum …</code> works too, as long as <code>AWS_PROFILE</code>
+  is exported.</p>
 </div>
 
 <p>A cloud run needs two things beyond the manifest: the function to dispatch to, and a storage

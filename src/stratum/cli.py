@@ -112,7 +112,7 @@ def run(manifest: str | None, patch: tuple[str, ...], from_provenance: str | Non
         dry_run: bool) -> None:
     """Plan and execute every stage."""
     from stratum.executors import (ExecutionError, executor_available,
-                                   executor_suits_root, run_all)
+                                   executor_suits_root, root_is_reachable, run_all)
     from stratum.plan import BudgetExceeded, plan_run
 
     _set_asset_cache(asset_cache)
@@ -122,6 +122,7 @@ def run(manifest: str | None, patch: tuple[str, ...], from_provenance: str | Non
     if manifest is None:
         raise click.UsageError("-m/--manifest is required")
     _guarded(executor_suits_root, manifest, executor)
+    _guarded(root_is_reachable, manifest)
     result = _guarded(plan_run, manifest, out, patch)
     click.echo(result.report, nl=False)
     if result.over_budget:

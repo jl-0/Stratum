@@ -42,6 +42,29 @@ def executor_suits_root(manifest_path: str, executor: str) -> None:
             "--executor local, which works against either (06 section 4, 08 section 1)")
 
 
+def root_is_reachable(manifest_path: str) -> None:
+    """Refuse a bucket storage root we have no AWS credentials for, BEFORE planning.
+
+    Without this the run plans to completion - which for a catalogue source downloads assets -
+    and then dies inside botocore on the first upload with `NoCredentialsError`, a message that
+    names neither the bucket nor the profile it looked for. The cost of finding out is the whole
+    plan stage.
+    """
+    from stratum.manifest import load_manifest
+    from stratum.storage import parse_s3
+    bucket = str(load_manifest(manifest_path).outputs.bucket)
+    if parse_s3(bucket) is None:
+        return
+    import boto3
+    if boto3.Session().get_credentials() is not None:
+        return
+    raise NotImplementedError(
+        f"outputs.bucket is {bucket!r} but no AWS credentials were found. boto3 looks at "
+        "AWS_PROFILE, AWS_ACCESS_KEY_ID, ~/.aws/credentials and the instance role, in that "
+        "order. Run via ./scripts/stratum.sh, which loads .env, or export AWS_PROFILE "
+        "yourself; if the profile is federated the session may simply have expired.")
+
+
 def executor_available(name: str) -> None:
     """Refuse an executor this build does not ship, naming the section."""
     if name not in EXECUTORS:
@@ -68,5 +91,5 @@ def run_all(run_dir: Path | str, workers: int | None = None,
 
 
 __all__ = ["EXECUTORS", "ExecutionError", "budget_gate", "exec_item", "executor_available",
-           "executor_suits_root",
+           "executor_suits_root", "root_is_reachable",
            "load_cached", "product_key", "run_all", "run_stage", "stage_runner"]

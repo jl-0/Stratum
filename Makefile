@@ -48,7 +48,7 @@ ARGS     ?=
 cloud-run: env-check
 	./scripts/cloud-manifest.sh $(MANIFEST)
 	STRATUM_LAMBDA_FUNCTION=$$(./scripts/tf.sh output -raw function_name) \
-	  pixi run stratum run -m $(MANIFEST:.yaml=.cloud.yaml) --executor aws $(ARGS)
+	  ./scripts/stratum.sh run -m $(MANIFEST:.yaml=.cloud.yaml) --executor aws $(ARGS)
 
 image:       env-check ; ./scripts/build-image.sh
 image-local: env-check ; ./scripts/build-image.sh --local
