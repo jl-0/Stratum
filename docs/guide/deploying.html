@@ -232,10 +232,14 @@ directly:</p>
 </table>
 </div>
 
-<pre><code>aws secretsmanager put-secret-value \
-  --secret-id stratum/<span class="k">$STRATUM_DEPLOYMENT</span>/earthdata \
-  --secret-string <span class="k">'{"username":"…","password":"…"}'</span> \
-  --profile <span class="k">"$AWS_PROFILE"</span></code></pre>
+<pre><code>./scripts/put-edl-secret.sh            <span class="c"># prompts for username and password</span>
+./scripts/put-edl-secret.sh token      <span class="c"># prompts for a token instead</span></code></pre>
+
+<p>It prompts without echoing, builds the JSON in Python rather than the shell so a password
+containing quotes or <code>$</code> survives verbatim, and passes the value as
+<code>file://</code> from a <code>umask 077</code> temp file removed on exit. Passing
+<code>--secret-string</code> by hand instead would put the credential into your shell history
+and, briefly, into the process list.</p>
 
 <p>Both shapes are already supported — no code change either way. Which one to standardise on is
 still <a href="../status.html#open">open</a>: the password pair is simpler, the token avoids holding
