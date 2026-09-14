@@ -41,8 +41,18 @@ them.</p>
 </div>
 
 <pre><code>stratum run -m manifest.yaml                      <span class="c"># local, the default</span>
-stratum run -m manifest.yaml --executor slurm
-stratum run -m manifest.yaml --executor aws</code></pre>
+stratum run -m manifest.yaml --executor aws       <span class="c"># one Lambda per work item</span>
+stratum run -m manifest.yaml --executor slurm     <span class="c"># specified; not built</span></code></pre>
+
+<div class="note">
+  <span class="label">What <code>aws</code> needs</span>
+  <p>Two things beyond the manifest: <code>$STRATUM_LAMBDA_FUNCTION</code>, which the deployment
+  prints, and an <code>outputs.bucket</code> that is an <code>s3://</code> URI. A local root is
+  refused by name before the first invocation &mdash; a Lambda cannot read your laptop's
+  filesystem, and that failure is far cheaper here than several hundred invocations later.
+  <a href="deploying.html">Deploying to AWS</a> is the runbook; <code>slurm</code> is refused with
+  its spec section cited.</p>
+</div>
 
 <div class="key">
   <span class="label">The executor is not a manifest field</span>

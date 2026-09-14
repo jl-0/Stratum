@@ -3,8 +3,10 @@
 Cost-function-driven mosaic engine for imaging spectroscopy. **The first slice exists** (built
 2026-09-02, `src/stratum` + `plugins/stratum-emit`, 285 tests): a local run over staged granules,
 plan through publish, and — the same day — a run from NASA's CMR catalogue with granules
-downloaded over HTTPS on first touch (`examples/emit-cmr-nevada/`). `docs/specs/` is still the
-contract; the build contract it was written against is
+downloaded over HTTPS on first touch (`examples/emit-cmr-nevada/`). **The cloud slice followed**
+(2026-09-14, 525 tests): an `s3://` storage root, a container image, a Lambda worker and
+`--executor aws`. `docs/specs/` is still the contract; the build contract the first slice was
+written against is
 [`docs/notes/2026-09-02-first-slice-plan.md`](docs/notes/2026-09-02-first-slice-plan.md).
 
 Read [`docs/specs/00-overview.md`](docs/specs/00-overview.md) before doing anything substantive;
@@ -176,6 +178,18 @@ Established by reading code and data. Do not re-derive; do not assume the opposi
   `$STRATUM_ASSET_CACHE`, else `{root}/assets` — `--asset-cache` on `run`/`exec` sets the
   variable so spawned workers inherit it; the planner downloads one geometry asset plus every
   contributing granule's class-table asset into it, and the run hits them.
+- **Terraform never builds; a plugin is never a Terraform resource.** `make image` builds and
+  pushes, and `terraform/deployment/` points a Lambda at the digest. A project ships a Python
+  distribution with `stratum.*` entry points and writes no HCL — [`ADR-0003`](docs/decisions/ADR-0003-image-build-and-digest.md).
+- **A mirror is never the record.** A bucket storage root gets a node-local mirror under
+  `$STRATUM_SCRATCH`, derived from a hash of the URI so every process agrees on it. `plan.json`
+  records `root`, `run_dir` and `products_dir` as URIs; nothing durable may name a mirror path.
+- **A directory artifact carries `.members.json`.** Members, then the list, then `.inputs.json`.
+  The sidecar is still the commit; the list is what tells a complete artifact from a prefix that
+  lost an object. Locally redundant and written anyway, so the two paths behave identically.
+- **The EDL secret's *name* is configuration; its value never is.** Anything in a Lambda's
+  `environment` block is in Terraform state and readable by `lambda:GetFunction`. The handler
+  fetches the value at run time, once per container — [`08 §5`](docs/specs/08-execution.md).
 - **Wrap SpectralUtil, never fork it.** EMIT-AMD depends on a personal fork for a CLI upstream now
   ships; do not repeat that.
 
@@ -494,6 +508,31 @@ print(d.groups['mineral_metadata'].variables.keys())"
 
 ---
 
+## The cloud slice exists (2026-09-14)
+
+A run whose every work item executes in Lambda, orchestrated from a laptop. Four pieces, in
+dependency order, each with its own commit:
+
+1. **`plugins/stratum-emit/` is its own distribution** — its own `pyproject.toml` carrying the
+   scorer, mask and reader entry points; `stratum` registers only `stratum.sources`.
+   [`ADR-0003`](docs/decisions/ADR-0003-image-build-and-digest.md).
+2. **`outputs.bucket` may be an `s3://` prefix** — `stratum.storage.Workspace`, a node-local
+   mirror behind `CacheRoot`. [`06 §4`](docs/specs/06-caching.md).
+3. **One image, two entrypoints**, `linux/arm64`, resolved from `pixi.lock`. `make image` builds,
+   pushes and prints the digest; `terraform/deployment/` pins it and creates no IAM.
+4. **`--executor aws`** — a thread pool over `lambda:InvokeFunction` with the same outcome records
+   and the same Finalize as `local`. [`08 §1`](docs/specs/08-execution.md).
+
+Verified on this machine: the image builds and `stratum plugins list` inside it resolves all
+twelve EMIT plugins; an invocation through the Lambda Runtime Interface Emulator reaches the
+handler; `terraform validate` passes on both roots. **Not yet verified against real AWS** — no
+deployment had been applied when this was written.
+
+Still open here: nothing survives closing the laptop (the orchestrator is the CLI), nothing is
+scheduled, and the manifest's `plugins.wheel` cold-start fetch is modelled and unbuilt.
+
+---
+
 ## The first slice exists
 
 The agreed scope was deliberately narrow:
@@ -510,8 +549,9 @@ the schema-driven reducer, publish (data COGs, categorical/continuous mappers, l
 provenance), the `local` executor and the CLI. Added the same day, beyond the contract:
 `CMRSource`, HTTPS assets behind Earthdata Login staged into a node-local asset cache, and the
 `examples/emit-cmr-nevada` run ([12 §4–5](docs/specs/12-data-access.md)). Still out, refused with the
-spec section named: S3 assets, prepared assets, aux data, `stack`/`tile` scorers, `Reducer`
-plugins, `threshold`/`composite` mappers, `stratum render`, patches, `approve`, `slurm`/`aws`.
+spec section named: S3 *assets* (the DAAC credential exchange), prepared assets, aux data,
+`stack`/`tile` scorers, `Reducer` plugins, `threshold`/`composite` mappers, `stratum render`,
+patches, `approve`, `slurm`.
 No V002 output was available locally; a SpectralUtil `build_obs_nc` parity run stands in and
 matches cell for cell (`docs/notes/heritage.md`, "First measurements").
 

@@ -456,7 +456,7 @@ and their schema.</p>
 <table>
 <thead><tr><th>Field</th><th>Values</th><th>Default</th></tr></thead>
 <tbody>
-<tr><td><code>bucket</code></td><td>S3 URI</td><td>—</td></tr>
+<tr><td><code>bucket</code></td><td>An <code>s3://</code> URI, or a path relative to the manifest</td><td>—</td></tr>
 <tr><td><code>formats</code></td><td><code>cog</code>, <code>netcdf</code></td><td><code>[cog]</code></td></tr>
 <tr><td><code>stac</code></td><td>bool</td><td><code>true</code></td></tr>
 <tr><td><code>render.&lt;band&gt;.mapper</code></td><td><code>categorical</code> | <code>continuous</code> | <code>threshold</code> | <code>composite</code> | a plugin ref</td><td>—</td></tr>
@@ -465,6 +465,16 @@ and their schema.</p>
 <tr><td><code>render.&lt;band&gt;.alpha_from</code></td><td><code>{band, domain, range}</code></td><td>unset</td></tr>
 </tbody>
 </table>
+</div>
+
+<div class="key">
+  <span class="label"><code>bucket</code> is the storage root, not just where products land</span>
+  <p><code>cache/</code>, <code>runs/{run_id}/</code> and <code>products/{run_id}/</code> all hang
+  off it, with the same layout and the same keys whether it is a bucket or a directory. Pointing a
+  run at a deployment is therefore this one field &mdash; the executor is never a manifest field,
+  so the same science runs in both places. A bucket root is required by the
+  <code>aws</code> executor, which refuses a local one by name: a Lambda cannot read your
+  laptop's filesystem.</p>
 </div>
 
 <p>Continuous mappers take <code>ramp</code>, <code>domain</code> and <code>clip</code> instead of

@@ -32,10 +32,10 @@ on a laptop, on a cluster, and as the worker entrypoint.</p>
 <div class="key">
   <span class="label">What runs today</span>
   <p><span class="chip chip-locked">built</span> marks a command or option that exists as of
-  2026-09-02. <span class="chip chip-open">not yet</span> marks one that is specified and refused
+  2026-09-14. <span class="chip chip-open">not yet</span> marks one that is specified and refused
   with a message naming its spec section (<code>not implemented in this slice: …</code>, exit
-  <code>1</code>). Only the <code>local</code> executor exists; <code>--executor slurm</code> and
-  <code>aws</code> are refused.</p>
+  <code>1</code>). <code>--executor local</code> and <code>--executor aws</code> both run;
+  <code>slurm</code> is refused.</p>
 </div>
 
 <h2 id="summary">Commands</h2>
@@ -68,7 +68,7 @@ on a laptop, on a cluster, and as the worker entrypoint.</p>
 <tr><td><code>--version</code></td><td>Print the package version</td><td><span class="chip chip-locked">built</span></td></tr>
 <tr><td><code>-m, --manifest PATH</code></td><td>Base manifest — per command, on every command that takes one</td><td><span class="chip chip-locked">built</span></td></tr>
 <tr><td><code>-p, --patch NAME</code></td><td>Patch to merge, repeatable, applied in order</td><td><span class="chip chip-open">not yet</span> — parsed and refused</td></tr>
-<tr><td><code>--executor NAME</code></td><td><code>local</code> (default) | <code>slurm</code> | <code>aws</code>. A platform choice, never a manifest field. On <code>run</code> only.</td><td><span class="chip chip-locked">built</span> <code>local</code></td></tr>
+<tr><td><code>--executor NAME</code></td><td><code>local</code> (default) | <code>slurm</code> | <code>aws</code>. A platform choice, never a manifest field. On <code>run</code> only.</td><td><span class="chip chip-locked">built</span> <code>local</code>, <code>aws</code></td></tr>
 <tr><td><code>--profile NAME</code></td><td>Named executor settings — cluster partition, or AWS endpoints and region</td><td><span class="chip chip-open">not yet</span></td></tr>
 <tr><td><code>--log-level LEVEL</code></td><td><code>debug</code> | <code>info</code> | <code>warning</code> | <code>error</code></td><td><span class="chip chip-open">not yet</span></td></tr>
 <tr><td><code>--json</code></td><td>Machine-readable output instead of formatted text</td><td><span class="chip chip-locked">built</span> on <code>plan</code></td></tr>
@@ -116,23 +116,32 @@ area, time and filters — is invalid, not an empty plan.</p>
 
 <h2 id="run">stratum run</h2>
 
-<pre><code>stratum run -m manifest.yaml [--workers N] [--out PATH] [--asset-cache PATH] [--dry-run]</code></pre>
+<pre><code>stratum run -m manifest.yaml [--executor local|aws] [--workers N] [--out PATH]
+                            [--asset-cache PATH] [--dry-run]</code></pre>
 
-<p>Plans, then executes regrid → resolve → reduce → publish in a process pool on this machine,
-then writes the STAC collection and <code>provenance.json</code> and appends an execution table
-to <code>report.md</code>. Blocks until finished.</p>
+<p>Plans, then executes regrid → resolve → reduce → publish, then writes the STAC collection and
+<code>provenance.json</code> and appends an execution table to <code>report.md</code>. Blocks
+until finished.</p>
+
+<p>Where the items run is the only difference between the two executors. <code>local</code> uses a
+process pool on this machine. <code>aws</code> invokes the deployment's Lambda once per item, from
+this machine, and needs two things: <code>$STRATUM_LAMBDA_FUNCTION</code> (<code>make
+tf-deploy-output</code> prints it) and a manifest whose <code>outputs.bucket</code> is an
+<code>s3://</code> URI. A local root is refused by name before the first invocation, because a
+Lambda cannot read your laptop's filesystem. The stages, their order, the outcome records and
+everything the run writes are identical either way.</p>
 
 <div class="tw">
 <table>
 <thead><tr><th>Option</th><th>Effect</th><th>Status</th></tr></thead>
 <tbody>
-<tr><td><code>--executor NAME</code></td><td><code>local</code> (default), <code>slurm</code>, <code>aws</code></td><td><span class="chip chip-locked">built</span> <code>local</code> only</td></tr>
-<tr><td><code>--workers N</code></td><td>Pool size. Default one per core. <code>1</code> runs every item in-process, which is the path to use under a debugger.</td><td><span class="chip chip-locked">built</span></td></tr>
+<tr><td><code>--executor NAME</code></td><td><code>local</code> (default), <code>aws</code>, <code>slurm</code></td><td><span class="chip chip-locked">built</span> <code>local</code>, <code>aws</code></td></tr>
+<tr><td><code>--workers N</code></td><td><code>local</code>: pool size, default one per core; <code>1</code> runs every item in-process, which is the path to use under a debugger. <code>aws</code>: invocations in flight, default <code>$STRATUM_LAMBDA_CONCURRENCY</code> else 32.</td><td><span class="chip chip-locked">built</span></td></tr>
 <tr><td><code>--out PATH</code></td><td>Run directory; default <code>{root}/runs/{run_id}</code></td><td><span class="chip chip-locked">built</span></td></tr>
 <tr><td><code>--asset-cache PATH</code></td><td>Node-local directory remote assets are staged into. Sets <code>STRATUM_ASSET_CACHE</code> for this process and every spawned worker. Default <code>$STRATUM_ASSET_CACHE</code>, else <code>{root}/assets</code></td><td><span class="chip chip-locked">built</span></td></tr>
 <tr><td><code>--dry-run</code></td><td>Equivalent to <code>plan</code></td><td><span class="chip chip-locked">built</span></td></tr>
 <tr><td><code>--from-provenance URI</code></td><td>Re-run against a previous run's frozen index rather than re-querying</td><td><span class="chip chip-open">not yet</span></td></tr>
-<tr><td><code>--max-concurrent N</code></td><td><code>slurm</code>/<code>aws</code>: cap on simultaneous work items</td><td><span class="chip chip-open">not yet</span></td></tr>
+<tr><td><code>--max-concurrent N</code></td><td><code>slurm</code>: cap on simultaneous work items. For <code>aws</code> this is <code>--workers</code>, and the ceiling that actually binds is the function's reserved concurrency, which is a deployment setting</td><td><span class="chip chip-open">not yet</span></td></tr>
 <tr><td><code>--partition</code>, <code>--cpus-per-task</code>, <code>--mem</code>, <code>--time</code></td><td><code>slurm</code>: passed through to <code>sbatch</code></td><td><span class="chip chip-open">not yet</span></td></tr>
 <tr><td><code>--wait</code> / <code>--no-wait</code></td><td>Block until the run finishes. Default: wait for <code>local</code>, do not wait for the others.</td><td><span class="chip chip-open">not yet</span></td></tr>
 <tr><td><code>--no-cache</code>, <code>--no-cache-from STAGE</code></td><td>Ignore cache hits and rebuild from a stage onward</td><td><span class="chip chip-open">not yet</span></td></tr>

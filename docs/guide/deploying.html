@@ -24,14 +24,14 @@
 to. <a href="scaling.html">Running at scale</a> explains what the executors are; this page is the
 runbook.</p>
 
-<div class="warn">
-  <span class="label">Read this before you follow it</span>
-  <p>Only the first step is built. The Terraform below creates a bucket, an image repository, a
-  secret container and three roles — all of which apply cleanly today — but
-  <strong>nothing yet runs in the cloud</strong>: the S3 storage root, the container image, the
-  Lambda worker and the <code>aws</code> executor are all later slices. Each refuses by name with
-  its spec section cited. Follow this page to stand up the platform; do not expect a cloud run at
-  the end of it. <a href="../status.html">Status</a> is the authority on what exists.</p>
+<div class="key">
+  <span class="label">Where this gets you</span>
+  <p>A run whose every work item executes in Lambda, orchestrated from your laptop. The platform
+  root creates a bucket, an image repository, a secret container and three roles; the deployment
+  root creates the worker function from an image you build. What is <em>not</em> here: nothing
+  survives closing the laptop yet, and nothing is scheduled &mdash; those are the third and fourth
+  steps in <a href="#next">What comes next</a>. <a href="../status.html">Status</a> is the
+  authority on what exists.</p>
 </div>
 
 <h2 id="shape">What you are building</h2>
@@ -48,7 +48,8 @@ deliberately small:</p>
 <tr><td>ECR repository</td><td>One image, two entrypoints. Immutable tags, because deployments pin by digest</td><td><span class="chip chip-locked">built</span></td></tr>
 <tr><td>Secrets Manager secret</td><td>The Earthdata credential. Container only — the value never passes through Terraform</td><td><span class="chip chip-locked">built</span></td></tr>
 <tr><td>Three IAM roles</td><td>Lambda worker, orchestrator task, task execution</td><td><span class="chip chip-locked">built</span></td></tr>
-<tr><td>Lambda function</td><td>Runs one work item — the same <code>stratum exec</code> every executor calls</td><td><span class="chip chip-open">not started</span></td></tr>
+<tr><td>Lambda function</td><td>Runs one work item — the same <code>exec_item</code> every executor calls</td><td><span class="chip chip-locked">built</span></td></tr>
+<tr><td>Log group and budget</td><td>Explicit retention, and an alarm before the first execution</td><td><span class="chip chip-locked">built</span></td></tr>
 <tr><td>ECS task definition</td><td>The orchestrator, when a run should survive a closed laptop</td><td><span class="chip chip-open">not started</span></td></tr>
 </tbody>
 </table>
@@ -267,16 +268,111 @@ a password but adds a renewal obligation.</p>
 runs past Lambda's 15-minute ceiling, so nothing on this path ever needs to refresh a NASA
 credential mid-read.</p>
 
+<h2 id="image">7. Build and push the worker image</h2>
+
+<pre><code>make image</code></pre>
+
+<p>It builds for <code>linux/arm64</code>, pushes to the repository the platform root created, and
+prints the digest. Put that digest in <code>.env</code> as <code>STRATUM_IMAGE_DIGEST</code>; the
+deployment pins it.</p>
+
+<div class="tw">
+<table>
+<thead><tr><th>Property</th><th>Why</th></tr></thead>
+<tbody>
+<tr><td>The environment comes from <code>pixi.lock</code></td><td>The same file your laptop resolves from, so the image cannot drift from the environment the tests ran in. GDAL comes from conda-forge; a second resolution is a second set of versions to be surprised by</td></tr>
+<tr><td>arm64</td><td>Graviton on Lambda, native on an Apple-silicon laptop, so the build needs no emulation</td></tr>
+<tr><td>One image, two entrypoints</td><td>Which one you get is decided by whether <code>$AWS_LAMBDA_RUNTIME_API</code> is there to talk to &mdash; not by a second tag you have to remember</td></tr>
+<tr><td>Tags are immutable, and a dirty tree is refused</td><td>A digest has to identify a commit somebody else can check out. <code>ALLOW_DIRTY=1</code> overrides it, and stamps the tag so you can see what you did</td></tr>
+</tbody>
+</table>
+</div>
+
+<p>Check what the image actually provides before deploying it — this is the question "did my
+plugin make it in?", answered without guessing:</p>
+
+<pre><code>make image-local
+docker run --rm stratum-dev:&lt;tag&gt; stratum plugins list</code></pre>
+
+<div class="key">
+  <span class="label">Terraform never builds</span>
+  <p><code>make image</code> builds and pushes; the deployment root points a function at the digest
+  that produced. That split is what keeps an apply from needing Docker and a working copy, and it is
+  what makes the deployed code identifiable from an immutable digest rather than from whatever was
+  checked out when someone ran <code>apply</code>.
+  <a href="../decisions/ADR-0003-image-build-and-digest.md">ADR-0003</a> has the reasoning.</p>
+</div>
+
+<h2 id="deploy">8. Apply the deployment root</h2>
+
+<pre><code>make tf-deploy-init
+make tf-deploy-plan
+make tf-deploy
+make tf-deploy-output   <span class="c"># prints the function name, and the command to run</span></code></pre>
+
+<p>This root creates <strong>no IAM</strong>, so anyone with bucket and image-repository write may
+apply it. It creates the worker function from your digest, a log group with explicit retention, a
+reserved-concurrency ceiling, and a monthly budget alarm scoped by the <code>Deployment</code> tag.
+It reads the platform root's outputs through <code>terraform_remote_state</code>, under its own
+state key.</p>
+
+<div class="tw">
+<table>
+<thead><tr><th>Setting</th><th>Default</th><th>Why that</th></tr></thead>
+<tbody>
+<tr><td>Memory</td><td>4&nbsp;GB</td><td>Lambda gives CPU in proportion, so this is the compute knob too. A 720&nbsp;&times;&nbsp;720 block with up to 14 candidates measures well under 3&nbsp;GB</td></tr>
+<tr><td>Timeout</td><td>900&nbsp;s</td><td>Lambda's hard maximum. The slowest measured item is about 19&nbsp;s; the margin is for a cold start plus a granule download</td></tr>
+<tr><td><code>/tmp</code></td><td>10&nbsp;GB</td><td>Holds the storage mirror and the staged granules. Lambda's maximum</td></tr>
+<tr><td>Reserved concurrency</td><td>64</td><td>A guard rail, not a throughput target: it stops one run exhausting the account's Lambda concurrency and starving another</td></tr>
+<tr><td>Log retention</td><td>30 days</td><td>The default for a log group is "never expire", which is a real line item at tens of thousands of invocations</td></tr>
+<tr><td>Budget</td><td>100 USD/month</td><td>An alarm, not a cap &mdash; AWS does not stop the work. Set <code>STRATUM_BUDGET_ALERT_EMAIL</code> or nobody hears it</td></tr>
+</tbody>
+</table>
+</div>
+
+<p>All six are platform settings. None of them is a manifest field, and changing one is an apply
+that touches no role.</p>
+
+<h2 id="cloud-run">9. Run it</h2>
+
+<p>Two things beyond the manifest: the function name, and a manifest whose
+<code>outputs.bucket</code> is the deployment's bucket.</p>
+
+<pre><code><span class="k">outputs</span>:
+  <span class="k">bucket</span>: s3://stratum-dev-&lt;account-id&gt;/     <span class="c"># make tf-output prints it</span></code></pre>
+
+<pre><code>export STRATUM_LAMBDA_FUNCTION=$(make -s tf-deploy-output | grep function_name | cut -d'"' -f2)
+stratum run -m manifest.yaml --executor aws</code></pre>
+
+<p>Every work item of every stage becomes one invocation. Your laptop dispatches and collects
+outcomes; it holds no state, because every result is in the bucket before the invocation returns.
+Losing the laptop loses the dispatch, never the work. <code>--workers</code> is how many
+invocations are in flight (default 32); the ceiling that actually binds is the function's reserved
+concurrency.</p>
+
+<div class="warn">
+  <span class="label">A local storage root is refused, by design</span>
+  <p><code>--executor aws</code> with <code>outputs.bucket: ./out</code> stops before the first
+  invocation and says so. A Lambda cannot read your laptop's filesystem, and the failure is much
+  cheaper here than 700 invocations later.</p>
+</div>
+
+<p>When something fails, the outcome records are the same shape a local run writes &mdash; a handler
+exception included &mdash; so <code>stratum status --run &lt;id&gt; --failed</code> reads one format
+whichever executor produced it. The worker's own logs are in the log group
+<code>make tf-deploy-output</code> names.</p>
+
 <h2 id="next">What comes next</h2>
 
-<p>The platform above is the first of four steps. Each is useful on its own, and none needs EC2.</p>
+<p>The four steps, of which the first two are done. Each is useful on its own, and none needs
+EC2.</p>
 
 <div class="tw">
 <table>
 <thead><tr><th>Step</th><th>Orchestrator</th><th>Work</th><th>Trigger</th><th>Status</th></tr></thead>
 <tbody>
-<tr><td>S3 storage root</td><td>your laptop</td><td>your laptop</td><td>you</td><td><span class="chip chip-open">not started</span></td></tr>
-<tr><td>Image and Lambda worker</td><td>your laptop</td><td><strong>Lambda</strong></td><td>you</td><td><span class="chip chip-open">not started</span></td></tr>
+<tr><td>S3 storage root</td><td>your laptop</td><td>your laptop</td><td>you</td><td><span class="chip chip-locked">built</span></td></tr>
+<tr><td>Image and Lambda worker</td><td>your laptop</td><td><strong>Lambda</strong></td><td>you</td><td><span class="chip chip-locked">built</span></td></tr>
 <tr><td>Detached orchestrator</td><td><strong>Fargate</strong></td><td>Lambda</td><td>you</td><td><span class="chip chip-open">not started</span></td></tr>
 <tr><td>Scheduled runs</td><td>Fargate</td><td>Lambda</td><td><strong>EventBridge</strong></td><td><span class="chip chip-open">not started</span></td></tr>
 </tbody>
@@ -302,18 +398,23 @@ Only the third row introduces a container that is not a worker.</p>
 </div>
 
 <div class="note">
-  <span class="label">The storage root is the long pole</span>
-  <p>The cache layer writes through <code>pathlib.Path</code> with a temp-then-rename, and S3 has no
-  rename. A single <code>PutObject</code> is atomic, so file artifacts get <em>simpler</em>;
-  directory artifacts &mdash; snapshots and product blocks &mdash; have no equivalent, and commit by
-  writing their members first and the <code>.inputs.json</code> sidecar last, with the sidecar
-  listing what it covers. A crash leaves members with no sidecar, which is not a hit, so the stage
-  recomputes. <a href="caching.html">Caching &amp; reruns</a> explains why a partial artifact at a
-  key is the one corruption content addressing cannot detect.</p>
+  <span class="label">How the storage root works</span>
+  <p>A bucket root gets a <strong>node-local mirror</strong>: every stage is handed a real path, so
+  the read path is the same code as a local run &mdash; which matters because GDAL and netCDF4 want
+  a file, and Lambda has 10&nbsp;GB of <code>/tmp</code> against blocks of about 1&nbsp;GB. A cache
+  probe that misses locally probes the bucket before it is a miss, so whoever computed an artifact,
+  every other worker gets a hit. A mirror is a cache and never the record: delete it and a worker
+  recovers everything from the bucket.</p>
+  <p>S3 has no rename, so a directory artifact commits by writing its members first, then
+  <code>.members.json</code> &mdash; its own list of what it covers &mdash; then the
+  <code>.inputs.json</code> sidecar. A hit needs the sidecar <em>and</em> every listed member, which
+  is how a prefix that lost an object is told from a complete artifact.
+  <a href="caching.html">Caching &amp; reruns</a> explains why a partial artifact at a key is the one
+  corruption content addressing cannot detect.</p>
 </div>
 
-<p>Once the storage root exists, pointing a run at the deployment is a one-field change — the
-executor is never a manifest field, so the same science runs in both places:</p>
+<p>Pointing a run at the deployment is a one-field change — the executor is never a manifest
+field, so the same science runs in both places:</p>
 
 <pre><code><span class="k">outputs</span>:
   <span class="k">bucket</span>: s3://stratum-dev-&lt;account-id&gt;/     <span class="c"># was: ./out</span></code></pre>

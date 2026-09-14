@@ -121,6 +121,15 @@ else may be written into a snapshot directory: `read_snapshot` discovers layers 
    a file artifact's sidecar lands after the file, and a hit requires both, so the window between
    them reads as a miss. Rewriting an existing directory entry removes it first, because
    `rename(2)` cannot replace a non-empty directory.
+
+   **On a bucket there is no rename**, and a directory artifact is N uploads rather than one
+   atomic act. The same ordering carries the same meaning: members first, `.inputs.json` last,
+   so a crash leaves members with no sidecar and that is not a hit. What a bucket needs in
+   addition is a way to tell a complete artifact from a prefix that lost an object, since a
+   sidecar alone proves nothing about its neighbours — so a directory artifact also carries
+   **`.members.json`**, its own list of what it covers, written immediately before the sidecar.
+   A hit requires every listed member. Locally the file is redundant and written anyway, so the
+   two paths differ in no respect a reader can observe ([§4](#4-sharing)).
 7. **Staged source files are not artifacts.** A local copy of an upstream granule is keyed by URI
    and ETag, scoped to a worker, and never enters a cache key. Asset *identity* determines an
    artifact; whether the bytes happened to be local does not ([12 §4](12-data-access.md)). A
@@ -157,8 +166,22 @@ Layout separates what is shared from what is not:
 
 `{root}` is `outputs.bucket`: an `s3://` prefix in a deployment, and locally a **path** —
 relative to the manifest — under which the same three directories hang, so the layout and the
-keys are identical whichever executor writes them ([08 §1](08-execution.md)). The first slice
-refuses a remote root; it is a later slice, not a different design.
+keys are identical whichever executor writes them ([08 §1](08-execution.md)).
+
+**As built (2026-09-14).** Both roots run. `stratum.storage.Workspace` is the root as the stages
+see it: the directory itself when it is local, and a **node-local mirror** plus an object store
+when it is a bucket. Every stage is handed a `pathlib.Path` either way, which is why nothing
+above that module handles a URI and why the read path in resolve, reduce and publish is the same
+code — GDAL and netCDF4 want a file, and a block is about 1 GB against Lambda's 10 GB of `/tmp`.
+
+Three consequences worth stating, because they are what make a worker cheap:
+
+- **A probe that misses locally probes the bucket before it is a miss**, and mirrors what it
+  finds. Whoever computed an artifact, everyone else gets a hit.
+- **A mirror is a cache, never the record.** It may be deleted between runs; a worker that starts
+  with an empty one recovers everything from the bucket.
+- **Nothing durable names a mirror.** `plan.json` records `root` as the URI and `run_dir` and
+  `products_dir` as URIs under it, so the same plan resolves on any machine ([09 §6](09-run-manifest.md)).
 
 ---
 

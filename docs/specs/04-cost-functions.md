@@ -543,12 +543,22 @@ min_view_zenith = "stratum_emit.scorers:MinViewZenith"
 classify_last = "stratum_emit.reducers:ClassifyLast"   # only for what the schema cannot say
 ```
 
+A plugin is a **Python distribution**, never an infrastructure resource: a project writes a
+`pyproject.toml` with these tables and no HCL at any point ([ADR-0003](../decisions/ADR-0003-image-build-and-digest.md)).
+The EMIT plugins are packaged that way — `plugins/stratum-emit/`, its own distribution, installed
+beside `stratum` — so the path a third party's package takes is the one ours takes, rather than a
+claim about a path nothing exercises.
+
 Two delivery paths, both recorded in provenance:
 
-| Path | Mechanism | For |
-|---|---|---|
-| **Iteration** | wheel URI in the manifest, fetched to `/tmp` at cold start | experiments — edit, publish, rerun in ~90s |
-| **Production** | pinned in the container image, wheel-fetch disabled by policy | delivered products — reproducibility from an immutable digest |
+| Path | Mechanism | For | Built |
+|---|---|---|---|
+| **Production** | pinned in the container image, which a deployment names by digest | delivered products — reproducibility from an immutable digest | yes (2026-09-14) |
+| **Iteration** | wheel URI in the manifest, fetched to `/tmp` at cold start | experiments — edit, publish, rerun in ~90s | no; `plugins.wheel` is modelled and unused |
+
+Choosing among *registered* plugins is a manifest edit and needs no deploy. Adding a *new* class
+means a new image, because resolution reads installed metadata — about a two-minute round trip
+until the iteration path exists.
 
 ---
 

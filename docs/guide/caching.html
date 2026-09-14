@@ -96,8 +96,27 @@ project is byte-identical to one built for another over the same ground.</p>
 {root}/runs/{run_id}/...  <span class="c">run-scoped: frozen index, work lists, reports</span>
 {root}/products/{run_id}/ <span class="c">delivered outputs</span></code></pre>
 
-<p><code>{root}</code> is a local directory or an <code>s3://</code> prefix — the layout and the keys
-are identical either way, which is what lets a locally started run be finished on a cluster.</p>
+<p><code>{root}</code> is <code>outputs.bucket</code>: a local directory or an <code>s3://</code>
+prefix. The layout and the keys are identical either way, which is what lets a locally started run
+be finished elsewhere.</p>
+
+<p>A bucket root gets a <strong>node-local mirror</strong>, and two of its properties are worth
+knowing because they are what you will actually notice:</p>
+
+<ul>
+<li><strong>A miss is checked against the bucket before it is a miss.</strong> Whoever computed an
+artifact, every other machine gets a hit and mirrors it on first touch. This is why a fresh worker
+is cheap.</li>
+<li><strong>The mirror is a cache, never the record.</strong> Delete it and nothing is lost; a
+worker recovers everything from the bucket. Nothing durable &mdash; not
+<code>plan.json</code>, not a STAC item &mdash; ever names a mirror path.</li>
+</ul>
+
+<p>Directory artifacts carry one extra file there. A bucket has no rename, so a snapshot or product
+block commits by writing its members, then <code>.members.json</code> listing them, then the
+<code>.inputs.json</code> sidecar. A hit needs the sidecar <em>and</em> every listed member, which is
+how a complete artifact is told from a prefix that lost an object. Locally the list is redundant
+&mdash; the commit is a single rename &mdash; and written anyway, so the two behave identically.</p>
 
 <h2 id="inspecting">Inspecting the cache</h2>
 

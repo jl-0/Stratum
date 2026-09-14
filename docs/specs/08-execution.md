@@ -18,7 +18,7 @@ them.
 |---|---|---|
 | `local` | Process pool. **Default.** | Development, a zone, anything being debugged |
 | `slurm` | Job array over a shared filesystem | An existing institutional allocation |
-| `aws` | Step Functions → Lambda and Batch | Continental/global runs, bursty campaigns |
+| `aws` | Lambda, fanned out inline. Step Functions and Batch when a run outgrows that (§2-3) | Continental/global runs, bursty campaigns |
 
 The executor is a **CLI flag or deployment profile, never a manifest field**. Where a run executes
 is a platform decision; the same manifest must give the same result on a laptop and on a 10,000-way
@@ -48,8 +48,8 @@ Consequences worth stating:
 
 ### The `local` executor as built
 
-`stratum/executors/local.py` is the only executor in the first slice; `slurm` and `aws` are
-refused by name with this section cited.
+`stratum/executors/local.py`; `slurm` is refused by name with this section cited. The `aws`
+executor is below.
 
 | Property | Contract |
 |---|---|
@@ -94,6 +94,31 @@ the better shape and fail more cheaply. Set `--cpus-per-task` to match what the 
 
 Credential expiry (~1 h) argues for short array tasks here just as it argues for Lambda on AWS.
 
+### The `aws` executor as built (2026-09-14)
+
+An **inline fan-out**: a thread pool over `lambda:InvokeFunction`, dispatched by whatever ran
+`stratum run` — a laptop. Not a state machine. `run_all` takes the stage runner as a parameter,
+so the stages, their order, the outcome records and Finalize are literally the same code on both
+executors; only the dispatch differs.
+
+| Property | Contract |
+|---|---|
+| Unit of work | An invocation carrying `{root, run_id, stage, index}` — four scalars, no geometry, well under the 256 KiB of §3 |
+| Worker | `stratum/executors/awslambda.py`: load the credential, mirror the run directory if this container has not seen it, `exec_item` |
+| Pool | `--workers`, else `$STRATUM_LAMBDA_CONCURRENCY`, else 32. The ceiling that binds is the function's reserved concurrency, which is a deployment setting |
+| Outcomes | Identical records to `local`, including a handler exception, so `stratum status --failed` parses one format |
+| Failure | All-or-nothing, as `local`. §4's tolerated percentage is still a later slice |
+| Retry | None in the client (`max_attempts: 0`): an item is idempotent, so a retry is safe but never automatic, and the outcome record decides |
+| Refusal | A **local storage root** is refused by name before the first invocation. A Lambda cannot read a laptop's filesystem |
+| Finalize | Mirrors the products back before writing the STAC collection — the worker that published them was elsewhere |
+
+Why a pool and not Step Functions: a Distributed Map earns its keep at item counts beyond a pool,
+and costs a state machine and several more roles to deploy. The work lists are already the S3
+JSONL an `ItemReader` consumes, so §3 remains additive rather than superseded.
+
+The orchestrator holds **no state**: every result is in the bucket before the invocation returns.
+Losing the laptop loses the dispatch, never the work.
+
 ---
 
 ## 2. AWS split plane
@@ -110,6 +135,17 @@ honest answer is a split, not a choice.
 Lambda's ceilings are hard: **15 minutes, 10 GB memory, 10 GB `/tmp`**. AMD asks Slurm for 32 GB
 and up to 24 h per 1° bin. Block decomposition ([01](01-grid-tiling.md)) shrinks the unit until
 Lambda fits — which is why the answer is a router rather than a verdict.
+
+**As built (2026-09-14): one plane, no router, no Batch.** Every work item of the reference run
+clears all three ceilings by one to three orders of magnitude — the slowest measured item is a
+regrid of a granule covering the whole tile at about 19 s single-threaded, against a 900 s
+timeout; a 720 × 720 block is about 1 GB against 10 GB of memory and 10 GB of `/tmp`. So there is
+no placement decision to make and nothing to provision. The router below is what this becomes
+when an item appears that does not fit, not a stage that was skipped: the estimates it needs are
+open question 5.
+
+The plan stage runs wherever `stratum run` runs, which today is a laptop. Routing it, and moving
+the orchestrator off the laptop, are the third and fourth steps of the deployment.
 
 ### One image, two entrypoints
 
@@ -203,6 +239,15 @@ AMD's 24-hour Slurm jobs would simply fail partway through if ported naively. Re
 - Batch jobs must assume refresh is needed; Lambda's 15-minute ceiling makes it a non-issue there,
   which is a quiet argument for routing to Lambda where possible.
 
+**In a deployment (2026-09-14).** The worker reads `$STRATUM_EDL_SECRET` — the secret's *name*,
+which is the only part that is configuration — and fetches the value from Secrets Manager at run
+time, once per container, setting `EARTHDATA_USERNAME`/`PASSWORD` or `EARTHDATA_TOKEN` in its own
+process before the first login. Both secret shapes work and the code prefers neither. The value is
+never in the function's `environment` block, because anything there is in Terraform state *and*
+readable by `lambda:GetFunction`. No invocation runs past Lambda's 15-minute ceiling, so nothing on
+this path refreshes a NASA credential mid-read; the refresh wrapper remains unbuilt and unneeded
+here. `$STRATUM_EDL_SECRET` unset means do nothing — a run over public assets, and every test.
+
 **As built (2026-09-02, HTTPS only).** `stratum/access/auth.py` is the one place a credential is
 read: `earthdata_login()` tries `~/.netrc` (or `$NETRC`) for `urs.earthdata.nasa.gov`, then
 `EARTHDATA_USERNAME` / `EARTHDATA_PASSWORD`, building its own `earthaccess.Auth` rather than
@@ -212,8 +257,8 @@ afresh on its first remote asset. The `AssetStore` re-logins **once** on a `401`
 retries the request; a second refusal is an `AssetFetchError` with the URL and both statuses.
 Nothing logs, stores or raises a token or password — `EarthdataLoginError` names strategies and
 exception types only, and no credential reaches `plan.json`, the report or provenance. Secrets
-Manager, the S3 credential exchange and the refresh wrapper are not built; `s3://` is refused
-([12 §4](12-data-access.md)).
+Manager is built (above). The S3 credential exchange for `lp-prod-protected` and the refresh
+wrapper are not: a granule is read over HTTPS from Lambda as from a laptop ([12 §4](12-data-access.md)).
 
 ---
 

@@ -654,23 +654,42 @@ classify_last = <span class="k">"stratum_emit.reducers:ClassifyLast"</span>   <s
 
 <pre><code>stratum plugins list        <span class="c"># what this image or environment provides</span></code></pre>
 
-<p>There are two ways to get your plugin to the workers:</p>
+<h3 id="packaging">Packaging one</h3>
+
+<p>A plugin is a <strong>Python distribution</strong> — your own <code>pyproject.toml</code>, your
+own version, installed beside <code>stratum</code>. Nothing about it is infrastructure: you write no
+Terraform at any point, and adding a scorer touches no IAM role. The EMIT plugins are packaged
+exactly this way, in <code>plugins/stratum-emit/</code>, so the path your package takes is the one
+the framework's own plugin takes.</p>
 
 <div class="tw">
 <table>
-<thead><tr><th>Path</th><th>How</th><th>Use for</th></tr></thead>
+<thead><tr><th>Path</th><th>How</th><th>Use for</th><th></th></tr></thead>
 <tbody>
-<tr><td><strong>Iteration</strong></td><td>Point the manifest at a wheel in S3; workers fetch it at cold start</td><td>Experiments. Edit, publish, rerun in about 90 seconds.</td></tr>
-<tr><td><strong>Production</strong></td><td>Pin the plugin in the container image; wheel-fetch disabled by policy</td><td>Delivered products, reproducible from an immutable digest</td></tr>
+<tr><td><strong>Production</strong></td><td>Install it into the image, then deploy that image by digest</td><td>Delivered products, reproducible from an immutable digest</td><td><span class="chip chip-locked">built</span></td></tr>
+<tr><td><strong>Iteration</strong></td><td>Point the manifest at a wheel in S3; workers fetch it at cold start</td><td>Experiments. Edit, publish, rerun in about 90 seconds</td><td><span class="chip chip-open">not built</span></td></tr>
 </tbody>
 </table>
 </div>
 
-<pre><code>plugins:
-  wheel: s3://emit-l3/plugins/stratum_emit-0.4.2-py3-none-any.whl</code></pre>
+<pre><code><span class="c"># production: a new scorer is a new image, and an apply that touches no role</span>
+make image          <span class="c"># builds, pushes, prints the digest</span>
+make tf-deploy      <span class="c"># points the worker at it</span>
+
+<span class="c"># iteration (specified, not built)</span>
+<span class="k">plugins</span>:
+  <span class="k">wheel</span>: s3://emit-l3/plugins/stratum_emit-0.4.2-py3-none-any.whl</code></pre>
 
 <p>Both paths record the plugin version and content hash in provenance, and both feed the cache
 key — so a changed plugin invalidates its own results and nothing else.</p>
+
+<div class="key">
+  <span class="label">Choosing a plugin is configuration; adding one is code</span>
+  <p>Naming an <em>already registered</em> scorer is a manifest edit and needs no deploy at all.
+  A <em>new</em> scorer class has to be in the image, because plugins resolve through entry points
+  read from installed metadata. Check what an image actually provides before you trust it:
+  <code>docker run --rm &lt;image&gt; stratum plugins list</code>.</p>
+</div>
 
 <h2 id="validation">What is checked before you run</h2>
 

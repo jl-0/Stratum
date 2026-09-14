@@ -256,8 +256,15 @@ Schemes: `file://`, `s3://`, and `https://` behind Earthdata Login. As built
 (`stratum/access/store.py`, 2026-09-02): `file://` and bare paths open in place, stage-in as the
 identity; `https://` is staged into the node-local asset cache described below; `http://` is **refused**
 (`UntrustedScheme`: a plaintext URL would carry the Earthdata credential in the clear);
-`s3://` and any other scheme raise `NotImplementedError` naming this section. A
-local asset must **exist at `open()`** — `FileNotFoundError` — so a bad URI fails in plan-time
+`s3://` and any other scheme raise `NotImplementedError` naming this section.
+
+> **Not to be confused with the storage root.** This is the `AssetStore`, which reads *upstream
+> granules*; `s3://` there means `lp-prod-protected` and needs the DAAC's credential exchange,
+> which is unbuilt. `outputs.bucket` — where Stratum writes — may be an `s3://` prefix and has
+> been since 2026-09-14 ([06 §4](06-caching.md)). A cloud run therefore reads granules over
+> HTTPS and writes artifacts to its own bucket.
+
+A local asset must **exist at `open()`** — `FileNotFoundError` — so a bad URI fails in plan-time
 validation (§7), not in a worker. Paths are made absolute without resolving symlinks, so the
 filename the granule id was derived from is preserved. A `checksum` passed for a local file is
 accepted and ignored: it is asset identity for cache keys, not something to re-derive per open.

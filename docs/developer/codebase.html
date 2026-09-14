@@ -280,9 +280,17 @@ worker rebuild a planner's context from plain JSON.</td><td><a class="src" data-
 <tr><td><code>executors/worker.py</code></td><td>The portability seam: one handler per stage, and
 the single <code>exec_item</code> entry point every executor
 reduces to.</td><td><a class="src" data-sym="def exec_item" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/executors/worker.py#L189">exec_item</a></td></tr>
-<tr><td><code>executors/local.py</code></td><td>The only executor that exists today: a spawn-context
-process pool over the work lists, the budget gate, and
-Finalize.</td><td><a class="src" data-sym="def run_all" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/executors/local.py#L105">run_all</a></td></tr>
+<tr><td><code>executors/local.py</code></td><td>A spawn-context process pool over the work lists,
+the budget gate, and Finalize. <code>run_all</code> lives here and takes the stage runner as a
+parameter, so the stage order and Finalize are shared with every other
+executor.</td><td><a class="src" data-sym="def run_all" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/executors/local.py#L105">run_all</a></td></tr>
+<tr><td><code>executors/aws.py</code></td><td>The dispatch half of the cloud executor: a thread pool
+over <code>lambda:InvokeFunction</code>, writing the same outcome records. Imported only when
+<code>--executor aws</code> is asked for, so a local run never imports
+boto3.</td><td><a class="src" data-sym="def run_stage(run_dir: Path | str, stage: str" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/executors/aws.py#L93">run_stage</a></td></tr>
+<tr><td><code>executors/awslambda.py</code></td><td>The worker half: the Lambda entrypoint. Credential
+from Secrets Manager, run directory mirrored from the bucket, then the same
+<code>exec_item</code>.</td><td><a class="src" data-sym="def handler(event" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/executors/awslambda.py#L107">handler</a></td></tr>
 <tr><td><code>cli.py</code></td><td>The click command tree. Every command body imports its
 dependencies locally, which is what keeps <code>stratum --help</code>
 fast.</td><td><a class="src" data-sym="def main() -> None" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/cli.py#L65">main</a></td></tr>
