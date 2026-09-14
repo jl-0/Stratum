@@ -27,9 +27,9 @@ output "image_uri" {
 }
 
 output "run_command" {
-  description = "Copy-paste: everything a cloud run needs beyond the manifest."
+  description = "Copy-paste: everything a cloud run needs beyond the manifest. `pixi run` because the CLI lives in the pixi environment, not on PATH."
   value = local.deploy_worker ? join(" ", [
     "STRATUM_LAMBDA_FUNCTION=${one(aws_lambda_function.worker[*].function_name)}",
-    "stratum run -m <manifest.yaml> --executor aws",
+    "pixi run stratum run -m <manifest.yaml> --executor aws",
   ]) : "set STRATUM_IMAGE_DIGEST in .env and re-apply: no worker is deployed"
 }

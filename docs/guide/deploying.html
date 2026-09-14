@@ -502,6 +502,35 @@ field, so the same science runs in both places:</p>
 <pre><code><span class="k">outputs</span>:
   <span class="k">bucket</span>: s3://stratum-dev-&lt;account-id&gt;/     <span class="c"># was: ./out</span></code></pre>
 
+<h2 id="running">Running one</h2>
+
+<div class="warn">
+  <span class="label">The CLI is in the pixi environment, not on your PATH</span>
+  <p><code>stratum</code> lives in <code>.pixi/envs/default/bin/</code>, so a bare
+  <code>stratum run …</code> in a fresh shell is <em>command not found</em>. Use
+  <code>pixi run stratum …</code>, or <code>pixi shell</code> once and then plain
+  <code>stratum</code>. The <code>make</code> targets do not activate it for you: they drive
+  <code>terraform</code>, <code>aws</code> and <code>docker</code>, which are system tools.</p>
+</div>
+
+<p>A cloud run needs two things beyond the manifest: the function to dispatch to, and a storage
+root the workers can reach. One target does both:</p>
+
+<pre><code>make cloud-run                                   <span class="c"># the emit-cmr-nevada example</span>
+make cloud-run MANIFEST=path/to/manifest.yaml    <span class="c"># another one</span>
+make cloud-run ARGS=--dry-run                    <span class="c"># plan only</span></code></pre>
+
+<p>It writes a <code>manifest.cloud.yaml</code> beside the one you name, identical except that
+<code>outputs.bucket</code> points at this deployment's root, then looks the function up in
+Terraform state and runs. The generated file is gitignored, because the root names the account.</p>
+
+<div class="note">
+  <span class="label">Why a generated file and not a flag</span>
+  <p>Because <code>-p/--patch</code> is not built yet (09 §3). With it this would be
+  <code>-p outputs.bucket=…</code> and no second file. The same gap is what stands between here and
+  scheduled runs, which need <code>-p time.start=…</code>.</p>
+</div>
+
 <h2 id="guardrails">Guardrails worth having on day one</h2>
 
 <p>All cheap now and awkward to retrofit onto a run already in flight.</p>
