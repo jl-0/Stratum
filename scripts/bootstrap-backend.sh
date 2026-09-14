@@ -29,4 +29,4 @@ aws s3api put-public-access-block --bucket "$BUCKET" --profile "$AWS_PROFILE" \
   --public-access-block-configuration \
   BlockPublicAcls=true,IgnorePublicAcls=true,BlockPublicPolicy=true,RestrictPublicBuckets=true
 
-echo "done. next: make tf-init"
+echo "done. next: make stratum-infrastructure"

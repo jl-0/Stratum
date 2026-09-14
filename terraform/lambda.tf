@@ -4,13 +4,17 @@
 
 # Created explicitly rather than left to the function, which would create it with no retention.
 resource "aws_cloudwatch_log_group" "worker" {
+  count = local.deploy_worker ? 1 : 0
+
   name              = "/aws/lambda/${local.name}"
   retention_in_days = var.log_retention_days
 }
 
 resource "aws_lambda_function" "worker" {
+  count = local.deploy_worker ? 1 : 0
+
   function_name = local.name
-  role          = local.platform.lambda_role_arn
+  role          = aws_iam_role.lambda.arn
   package_type  = "Image"
   image_uri     = local.image_uri
   architectures = ["arm64"]
@@ -28,7 +32,7 @@ resource "aws_lambda_function" "worker" {
       # The secret's NAME, never its value: anything in this block is in Terraform state and in
       # the function configuration, where lambda:GetFunction can read it. The handler fetches
       # the value at run time (08 section 5).
-      STRATUM_EDL_SECRET = local.platform.edl_secret_arn
+      STRATUM_EDL_SECRET = aws_secretsmanager_secret.edl.arn
 
       # /tmp is the only writable filesystem here. The storage mirror and the staged granules
       # both live in it; neither is durable and neither needs to be.

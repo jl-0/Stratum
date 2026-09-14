@@ -126,7 +126,7 @@ until finished.</p>
 <p>Where the items run is the only difference between the two executors. <code>local</code> uses a
 process pool on this machine. <code>aws</code> invokes the deployment's Lambda once per item, from
 this machine, and needs two things: <code>$STRATUM_LAMBDA_FUNCTION</code> (<code>make
-tf-deploy-output</code> prints it) and a manifest whose <code>outputs.bucket</code> is an
+infra-output</code> prints it) and a manifest whose <code>outputs.bucket</code> is an
 <code>s3://</code> URI. A local root is refused by name before the first invocation, because a
 Lambda cannot read your laptop's filesystem. The stages, their order, the outcome records and
 everything the run writes are identical either way.</p>

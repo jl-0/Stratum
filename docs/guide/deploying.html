@@ -128,18 +128,18 @@ state file), default encryption, and a public-access block.</p>
 
 <h2 id="apply">3. Apply the platform root</h2>
 
-<pre><code>make tf-init     <span class="c"># generates this root's backend.hcl from .env, then terraform init</span>
-make tf-plan     <span class="c"># read this before applying</span>
-make tf-apply    <span class="c"># PRIVILEGED — creates IAM roles</span></code></pre>
+<pre><code>make stratum-infrastructure     <span class="c"># generates this root's backend.hcl from .env, then terraform init</span>
+make infra-plan     <span class="c"># read this before applying</span>
+make stratum-infrastructure    <span class="c"># PRIVILEGED — creates IAM roles</span></code></pre>
 
-<p><code>make tf-init</code> writes <code>terraform/platform/backend.hcl</code> from <code>.env</code>
+<p><code>make stratum-infrastructure</code> writes <code>terraform/backend.hcl</code> from <code>.env</code>
 plus the account id resolved at run time, so even the state bucket name is never hand-written or
 committed.</p>
 
 <div class="note">
   <span class="label">Each root has its own backend file, and its own state key</span>
-  <p>The deployment root is initialised separately with <code>make tf-deploy-init</code>, which
-  writes <code>terraform/deployment/backend.hcl</code> against
+  <p>The deployment root is initialised separately with <code>make stratum-infrastructure</code>, which
+  writes <code>terraform/backend.hcl</code> against
   <code>key = deployment/terraform.tfstate</code>. They are deliberately not one shared file: a
   shared one is rewritten on every init, so a hand-run <code>terraform init -backend-config=…</code>
   could point one root at the other root's state. If Terraform says backend initialisation is
@@ -150,39 +150,48 @@ committed.</p>
 <div class="note">
   <span class="label">Federated sessions expire mid-apply</span>
   <p>If your login issues short-lived tokens, re-authenticate immediately before
-  <code>tf-apply</code> and keep applies small. An apply that dies on an expired token is
+  <code>stratum-infrastructure</code> and keep applies small. An apply that dies on an expired token is
   recoverable — the state is in S3 and locked — but it is an avoidable annoyance.</p>
 </div>
 
-<p>When it succeeds, <code>make tf-output</code> prints what the next slice consumes, including
+<p>When it succeeds, <code>make infra-output</code> prints what the next slice consumes, including
 <code>storage_root</code> — the value a manifest's <code>outputs.bucket</code> will take.</p>
 
-<h2 id="roles">4. Who applies what</h2>
+<h2 id="roles">Who applies what</h2>
 
-<p>At many sites only certain people may create IAM roles, and role creation carries naming and
-permissions-boundary requirements. Rather than treat that as an obstacle, the Terraform is split
-along it.</p>
+<p><strong>One root, one state, one <code>apply</code>.</strong> There is deliberately no
+privileged and unprivileged split expressed in Terraform, because the two ways of expressing one
+are both bad:</p>
 
 <div class="tw">
 <table>
-<thead><tr><th>Root</th><th>Creates</th><th>Applied by</th><th>How often</th></tr></thead>
+<thead><tr><th>Approach</th><th>Why not</th></tr></thead>
 <tbody>
-<tr><td><code>terraform/platform/</code></td><td>IAM roles, bucket, ECR, secret container</td><td>The account owner</td><td>Rarely</td></tr>
-<tr><td><code>terraform/deployment/</code></td><td>Lambda, task definitions, budgets. <strong>No IAM</strong></td><td>Anyone with bucket write</td><td>Every image</td></tr>
+<tr><td><code>-target=…</code></td><td>Terraform documents it as an escape hatch for exceptional recovery and warns that the plan is incomplete. Not a routine workflow</td></tr>
+<tr><td>A <code>count</code> feature flag per group</td><td>With one state file, applying with the flag off makes Terraform plan to <strong>destroy</strong> those resources</td></tr>
+<tr><td>Two roots, two state files</td><td>What this had, and the cost was real: two inits, two backend files, and a <code>terraform_remote_state</code> dependency between them</td></tr>
 </tbody>
 </table>
 </div>
 
-<p>Two state keys, not one, so the bucket prefixes can carry different permissions: a deployer can
-neither read nor clobber platform state. This is what makes "add a selector" an unprivileged
-operation — a new scorer is a new image and a <code>deployment/</code> apply, and touches no role.</p>
+<div class="key">
+  <span class="label">AWS enforces the split, not the configuration</span>
+  <p>Everyone applies the same root and IAM decides what each person may change. In steady state
+  this costs nothing: changing only the image digest produces a plan that touches only the
+  function, so Terraform makes no IAM write call and a role without IAM rights succeeds anyway.
+  Such a role needs broad <em>read</em> — a refresh describes every resource — and narrow
+  <em>write</em>, which is an ordinary policy shape.</p>
+  <p>If an apply fails on an IAM permission, something privileged genuinely needs to change.
+  That is information, not an obstacle: escalate rather than route around it.</p>
+</div>
 
 <div class="key">
   <span class="label">A new selector is code, not configuration</span>
   <p>Scorers resolve through entry points read from installed metadata, so a <em>new</em> scorer
-  class must be in the image: rebuild, push, apply <code>deployment/</code>. Choosing among
-  <em>registered</em> scorers by name is a manifest edit and needs no deploy at all. Both sides of
-  that line are in <a href="../decisions/ADR-0002-terraform-manifest-boundary.md">ADR-0002</a>.</p>
+  class must be in the image: <code>make image</code>, a new digest in <code>.env</code>, and
+  <code>make stratum-infrastructure</code>. Choosing among <em>registered</em> scorers by name is
+  a manifest edit and needs no deploy at all. Both sides of that line are in
+  <a href="../decisions/ADR-0002-terraform-manifest-boundary.md">ADR-0002</a>.</p>
 </div>
 
 <h2 id="site">5. Site requirements</h2>
@@ -293,7 +302,7 @@ pushes, and prints the digest. That digest is the one thing the next step needs,
 <pre><code>echo 'STRATUM_IMAGE_DIGEST=sha256:&lt;64 hex&gt;' &gt;&gt; .env     <span class="c"># replacing any earlier line</span></code></pre>
 
 <p>Nothing else in the deployment changes when your code does. Every later build is
-<code>make image</code>, a new digest in <code>.env</code>, and <code>make tf-deploy</code>.</p>
+<code>make image</code>, a new digest in <code>.env</code>, and <code>make stratum-infrastructure</code>.</p>
 
 <div class="tw">
 <table>
@@ -358,10 +367,8 @@ built.</p>
 
 <h2 id="deploy">8. Apply the deployment root</h2>
 
-<pre><code>make tf-deploy-init
-make tf-deploy-plan
-make tf-deploy
-make tf-deploy-output   <span class="c"># prints the function name, and the command to run</span></code></pre>
+<pre><code>make stratum-infrastructure
+make infra-output   <span class="c"># prints the function name, and the command to run</span></code></pre>
 
 <p>This root creates <strong>no IAM</strong>, so anyone with bucket and image-repository write may
 apply it. It creates the worker function from your digest, a log group with explicit retention, a
@@ -436,7 +443,7 @@ concurrency.</p>
 <p>When something fails, the outcome records are the same shape a local run writes &mdash; a handler
 exception included &mdash; so <code>stratum status --run &lt;id&gt; --failed</code> reads one format
 whichever executor produced it. The worker's own logs are in the log group
-<code>make tf-deploy-output</code> names.</p>
+<code>make infra-output</code> names.</p>
 
 <h2 id="next">What comes next</h2>
 

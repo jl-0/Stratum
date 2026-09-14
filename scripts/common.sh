@@ -30,14 +30,12 @@ export TF_VAR_deployment="$STRATUM_DEPLOYMENT"
 export TF_VAR_permissions_boundary_arn="$STRATUM_PERMISSIONS_BOUNDARY_ARN"
 export TF_VAR_role_name_prefix="$STRATUM_ROLE_NAME_PREFIX"
 
-# The deployment root only. Absent until `make image` has printed a digest, which is the right
-# order: there is nothing to deploy before there is an image.
+# Empty until `make image` has printed a digest, and empty is valid: the root then creates the
+# bucket, repository, secret and roles and no function. That is the bootstrap order, because the
+# repository must exist before there is an image to push to it.
 export TF_VAR_image_digest="${STRATUM_IMAGE_DIGEST:-}"
 export TF_VAR_budget_alert_email="${STRATUM_BUDGET_ALERT_EMAIL:-}"
 
 account_id() { aws sts get-caller-identity --profile "$AWS_PROFILE" --query Account --output text; }
 state_bucket() { echo "stratum-tfstate-$(account_id)"; }
 
-# deployment/ reads the platform root's outputs out of the state bucket, so it needs to be told
-# which bucket that is. Resolved here rather than written down anywhere.
-export_state_bucket() { export TF_VAR_state_bucket="$(state_bucket)"; }

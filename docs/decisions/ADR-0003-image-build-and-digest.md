@@ -24,7 +24,7 @@ own wheel, nothing exercised that path, and an unexercised seam is a claim rathe
 
 **Terraform never builds. It points at a digest.**
 
-`make image` builds the container image and pushes it; `terraform/deployment/` takes the resulting
+`make image` builds the container image and pushes it; `terraform/` takes the resulting
 digest as an input variable and creates a Lambda from it. The ECR repository keeps
 `image_tag_mutability = "IMMUTABLE"`, so a digest identifies bytes that cannot be replaced under it.
 
@@ -55,7 +55,7 @@ Consequences for a project, in full:
 |---|---|---|
 | Choose among registered plugins | Edit the manifest | none |
 | Add a scorer, mask, reader or mapper | Add it to a plugin distribution, `make image`, `make deploy` | bucket + ECR write |
-| Change a role, a bucket or a boundary | `terraform/platform/` | IAM |
+| Change a role, a bucket or a boundary | `terraform/` | IAM |
 
 A project writes no HCL at any point. It writes a `pyproject.toml` with entry points.
 

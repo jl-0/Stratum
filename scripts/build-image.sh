@@ -5,7 +5,7 @@
 #   ./scripts/build-image.sh --local    build only; nothing leaves this machine
 #
 # Terraform never builds (ADR-0003). This script is the build, and the digest it prints is what
-# terraform/deployment/ pins - which is why the repository's tags are immutable and why a dirty
+# terraform/ pins - which is why the repository's tags are immutable and why a dirty
 # working tree is refused: a digest has to identify a commit somebody else can check out.
 set -euo pipefail
 . "$(dirname "$0")/common.sh"
@@ -63,4 +63,4 @@ echo "digest  ${DIGEST}"
 echo
 echo "This is what the deployment pins. Record it:"
 echo "    echo 'STRATUM_IMAGE_DIGEST=${DIGEST}' >> .env      # replacing any earlier line"
-echo "then  make tf-deploy"
+echo "then  make stratum-infrastructure"

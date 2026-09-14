@@ -760,7 +760,7 @@ cd &lt;stratum&gt; &amp;&amp; make image</code></pre>
 
 <pre><code><span class="c"># production: a new scorer is a new image, and an apply that touches no role</span>
 make image          <span class="c"># builds, pushes, prints the digest</span>
-make tf-deploy      <span class="c"># points the worker at it</span>
+make stratum-infrastructure      <span class="c"># points the worker at it</span>
 
 <span class="c"># iteration (specified, not built)</span>
 <span class="k">plugins</span>:
