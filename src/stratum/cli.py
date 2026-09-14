@@ -99,7 +99,9 @@ def plan(manifest: str, patch: tuple[str, ...], out: str | None, asset_cache: st
 @click.option("-p", "--patch", multiple=True)
 @click.option("--from-provenance", type=click.Path(exists=True))
 @click.option("--executor", type=click.Choice(["local", "slurm", "aws"]), default="local")
-@click.option("--workers", type=int, default=None, help="local: pool size; default one per core.")
+@click.option("--workers", type=int, default=None,
+              help="local: pool size, default one per core. aws: invocations in flight, "
+                   "default $STRATUM_LAMBDA_CONCURRENCY else 32.")
 @click.option("--out", type=click.Path(), help="Run directory; default {root}/runs/{run_id}.")
 @click.option("--asset-cache", type=click.Path(), default=None,
               help="Node-local directory remote assets are staged into (12 section 4); "
@@ -127,7 +129,7 @@ def run(manifest: str | None, patch: tuple[str, ...], from_provenance: str | Non
     if dry_run:
         return
     try:
-        execution = run_all(result.run_dir, workers)
+        execution = run_all(result.run_dir, workers, executor)
     except BudgetExceeded as e:
         click.echo(str(e), err=True)
         sys.exit(2)

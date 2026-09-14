@@ -14,7 +14,7 @@ import multiprocessing
 import os
 import time
 import traceback
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from datetime import UTC, datetime
 from pathlib import Path
@@ -102,23 +102,34 @@ def budget_gate(run: RunPlan | Mapping[str, Any]) -> None:
     raise BudgetExceeded(f"run {doc['run_id']} is over budget: {why}. {hint}")
 
 
-def run_all(run_dir: Path | str, workers: int | None = None) -> dict[str, Any]:
+def run_all(run_dir: Path | str, workers: int | None = None, *,
+            stage_runner: Callable[..., list[dict[str, Any]]] | None = None,
+            executor: str = "local") -> dict[str, Any]:
     """Every stage in order, then Finalize: the STAC collection, `provenance.json` (10 section
-    2) and an execution section appended to `report.md`. Returns the execution record."""
+    2) and an execution section appended to `report.md`. Returns the execution record.
+
+    `stage_runner` is how one stage's items are executed - the process pool below by default,
+    `executors.aws.run_stage` when the dispatch is Lambda. Everything else on this path is
+    executor-independent by construction: the stages, their order, the outcome records and
+    Finalize are the same whoever ran the items (08 section 1)."""
     run_dir = Path(run_dir).resolve()
+    runner = stage_runner or run_stage
     budget_gate(read_plan(run_dir))
     run = load_cached(run_dir)
     started = datetime.now(UTC)
     execution: dict[str, Any] = {"stages": {}, "cache_hits": {}, "failed_items": []}
     for stage in STAGES:
         t0 = time.perf_counter()
-        results = run_stage(run_dir, stage, workers)
+        results = runner(run_dir, stage, workers)
         execution["stages"][stage] = {"items": len(results),
                                       "hits": sum(1 for r in results if r.get("hit")),
                                       "seconds": round(time.perf_counter() - t0, 3)}
         execution["cache_hits"][stage] = execution["stages"][stage]["hits"]
     finished = datetime.now(UTC)
 
+    # a worker that published elsewhere - a Lambda - wrote its product tree to the bucket and
+    # not to this machine, so Finalize mirrors it before reading the items back
+    run.workspace.pull_tree(run.products_dir)
     if run.outputs.get("stac", True):
         items = sorted(run.products_dir.glob("*/*/item.json"))
         if items:
@@ -130,8 +141,9 @@ def run_all(run_dir: Path | str, workers: int | None = None) -> dict[str, Any]:
     counts = run.document["counts"]
     store_cache = getattr(run.context.store, "asset_cache", None)
     execution.update({"tiles": counts["tiles"], "epochs": counts["epochs"],
-                      "blocks": counts["blocks"], "workers": workers or os.cpu_count() or 1,
-                      "executor": "local",
+                      "blocks": counts["blocks"],
+                      "workers": workers or (os.cpu_count() or 1 if executor == "local" else 0),
+                      "executor": executor,
                       # where remote assets were staged (12 section 4): recorded so a reader of
                       # the provenance knows where the bytes went; it enters no cache key
                       "asset_cache": str(store_cache) if store_cache is not None else None})
