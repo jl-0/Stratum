@@ -20,7 +20,7 @@ from rasterio.crs import CRS
 from rasterio.warp import transform_bounds
 
 from stratum import __version__
-from stratum.publish.cogs import COG_MEDIA_TYPE, is_categorical
+from stratum.publish.cogs import is_categorical, media_type
 from stratum.publish.colors import hex_color, resolve_class_colors, table_ids_names
 from stratum.publish.provenance import PROVENANCE_NAME, iso_utc
 from stratum.types import BandSpec, BandStack, ClassTable, Epoch, TileRef
@@ -101,9 +101,13 @@ def build_stac_item(*, run_id: str, manifest_hash: str, tile: TileRef, period: E
                     legends: Mapping[str, Path] | None = None,
                     classes_path: Path | None = None, out_dir: Path | None = None,
                     run_dir: Path | None = None, collection_href: str = "../../collection.json",
-                    extra_properties: Mapping[str, Any] | None = None) -> dict[str, Any]:
+                    extra_properties: Mapping[str, Any] | None = None,
+                    fmt: str = "cog") -> dict[str, Any]:
     """The item as a dict. Asset hrefs are relative to `out_dir` (the item's directory); with
-    `run_dir` given, links to `provenance.json` and `index.parquet` are relative paths too."""
+    `run_dir` given, links to `provenance.json` and `index.parquet` are relative paths too.
+
+    `fmt` decides the raster media type, so the item never claims `profile=cloud-optimized` for
+    a file written as a plain GeoTIFF (07 section 7)."""
     out_dir = Path(out_dir) if out_dir is not None else None
     geometry, bbox = tile_geometry(tile)
     crs = CRS.from_user_input(tile.grid.crs)
@@ -136,14 +140,14 @@ def build_stac_item(*, run_id: str, manifest_hash: str, tile: TileRef, period: E
     for spec in stack.specs:
         asset: dict[str, Any] = {
             "href": href((data_paths or {}).get(spec.name), f"./{spec.name}.tif"),
-            "type": COG_MEDIA_TYPE, "title": spec.name, "description": spec.description,
+            "type": media_type(fmt), "title": spec.name, "description": spec.description,
             "roles": ["data"], "raster:bands": raster_bands(spec),
         }
         if is_categorical(spec) and class_table is not None:
             asset["classification:classes"] = classification_classes(class_table, colors)
         assets[spec.name] = asset
     for name, p in (images or {}).items():
-        assets[f"{name}_rgba"] = {"href": href(p, f"./{name}_rgba.tif"), "type": COG_MEDIA_TYPE,
+        assets[f"{name}_rgba"] = {"href": href(p, f"./{name}_rgba.tif"), "type": media_type(fmt),
                                   "title": f"{name} rendering", "roles": ["visual"]}
     for name, p in (legends or {}).items():
         assets[f"{name}_legend"] = {"href": href(p, f"./{name}_legend.json"),

@@ -8,6 +8,7 @@ memory to reorder it; internal tiling is what makes a window read a range reques
 """
 from __future__ import annotations
 
+import tempfile
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any
@@ -15,6 +16,7 @@ from typing import Any
 import numpy as np
 import rasterio
 from affine import Affine
+from rasterio.shutil import copy as rio_copy
 
 from stratum.publish.colors import RGBA, gdal_colormap, resolve_class_colors
 from stratum.reduce import CATEGORICAL_DTYPE, CATEGORICAL_NODATA
@@ -22,8 +24,29 @@ from stratum.types import BandSpec, BandStack, ClassTable, TileRef
 
 COG_MEDIA_TYPE = "image/tiff; application=geotiff; profile=cloud-optimized"
 REQUIRED_TAGS = ("run_id", "manifest_hash")     # 10 section 3
-FORMATS = ("cog", "netcdf")                      # what the manifest may name (07)
-IMPLEMENTED_FORMATS = ("cog",)
+FORMATS = ("cog", "gtiff", "netcdf")             # what the manifest may name (07)
+IMPLEMENTED_FORMATS = ("cog", "gtiff")
+
+#: A GeoTIFF that makes no cloud-optimised claim. The bytes of `gtiff` are what `cog` used to
+#: write before the COG driver was adopted: tiled and deflated, header wherever libtiff left it,
+#: no overviews.
+GTIFF_MEDIA_TYPE = "image/tiff; application=geotiff"
+
+
+def raster_format(formats: Sequence[str]) -> str:
+    """Which raster format the delivered bands take. `netcdf` is an additional product, not an
+    alternative to the raster one, so it does not participate."""
+    for f in formats:
+        if f in ("cog", "gtiff"):
+            return f
+    return "cog"
+
+
+def media_type(fmt: str) -> str:
+    """The STAC media type for what was actually written. Claiming `profile=cloud-optimized` for
+    a file that is not one is a false statement in delivered metadata, which is the defect this
+    pairing exists to prevent."""
+    return COG_MEDIA_TYPE if fmt == "cog" else GTIFF_MEDIA_TYPE
 
 
 def check_formats(formats: Sequence[str]) -> None:
@@ -75,9 +98,16 @@ def _band_first(data: np.ndarray, spec: BandSpec) -> np.ndarray:
 
 
 def write_geotiff(path: Path, data: np.ndarray, spec: BandSpec, *, transform: Affine, crs: str,
-                  tags: Mapping[str, Any], colormap: Mapping[int, RGBA] | None = None) -> Path:
+                  tags: Mapping[str, Any], colormap: Mapping[int, RGBA] | None = None,
+                  cog: bool = False) -> Path:
     """One delivered band as a tiled deflate GeoTIFF: nodata, description, units and the tags
-    from `spec` and `tags`; a GDAL colour table on band 1 when `colormap` is given."""
+    from `spec` and `tags`; a GDAL colour table on band 1 when `colormap` is given.
+
+    `cog=True` writes it through GDAL's COG driver, which puts the header at the front of the
+    file and builds internal overviews - the two things a range-reading tile server needs and
+    that a plain tiled GeoTIFF does not provide. It costs roughly twice the bytes, nearly all of
+    it the overview pyramid.
+    """
     arr = _band_first(data, spec).astype(spec.dtype, copy=False)
     count, rows, cols = arr.shape
     bs = internal_tile_size((rows, cols))
@@ -85,6 +115,19 @@ def write_geotiff(path: Path, data: np.ndarray, spec: BandSpec, *, transform: Af
                "dtype": spec.dtype, "nodata": spec.nodata, "crs": crs, "transform": transform,
                "tiled": True, "blockxsize": bs, "blockysize": bs, "compress": "deflate"}
     path = Path(path)
+    if cog:
+        # GDAL's COG driver is create-copy only, so the file is written once as a plain GeoTIFF
+        # and then rewritten into COG layout: header first, overviews built in.
+        with tempfile.TemporaryDirectory(dir=path.parent) as tmp:
+            staged = write_geotiff(Path(tmp) / path.name, data, spec, transform=transform,
+                                   crs=crs, tags=tags, colormap=colormap, cog=False)
+            # Averaging class ids would invent classes that do not exist, so a categorical band
+            # decimates. A continuous one averages, which is what makes a zoomed-out view honest.
+            resampling = "NEAREST" if is_categorical(spec) else "AVERAGE"
+            rio_copy(str(staged), str(path), driver="COG", COMPRESS="DEFLATE",
+                     OVERVIEW_RESAMPLING=resampling, BLOCKSIZE=str(internal_tile_size(
+                         (int(data.shape[0]), int(data.shape[1])))))
+        return path
     with rasterio.open(path, "w", **profile) as dst:
         dst.write(arr)
         dst.update_tags(**{k: str(v) for k, v in tags.items()}, units=spec.units)
@@ -100,7 +143,8 @@ def write_geotiff(path: Path, data: np.ndarray, spec: BandSpec, *, transform: Af
 
 def write_data_cogs(out_dir: Path, stack: BandStack, tile: TileRef, *,
                     class_table: ClassTable | None, tags: Mapping[str, Any],
-                    colors: Mapping[str, Sequence[int]] | None = None) -> list[Path]:
+                    colors: Mapping[str, Sequence[int]] | None = None,
+                    fmt: str = "cog") -> list[Path]:
     """Write every band of `stack` as `{band}.tif` under `out_dir` on the tile's grid.
 
     `tags` must carry `run_id` and `manifest_hash` (10 section 3); `grid_id` and `tile` are added.
@@ -125,5 +169,5 @@ def write_data_cogs(out_dir: Path, stack: BandStack, tile: TileRef, *,
         cm = colormap if is_categorical(spec) else None
         paths.append(write_geotiff(out_dir / f"{spec.name}.tif", stack[spec.name], spec,
                                    transform=tile.transform, crs=tile.grid.crs, tags=full_tags,
-                                   colormap=cm))
+                                   colormap=cm, cog=fmt == "cog"))
     return paths

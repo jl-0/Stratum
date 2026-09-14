@@ -446,3 +446,76 @@ def test_provenance_build_write_read(tmp_path):
     assert read_provenance(p.parent) == rec
     with pytest.raises(ValueError, match="inputs"):
         write_provenance(tmp_path, {k: v for k, v in rec.items() if k != "inputs"})
+
+
+# ----------------------------------------------------------------- outputs.formats: cog / gtiff
+def _tiny_band(tmp_path, cog: bool, categorical: bool):
+    """One small band written both ways, so the difference is the format and nothing else."""
+    import numpy as np
+    from affine import Affine
+
+    from stratum.publish.cogs import write_geotiff
+    from stratum.types import BandSpec
+
+    rng = np.random.default_rng(0)
+    size = 1024                                   # over 512, so overviews are expected of a COG
+    if categorical:
+        data = rng.integers(1, 6, size=(size, size)).astype("uint16")
+        spec = BandSpec(name="mineral_1", dtype="uint16", nodata=65535, description="d", units="")
+    else:
+        data = rng.random((size, size)).astype("float32")
+        spec = BandSpec(name="depth_1", dtype="float32", nodata=-9999.0, description="d", units="")
+    path = tmp_path / f"{spec.name}_{'cog' if cog else 'gtiff'}.tif"
+    return write_geotiff(path, data, spec, transform=Affine.scale(1 / 3600, -1 / 3600),
+                         crs="EPSG:4326", tags={"run_id": "r", "manifest_hash": "h"}, cog=cog)
+
+
+def test_cog_format_is_a_valid_cog_and_gtiff_is_not(tmp_path):
+    """The defect this fixes: the STAC media type claimed cloud-optimized for a file whose
+    header was a megabyte into it and which carried no overviews."""
+    rasterio = pytest.importorskip("rasterio")
+    validate = pytest.importorskip("osgeo_utils.samples.validate_cloud_optimized_geotiff")
+
+    cog = _tiny_band(tmp_path, cog=True, categorical=True)
+    plain = _tiny_band(tmp_path, cog=False, categorical=True)
+
+    _warnings, errors, _ = validate.validate(str(cog), full_check=True)
+    assert not errors, f"the cog format must validate: {errors}"
+
+    with rasterio.open(cog) as c, rasterio.open(plain) as p:
+        assert c.overviews(1), "a COG of this size carries overviews"
+        assert not p.overviews(1), "plain gtiff is the old behaviour, unchanged"
+
+
+def test_categorical_overviews_never_invent_a_class(tmp_path):
+    """Averaging class ids would produce ids that are in no class table. Categorical bands
+    decimate; continuous ones average, which is what makes a zoomed-out view honest."""
+    import numpy as np
+    rasterio = pytest.importorskip("rasterio")
+
+    with rasterio.open(_tiny_band(tmp_path, cog=True, categorical=True)) as s:
+        full = set(np.unique(s.read(1)))
+        coarse = set(np.unique(s.read(1, out_shape=(s.height // 4, s.width // 4))))
+        assert coarse <= full, f"overview invented classes {sorted(coarse - full)}"
+
+    with rasterio.open(_tiny_band(tmp_path, cog=True, categorical=False)) as s:
+        full = set(np.unique(s.read(1)))
+        coarse = set(np.unique(s.read(1, out_shape=(s.height // 4, s.width // 4))))
+        assert coarse - full, "a continuous band's overview should average, not decimate"
+
+
+def test_media_type_follows_the_format_actually_written():
+    from stratum.publish.cogs import media_type, raster_format
+    assert "cloud-optimized" in media_type("cog")
+    assert "cloud-optimized" not in media_type("gtiff")
+    assert raster_format(["gtiff"]) == "gtiff"
+    assert raster_format(["cog", "netcdf"]) == "cog"
+    assert raster_format(["netcdf"]) == "cog", "netcdf is an extra product, not a raster choice"
+
+
+def test_gtiff_is_accepted_by_the_manifest_and_netcdf_still_refuses():
+    from stratum.publish.cogs import check_formats
+    check_formats(["cog"])
+    check_formats(["gtiff"])
+    with pytest.raises(NotImplementedError):
+        check_formats(["netcdf"])

@@ -12,7 +12,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from stratum.publish.cogs import check_formats, write_data_cogs
+from stratum.publish.cogs import check_formats, raster_format, write_data_cogs
 from stratum.publish.legend import write_classes, write_legend
 from stratum.publish.mappers import build_mappers, write_images
 from stratum.publish.stac import stamp, write_stac_item
@@ -79,7 +79,9 @@ def publish_period(out_dir: Path, product_dirs: Sequence[tuple[BlockRef, Path]],
     multi-band widths it alone cannot state. `outputs` is the manifest block: `formats`
     (default `[cog]`), `stac` (default true), `render`."""
     out_dir = Path(out_dir)
-    check_formats(outputs.get("formats") or ["cog"])
+    formats = outputs.get("formats") or ["cog"]
+    check_formats(formats)
+    fmt = raster_format(formats)
     bands = delivered_bands(schema, band_counts=band_counts)
     mappers = build_mappers(outputs, schema)              # validate before any IO
     stack = stitch(product_dirs, tile, bands)
@@ -91,11 +93,12 @@ def publish_period(out_dir: Path, product_dirs: Sequence[tuple[BlockRef, Path]],
                 "period_start": period.start.isoformat(), "period_end": period.end.isoformat(),
                 **dict(tags or {})}
     data_paths = write_data_cogs(out_dir, stack, tile, class_table=class_table, tags=all_tags,
+                                 fmt=fmt,
                                  colors=colors)
     data = {spec.name: p for spec, p in zip(stack.specs, data_paths, strict=True)}
 
     images = write_images(out_dir, {n: m.render(stack) for n, m in mappers.items()}, tile,
-                          tags=all_tags)
+                          tags=all_tags, fmt=fmt)
     legends = {n: write_legend(out_dir, n, m.legend()) for n, m in mappers.items()}
     classes = write_classes(out_dir, class_table) if class_table is not None else None
 
@@ -104,6 +107,6 @@ def publish_period(out_dir: Path, product_dirs: Sequence[tuple[BlockRef, Path]],
         item = write_stac_item(out_dir, run_id=run_id, manifest_hash=manifest_hash, tile=tile,
                                period=period, stack=stack, class_table=class_table, colors=colors,
                                data_paths=data, images=images, legends=legends,
-                               classes_path=classes, run_dir=run_dir)
+                               classes_path=classes, run_dir=run_dir, fmt=fmt)
     return Published(out_dir=out_dir, data=data, images=images, legends=legends, classes=classes,
                      item=item)

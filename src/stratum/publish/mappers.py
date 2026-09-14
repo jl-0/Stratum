@@ -271,8 +271,13 @@ def render(manifest_outputs: Mapping[str, Any], stack: BandStack,
 
 
 def write_image(path: Path, rgba: np.ndarray, tile: TileRef, *,
-                tags: Mapping[str, Any]) -> Path:
-    """A 4-band uint8 RGBA GeoTIFF on the tile's grid, alpha declared as alpha."""
+                tags: Mapping[str, Any], cog: bool = False) -> Path:
+    """A 4-band uint8 RGBA GeoTIFF on the tile's grid, alpha declared as alpha.
+
+    `cog=True` rewrites it through the COG driver. Overviews decimate rather than average: these
+    colours come from a legend, and averaging two of them produces a third that is in no legend
+    and means nothing.
+    """
     rgba = np.asarray(rgba)
     if rgba.dtype != np.uint8 or rgba.ndim != 3 or rgba.shape[-1] != 4:
         raise ValueError(f"an image is (H, W, 4) uint8, got {rgba.dtype} {rgba.shape}")
@@ -285,6 +290,15 @@ def write_image(path: Path, rgba: np.ndarray, tile: TileRef, *,
                "blockxsize": bs, "blockysize": bs, "compress": "deflate",
                "photometric": "RGB", "alpha": "YES"}      # ALPHA=YES marks band 4 as alpha
     path = Path(path)
+    if cog:
+        import tempfile
+
+        from rasterio.shutil import copy as rio_copy
+        with tempfile.TemporaryDirectory(dir=path.parent) as tmp:
+            staged = write_image(Path(tmp) / path.name, rgba, tile, tags=tags, cog=False)
+            rio_copy(str(staged), str(path), driver="COG", COMPRESS="DEFLATE",
+                     OVERVIEW_RESAMPLING="NEAREST", BLOCKSIZE=str(bs))
+        return path
     with rasterio.open(path, "w", **profile) as dst:
         dst.write(np.moveaxis(rgba, -1, 0))
         dst.colorinterp = [ColorInterp.red, ColorInterp.green, ColorInterp.blue, ColorInterp.alpha]
@@ -293,9 +307,10 @@ def write_image(path: Path, rgba: np.ndarray, tile: TileRef, *,
 
 
 def write_images(out_dir: Path, images: Mapping[str, np.ndarray], tile: TileRef, *,
-                 tags: Mapping[str, Any]) -> dict[str, Path]:
+                 tags: Mapping[str, Any], fmt: str = "cog") -> dict[str, Path]:
     """`{name}_rgba.tif` per rendered output. Returns name -> path."""
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
-    return {name: write_image(out_dir / f"{name}_rgba.tif", rgba, tile, tags=tags)
+    return {name: write_image(out_dir / f"{name}_rgba.tif", rgba, tile, tags=tags,
+                              cog=fmt == "cog")
             for name, rgba in images.items()}

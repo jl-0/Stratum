@@ -507,7 +507,7 @@ class OutputsSpec(Strict):
     """`bucket` is a URI or, locally, the storage root (plan section 4)."""
 
     bucket: str
-    formats: list[Literal["cog", "netcdf"]] = Field(default_factory=lambda: ["cog"])
+    formats: list[Literal["cog", "gtiff", "netcdf"]] = Field(default_factory=lambda: ["cog"])
     stac: bool = True
     render: dict[str, RenderSpec] = Field(default_factory=dict)
 
