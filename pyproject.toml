@@ -74,6 +74,9 @@ pyyaml = "*"
 affine = "*"
 earthaccess = "*"
 boto3 = "*"
+# pip is here for the image build only: the Lambda Runtime Interface Client is a pip-only,
+# Linux-only package and must not enter the lock for every platform (ADR-0003).
+pip = "*"
 pytest = "*"
 ruff = "*"
 

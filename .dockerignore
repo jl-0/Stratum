@@ -1,0 +1,26 @@
+# Keep the build context to what the image needs: the two distributions, the vendored library,
+# the manifest and the lock. Everything else is either large, private, or would invalidate the
+# layer cache on every docs edit.
+.git
+.github
+.pixi
+.env
+.env.*
+!.env.example
+docs
+refs
+trial-data
+examples
+terraform
+scripts
+tests
+vendor/*
+!vendor/SpectralUtil
+vendor/SpectralUtil/.git
+vendor/SpectralUtil/.pixi
+**/__pycache__
+**/*.pyc
+**/.pytest_cache
+**/.ruff_cache
+*.tfstate*
+*.tfvars

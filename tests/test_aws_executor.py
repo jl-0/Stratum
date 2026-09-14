@@ -213,3 +213,16 @@ def test_invoke_survives_a_non_json_payload() -> None:
 
     out = invoke(Garbage(), "fn", {"stage": "regrid", "index": 3})
     assert out["ok"] is False and "504" in out["error"]
+
+
+def test_the_image_cmd_names_a_real_handler() -> None:
+    """The Dockerfile's CMD is the only place the handler is named as a string, so a rename here
+    breaks the deployment and nothing else. One import is enough to catch it."""
+    import importlib
+    from pathlib import Path as P
+
+    dockerfile = P(__file__).resolve().parent.parent / "Dockerfile"
+    line = next(line for line in dockerfile.read_text().splitlines() if line.startswith("CMD"))
+    ref = line.split('"')[1]
+    module, _, attr = ref.rpartition(".")
+    assert callable(getattr(importlib.import_module(module), attr)), ref
