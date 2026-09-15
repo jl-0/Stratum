@@ -118,7 +118,14 @@ else may be written into a snapshot directory: `read_snapshot` discovers layers 
    under a stable URI is the classic silent-staleness bug.
 5. **Undeclared reads are refused.** A plugin that opens an undeclared aux URI produces a key that
    lies; the accessor rejects it rather than trusting authors to remember ([05](05-ancillary-data.md)).
-6. **Cache writes are atomic** — write to a temp name, then rename — so an interrupted Spot task
+6. **Never open `key.path` without `hit()` first.** On a bucket root the path is a node-local
+   *mirror*, and `hit()` is what pulls the artifact into it; a local run needs only the stat.
+   Reading the path directly therefore works perfectly on the machine that wrote the artifact and
+   fails on every other one, which is the worst available failure mode: it passes every local
+   test and breaks only under fan-out. The rule is mechanical and applies to every artifact kind
+   — a reader that skipped it cost 861 of 1184 Lambda invocations on first contact
+   ([§4](#4-sharing)).
+7. **Cache writes are atomic** — write to a temp name, then rename — so an interrupted Spot task
    cannot leave a truncated artifact that later reads as a hit. A directory artifact gets its
    sidecar written *inside* the temp directory before the rename, so the rename is the commit;
    a file artifact's sidecar lands after the file, and a hit requires both, so the window between
@@ -133,12 +140,12 @@ else may be written into a snapshot directory: `read_snapshot` discovers layers 
    **`.members.json`**, its own list of what it covers, written immediately before the sidecar.
    A hit requires every listed member. Locally the file is redundant and written anyway, so the
    two paths differ in no respect a reader can observe ([§4](#4-sharing)).
-7. **Staged source files are not artifacts.** A local copy of an upstream granule is keyed by URI
+8. **Staged source files are not artifacts.** A local copy of an upstream granule is keyed by URI
    and ETag, scoped to a worker, and never enters a cache key. Asset *identity* determines an
    artifact; whether the bytes happened to be local does not ([12 §4](12-data-access.md)). A
    *prepared* asset is different: a transcode keyed on the checksum is an artifact like any other,
    and its science-free key is what lets every run share it.
-8. **Extend a schema, never redefine it.** Appending to an enumeration keeps cached snapshots
+9. **Extend a schema, never redefine it.** Appending to an enumeration keeps cached snapshots
    valid through `extends`; anything else is a new `layers_hash` and a rebuild of resolve
    ([13 §5](13-snapshot-schema.md)).
 

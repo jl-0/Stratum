@@ -325,7 +325,7 @@ falling back, since a silent fallback would mix two derivations under one cache 
   <td>Read</td>
   <td>Each role (geometry, mineral, mask…) read over that window as a masked array — fill values
       arrive already masked</td>
-  <td><a class="src" data-sym="read_observation" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/resolve/observation.py#L156">observation.py:110</a></td>
+  <td><a class="src" data-sym="read_observation" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/resolve/observation.py#L165">observation.py:110</a></td>
 </tr>
 <tr>
   <td class="num">5</td>
@@ -333,7 +333,7 @@ falling back, since a silent fallback would mix two derivations under one cache 
   <td>Every <code>PixelMask</code> evaluated in the granule's own geometry, combined by
       conjunction — cheaper here than on the map, and some masks (slit artefacts, edge trims)
       only make sense in sensor space</td>
-  <td><a class="src" data-sym="for mask in plan.sensor_mask" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/resolve/observation.py#L241">observation.py:177</a></td>
+  <td><a class="src" data-sym="for mask in plan.sensor_mask" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/resolve/observation.py#L250">observation.py:177</a></td>
 </tr>
 <tr>
   <td class="num">6</td>
@@ -349,7 +349,7 @@ falling back, since a silent fallback would mix two derivations under one cache 
       <code>bands</code> like a gathered role and its nodata joins <code>valid</code> &mdash; but
       never <code>interpolated</code>, which means "the GLT reached beyond
       <code>max_distance</code>" and has no meaning for a warp</td>
-  <td><a class="src" data-sym="def read_ortho_roles" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/resolve/observation.py#L112">observation.py</a></td>
+  <td><a class="src" data-sym="def read_ortho_roles" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/resolve/observation.py#L121">observation.py</a></td>
 </tr>
 <tr>
   <td class="num">6b</td>
@@ -363,14 +363,14 @@ falling back, since a silent fallback would mix two derivations under one cache 
   <td class="num">7</td>
   <td>Map-space masks</td>
   <td>Masks that need map geometry or ancillary rasters, on the block, by conjunction</td>
-  <td><a class="src" data-sym="for mask in plan.map_masks:" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/resolve/observation.py#L271">observation.py:200</a></td>
+  <td><a class="src" data-sym="for mask in plan.map_masks:" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/resolve/observation.py#L280">observation.py:200</a></td>
 </tr>
 <tr>
   <td class="num">8</td>
   <td>Class remap</td>
   <td>The granule's own class ids → the run's, by the lookup array plan built. A value with no
       mapping is marked invalid rather than guessed</td>
-  <td><a class="src" data-sym="values = apply_remap(values," href="https://github.com/jl-0/Stratum/blob/main/src/stratum/resolve/observation.py#L286">observation.py:215</a></td>
+  <td><a class="src" data-sym="values = apply_remap(values," href="https://github.com/jl-0/Stratum/blob/main/src/stratum/resolve/observation.py#L295">observation.py:215</a></td>
 </tr>
 <tr>
   <td class="num">9</td>

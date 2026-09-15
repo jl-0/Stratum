@@ -210,6 +210,10 @@ Established by reading code and data. Do not re-derive; do not assume the opposi
   `pixi.lock` pins all three. That is how the image gets the plugin — the Dockerfile copies the
   manifest, the lock and the sources and runs `pixi install --locked`, resolving nothing twice.
   A plugin from another repo goes in as a wheel in `plugins/wheels/` instead (`--no-deps`).
+- **Never open a cache key's path without `cache.hit()` first.** On a bucket root `key.path` is a
+  node-local mirror and `hit()` is what pulls the artifact down; locally it is just a stat. Read
+  the path directly and it works on the machine that planned and fails on every worker - passing
+  every local test. `BlockAux` shipped with exactly this and failed 861 of 1184 Lambda items.
 - **A mirror is never the record.** A bucket storage root gets a node-local mirror under
   `$STRATUM_SCRATCH`, derived from a hash of the URI so every process agrees on it. `plan.json`
   records `root`, `run_dir` and `products_dir` as URIs; nothing durable may name a mirror path.

@@ -327,10 +327,11 @@ class BlockAux(AuxAccessor):
     """
 
     def __init__(self, keys: Mapping[str, CacheKey], sources: Mapping[str, AuxSource],
-                 block: BlockRef) -> None:
+                 block: BlockRef, cache: CacheRoot | None = None) -> None:
         self._keys = dict(keys)
         self._sources = dict(sources)
         self._block = block
+        self._cache = cache
         self._cached: dict[str, np.ndarray] = {}
 
     def raster(self, alias: str, *, date: datetime | None = None,
@@ -348,7 +349,19 @@ class BlockAux(AuxAccessor):
                 "it in `aux` - an undeclared read makes a cache key that lies (05 section 5).")
         if alias not in self._cached:
             source = self._sources[alias]
-            self._cached[alias] = read_window(self._keys[alias].path, self._block.window,
+            key = self._keys[alias]
+            # Go through the cache, never straight to the path. On a bucket root `key.path` is a
+            # node-local MIRROR, and the planner's warp went to the bucket - so on a worker the
+            # file is not there until `hit()` pulls it down. Locally this is a stat; remotely it
+            # is the download. Reading the path directly works on one machine and fails on every
+            # other, which is the worst way for this to be wrong (06 section 4).
+            if self._cache is not None and not self._cache.hit(key):
+                raise AuxError(
+                    f"aux {alias!r} has no warp for tile {self._block.tile.name} at {key.path}. "
+                    "The planner warps every declared source onto every tile before any worker "
+                    "runs (05 section 5), so a miss here means the plan and this worker disagree "
+                    "about the source - check that `aux` was not edited after the plan.")
+            self._cached[alias] = read_window(key.path, self._block.window,
                                               nodata=source.nodata)
         return self._cached[alias]
 

@@ -206,7 +206,7 @@ def resolve_window(plan: PlanContext, block: BlockRef, epoch: Epoch,
     contributing: list[str] = []
     if aux is None:
         aux = NullAux() if not plan.aux_to_read() else BlockAux(
-            aux_keys_for(plan, block.tile), plan.aux_sources, block)
+            aux_keys_for(plan, block.tile), plan.aux_sources, block, plan.cache)
     scorer = plan.scorer.instance
     core = _core_slices(block)
     coords = block_coords(block.transform, shape, plan.grid.crs)
@@ -266,7 +266,7 @@ def resolve_block(item: Mapping[str, Any], plan: PlanContext) -> CacheKey:
         return snap_key
 
     aux_keys = aux_keys_for(plan, tile)
-    aux = NullAux() if not aux_keys else BlockAux(aux_keys, plan.aux_sources, block)
+    aux = NullAux() if not aux_keys else BlockAux(aux_keys, plan.aux_sources, block, plan.cache)
     resolved = resolve_window(plan, block, epoch, reached, aux)
     core_transform = BlockRef(tile, block.bx, block.by, halo=0).transform
     plan.cache.write_dir(snap_key, lambda d: write_snapshot(

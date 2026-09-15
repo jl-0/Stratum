@@ -101,7 +101,7 @@ class CacheRoot:
 
     def hit(self, key: CacheKey) -> bool:
         """True when the artifact AND its `.inputs.json` exist. A write commits the artifact
-        first and the sidecar last, so a partial write never reads as a hit (06 section 3, rule 6).
+        first and the sidecar last, so a partial write never reads as a hit (06 section 3, rule 7).
 
         On a remote workspace a local miss is not yet a miss: the sidecar is probed in the bucket
         and, when it is there, the artifact is mirrored and the answer is yes. The sidecar is

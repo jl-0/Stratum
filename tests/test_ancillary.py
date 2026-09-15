@@ -448,3 +448,48 @@ def test_an_ortho_role_is_warped_onto_the_block_beside_a_sensor_role(tmp_path):
         AssertionError("a cached ortho warp must not open the granule again"))
     again = read_ortho_roles(ctx, ["frcov"])["frcov"]
     np.testing.assert_array_equal(again, got)
+
+
+# ----------------------------------------------------- the bucket path: a mirror is not the bucket
+def test_the_accessor_pulls_its_warp_from_a_bucket_before_reading(monkeypatch, tmp_path):
+    """A worker's `key.path` is a node-local MIRROR, not the artifact.
+
+    The planner warps aux into the artifact cache, which on a bucket root means the bytes land in
+    S3. A worker's mirror is empty until something pulls them down, and `CacheRoot.hit` is what
+    does that. Reading `key.path` directly works on the machine that planned and fails on every
+    other one - which is exactly how this shipped and broke 861 of 1184 items in Lambda.
+
+    Two workspaces over one bucket stand in for the planner and the worker.
+    """
+    from fake_s3 import install
+
+    from stratum.cache import CacheRoot
+    from stratum.storage import Workspace
+
+    install(monkeypatch, tmp_path / "bucket")
+    planner = Workspace.for_root("s3://stratum-test/", mirror=tmp_path / "planner-mirror")
+    worker = Workspace.for_root("s3://stratum-test/", mirror=tmp_path / "worker-mirror")
+
+    source = source_for(aligned_source(tmp_path, np.full((20, 20), 4, "uint8")))
+    key = warp_aux_tile(CacheRoot(planner), TILE, source)          # the planner warps
+    assert key.path.is_file(), "the planner's own mirror has it"
+
+    worker_cache = CacheRoot(worker)
+    worker_key = aux_key_for(worker_cache, TILE, source)
+    assert not worker_key.path.exists(), "the worker's mirror starts empty - the bug's precondition"
+
+    block = BlockRef(TILE, 0, 0)
+    aux = BlockAux({source.alias: worker_key}, {source.alias: source}, block, worker_cache)
+    out = aux.raster("landcover")                                   # must pull, not fail
+    assert out.shape == (10, 10) and (out == 4).all()
+
+
+def test_the_accessor_says_which_tile_is_missing_rather_than_naming_a_path(tmp_path):
+    """A warp the planner never made is a disagreement between the plan and the worker, and the
+    message should say so - `No such file or directory` on a mirror path does not."""
+    cache = CacheRoot(tmp_path / "root")
+    source = source_for(aligned_source(tmp_path, np.full((20, 20), 4, "uint8")))
+    key = aux_key_for(cache, TILE, source)                          # keyed, never written
+    aux = BlockAux({source.alias: key}, {source.alias: source}, BlockRef(TILE, 0, 0), cache)
+    with pytest.raises(AuxError, match="planner warps every declared source"):
+        aux.raster("landcover")

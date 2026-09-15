@@ -45,6 +45,15 @@ class ObsContext:
 
     def glt_window(self) -> np.ndarray:
         if self.glt is None:
+            # through the cache, not straight to the path: on a bucket root `key.path` is a
+            # node-local mirror and `hit()` is what pulls the artifact into it. `resolve_window`
+            # always passes the window it already read, so this branch is the one a caller
+            # constructing an ObsContext by hand takes - and it must not be the one that only
+            # works on the machine that planned.
+            if not self.plan.cache.hit(self.glt_key):
+                raise FileNotFoundError(
+                    f"no GLT for granule {self.granule.granule_id!r} at {self.glt_key.path}; "
+                    "regrid did not run for this granule and tile (03 section 6)")
             self.glt = read_glt(self.glt_key.path, self.block.window)
         return self.glt
 

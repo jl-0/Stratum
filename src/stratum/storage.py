@@ -16,7 +16,7 @@ The remote is touched at exactly three moments, all of them in `stratum.cache`:
 1. a cache probe that misses locally falls back to the bucket before it is a miss;
 2. an artifact that has just committed locally is uploaded, **members first and
    `.inputs.json` last**, which is the same ordering rule an atomic local write obeys
-   (06 section 3, rule 6) - a crash leaves members with no sidecar, which is not a hit;
+   (06 section 3, rule 7) - a crash leaves members with no sidecar, which is not a hit;
 3. a run directory or a published product tree is pushed whole.
 
 A mirror is a cache, never the record: it may be deleted between runs, and a worker that starts
