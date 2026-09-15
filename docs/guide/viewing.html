@@ -1,0 +1,228 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Viewing products · Stratum</title>
+<link rel="stylesheet" href="../assets/stratum.css">
+</head>
+<body data-page="guide/viewing" data-root="../">
+<a class="skip" href="#content">Skip to content</a>
+<header class="masthead">
+  <a class="wordmark" href="../index.html"><span class="glyph"></span>Stratum</a>
+  <span class="stage">Pre-release</span>
+  <span class="spacer"></span>
+  <span class="repo">EMIT Critical Minerals L3</span>
+</header>
+<div class="layout">
+<nav id="sidebar" aria-label="Documentation"></nav>
+<main id="content">
+<div class="prose">
+
+<h1>Viewing products</h1>
+<p class="lede">A published products tree is a STAC catalogue, so looking at it needs no
+configuration — point a viewer at the root and it finds the runs, the layers and the colours on
+its own.</p>
+
+<h2 id="locally">Looking at a run on your machine</h2>
+
+<pre><code>stratum preview --root out</code></pre>
+
+<p>That serves a map on <code>http://127.0.0.1:8787/</code> and opens it. Three pickers:
+<strong>run</strong> is the run directories under <code>products/</code>, <strong>layer</strong> is
+the assets each item declares, and <strong>basemap</strong> is the imagery underneath. Nothing about
+the run is configured anywhere — a run that delivers a new band shows it in the layer list.</p>
+
+<p><code>--root</code> takes either the storage root or the products directory inside it, and it
+takes a bucket:</p>
+
+<pre><code>stratum preview --root s3://my-bucket/</code></pre>
+
+<p>Over a bucket it reads with your own credentials and copies each raster into a local mirror the
+first time a tile needs it, so the first look at a tile is slow and every later one is not. The
+catalogue itself is read without fetching a single raster.</p>
+
+<div class="warn">
+<p><strong>The server binds to loopback and has no authentication.</strong> It is a development
+tool. A path from a URL cannot leave the products root, but do not put it on a public address.</p>
+</div>
+
+<h3 id="reading">Reading a point</h3>
+
+<p><strong>Click anywhere on the map.</strong> The popup reports every band the run delivered at
+that point &mdash; not just the layer being drawn &mdash; with class names resolved and raw values
+beside them:</p>
+
+<pre><code>mineral_1              Goethite_Thin_Film WS222 W1R1Ba (8)
+mineral_1_agreement    0.6667
+mineral_1_runner_up    nHematit+fg-Goethit 34B2+MPC W1R1Hb (46)
+depth_1                0.02843
+n_epochs               3</code></pre>
+
+<p>This is usually faster than the legend, and it is the only practical way to read a map with a
+few hundred classes whose colours are necessarily close together. The number is shown next to the
+name because they are different facts: the name comes from the product's own class table, the
+number is what is in the pixel.</p>
+
+<p>Which bands are categorical is not guessed from the band name. Published items carry the STAC
+Classification extension, and each categorical band declares its own
+<code>classification:classes</code> &mdash; so <code>mineral_1_runner_up</code> is named and
+<code>mineral_1_agreement</code>, which merely shares a prefix, is not.</p>
+
+<p>The legend also takes a filter, for when you want to go the other way and find a class you can
+name.</p>
+
+<h3 id="layers">What the layers mean</h3>
+
+<div class="tw">
+<table>
+<thead><tr><th>Asset role</th><th>Drawn as</th></tr></thead>
+<tbody>
+<tr><td><code>visual</code> — a published rendering</td><td>Straight through. The colours are the
+ones publish wrote into the image; the viewer chooses nothing.</td></tr>
+<tr><td><code>data</code>, with a <code>legend</code> asset beside it</td><td>Each value looked up
+in that legend. Resampled <strong>nearest</strong>, always — averaging class ids would invent
+classes nothing identified.</td></tr>
+<tr><td><code>data</code>, continuous</td><td>Stretched between the band's 2nd and 98th percentile
+through a colour ramp. Averaged when zoomed out, which is what makes a whole tile readable.</td></tr>
+</tbody>
+</table>
+</div>
+
+<p>Two values are always transparent: the band's nodata, and — in a categorical band — class
+<code>0</code>. Those are different facts, and drawing either one would hide the difference:</p>
+
+<div class="key">
+<p><strong>nodata</strong> is <em>nothing observed this cell</em>. <strong>Class 0</strong> is
+<em>observed, and nothing was identified</em>. A viewer that painted class 0 would make an area
+that was looked at and found empty indistinguishable from one that was never looked at.</p>
+</div>
+
+<h2 id="deploying">Handing someone a URL</h2>
+
+<p>The same server, run as a Fargate task inside your VPC. It reads the bucket with the task role
+and serves the map on its own private IP, so nothing about the bucket changes: no public access,
+no website hosting, no bucket policy, no CORS.</p>
+
+<pre><code>make viewer-up      <span class="c"># start one; prints its URL</span>
+make viewer-url     <span class="c"># the URL of whatever is already running</span>
+make viewer-down    <span class="c"># stop it</span>
+make viewer-logs    <span class="c"># tail the container log</span></code></pre>
+
+<p>There is no service and no load balancer, so the address is the task's own private IP and it
+changes each time you start one. Nothing runs, and nothing is billed, between looks.</p>
+
+<h3 id="deploying-setup">What it needs once</h3>
+
+<p>One site input in <code>.env</code>, and it is the deployment's, not the viewer's &mdash; the
+same VPC will carry the data plane when that arrives. Leave it empty and no workload that needs a
+network is created:</p>
+
+<pre><code>STRATUM_VPC_ID=vpc-0a1b2c3d</code></pre>
+
+<p>Then <code>make stratum-infrastructure</code> creates the cluster, the log group, the task
+definition and a security group. The task runs in the VPC's subnets, reuses the <code>task</code>
+and <code>task-exec</code> roles the deployment already has, and is never given a public IP. There
+are no other network settings.</p>
+
+<h3 id="deploying-sg">The security group</h3>
+
+<p>Created here rather than asked for, because it is the only network control in front of a server
+with no authentication of its own, and a group inherited from elsewhere is a group whose rules this
+deployment cannot see. Three rules:</p>
+
+<div class="tw">
+<table>
+<thead><tr><th>Direction</th><th>Rule</th><th>Why</th></tr></thead>
+<tbody>
+<tr><td>in</td><td>TCP 8787 from anywhere</td><td>the viewer. <strong>The control is the port, not
+the source</strong> &mdash; with no public IP, "anywhere" is whatever can route to the task</td></tr>
+<tr><td>out</td><td>TCP 443 anywhere</td><td>ECR, S3 and CloudWatch Logs &mdash; whether by NAT or
+by VPC endpoint, all of it is HTTPS</td></tr>
+<tr><td>out</td><td>TCP + UDP 53 to the VPC CIDR</td><td>the VPC resolver. Without it the task
+resolves none of the above and fails in a way that reads like a routing problem</td></tr>
+</tbody>
+</table>
+</div>
+
+<p>Terraform drops the allow-all egress rule AWS adds to a new group by default, so that list is
+the whole of it. The task cannot reach anything else.</p>
+
+<div class="warn">
+<p><strong>The preview server has no authentication</strong>, in the task exactly as on your
+laptop, and the group admits the port from any source that can route to it &mdash; the VPC, and
+whatever is peered, VPN'd or attached to it. Anything that reaches the port can read every product
+in the bucket. Stop the task when you are done; that, and the absence of a public IP, are what
+bound the exposure.</p>
+</div>
+
+<div class="tw">
+<table>
+<thead><tr><th>Requirement</th><th>Why</th></tr></thead>
+<tbody>
+<tr><td>The VPC's subnets reach ECR, S3 and CloudWatch Logs</td><td>A NAT gateway, or VPC endpoints
+for <code>ecr.api</code>, <code>ecr.dkr</code>, <code>s3</code> and <code>logs</code>. Fargate picks
+one subnet; if it cannot pull the image the task dies before it logs anything, and
+<code>make viewer-up</code> prints the reason ECS gives</td></tr>
+<tr><td>An image digest is set</td><td>The task runs the same image as the worker. No Dockerfile
+change: the entrypoint runs any command when it is not under the Lambda runtime</td></tr>
+</tbody>
+</table>
+</div>
+
+<h3 id="deploying-pins">One image, two pins</h3>
+
+<p>The viewer runs the <em>same image</em> as the worker &mdash; the entrypoint runs any command
+when it is not under the Lambda runtime, so there is nothing viewer-specific in it. What is
+separate is <strong>when the digest moves</strong>:</p>
+
+<pre><code>STRATUM_IMAGE_DIGEST=sha256:aaa...          <span class="c"># the worker, and the viewer with it</span>
+STRATUM_VIEWER_IMAGE_DIGEST=sha256:bbb...   <span class="c"># the viewer only; empty tracks the worker</span></code></pre>
+
+<p>Leave the second empty and both run the same bytes, which is what you want most of the time.
+Set it when the worker is pinned for a campaign and you still want to rebuild the viewer, so a
+viewer rebuild cannot repoint a worker you have frozen. <code>make image</code> prints one digest
+either way; which line it lands on is the decision.</p>
+
+<div class="key">
+<p><strong>The task definition pins a digest, so <code>make viewer-up</code> is a start button, not
+a deploy.</strong> Editing the viewer and starting a task runs the <em>old</em> code. Shipping a
+change is <code>make image</code>, the new digest into <code>.env</code>, then
+<code>make stratum-infrastructure</code>. <code>viewer-up</code> and <code>viewer-url</code> print
+the digest they are running so you can tell. For iterating, use <code>make viewer</code> locally
+against the same bucket.</p>
+</div>
+
+<div class="warn">
+<p><strong>The preview server has no authentication</strong>, in the task exactly as on your
+laptop. Anything that can reach the port can read every product in the bucket. The security group
+is the only thing standing in front of it, so scope it to the range you browse from and stop the
+task when you are done.</p>
+</div>
+
+<div class="note">
+<p><strong>Why a task and not a static page in the bucket.</strong> A browser cannot sign an S3
+request, so serving the products directly to one means granting anonymous <code>GetObject</code> on
+the prefix &mdash; and the products sit in the same bucket as <code>cache/</code> and
+<code>runs/</code>, behind a public access block. The task sidesteps the question entirely: it
+signs the requests itself with the task role, and speaks plain HTTP only to your VPC.</p>
+</div>
+
+<h2 id="limits">What it is not</h2>
+
+<p>It is a way to look at products, not a way to serve them. There is no styling beyond the ramp
+picker, no per-pixel inspection, no time slider, and no way to compare two runs side by side — the
+run picker swaps one for the other. It reads the products tree and never writes to it, so nothing
+you do in the viewer can change a run.</p>
+
+</div>
+<nav class="pager" aria-label="Pagination"></nav>
+<footer class="site">
+  Specified in <a href="../specs/07-output-mapping.md"><code>specs/07-output-mapping.md</code></a>,
+  <a href="../specs/06-caching.md"><code>06</code></a>
+</footer>
+</main>
+</div>
+<script src="../assets/stratum.js"></script>
+</body>
+</html>

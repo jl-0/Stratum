@@ -546,6 +546,35 @@ anyway, so a streaming page iterator is the follow-up if unscoped builds are eve
   function.</p>
 </div>
 
+<h2 id="ortho">Products that are already on a map grid</h2>
+
+<p>Most inputs arrive in sensor geometry and are gathered onto the grid through a GLT. Some do
+not: EMIT's L2B fractional cover is delivered orthorectified, one GeoTIFF per cover fraction, on
+the granule's own map grid. Such a role has no sensor space to window and no <code>loc</code>
+array to build a lookup table from.</p>
+
+<p>A reader declares which space it produces, and the framework warps an ortho-native role onto
+the block grid directly. Three consequences worth knowing:</p>
+
+<ul>
+<li><strong>It is a resample, not a crop.</strong> FRCOV's cell is about 60&nbsp;m; a
+one-arcsecond run grid is about 30&nbsp;m, a ratio of 1.95. So the role declares
+<code>resampling</code>, which is required for an ortho role and refused for a sensor one.</li>
+<li><strong>The warp is cached per (granule, role, tile)</strong>, exactly like a GLT, and each
+block reads a window out of it. Warping inside the block read path would repeat the work once per
+block, per epoch, per granule.</li>
+<li><strong>A run still needs a sensor role.</strong> The GLT is what decides which granules reach
+a block, so an all-ortho run is refused at plan time.</li>
+</ul>
+
+<pre><code>inputs:
+  roles:
+    frcov:
+      collection: EMITL2BFRCOV
+      asset: FRCOVBARE
+      var: EMIT_L2B_FRCOVBARE     <span class="c"># the band's description, not an index</span>
+      resampling: bilinear</code></pre>
+
 <div class="reading">
   <span class="label">Further reading</span>
   <ul>

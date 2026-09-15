@@ -68,16 +68,31 @@ def _scalar(value: Any) -> Any | None:
     return None
 
 
+class SourceError(RuntimeError):
+    """A granule source cannot index what it was pointed at. Carries the reason and the fix;
+    the CLI presents it as a message rather than a traceback."""
+
+
 def read_header(path: Path) -> dict[str, Any]:
     """Every scalar string/number global attribute, verbatim. Opens the file for metadata only;
-    no variable is touched."""
-    attrs: dict[str, Any] = {}
-    with nc.Dataset(path, mode="r") as ds:
-        for name in ds.ncattrs():
-            value = _scalar(ds.getncattr(name))
-            if value is not None:
-                attrs[name] = value
-    return attrs
+    no variable is touched.
+
+    NetCDF only. A local index is built from each granule's own ACDD attributes - the time
+    coverage and the four bounds - and a GeoTIFF carries none of them, so there is nothing to
+    index it from. Saying so beats an `OSError` out of the netCDF4 C library, which is what the
+    caller used to get (12 section 5).
+    """
+    try:
+        with nc.Dataset(path, mode="r") as ds:
+            return {name: value for name in ds.ncattrs()
+                    if (value := _scalar(ds.getncattr(name))) is not None}
+    except OSError as e:
+        raise SourceError(
+            f"{path}: not a NetCDF file, so `kind: local` cannot index it ({e}). A local index "
+            "reads each granule's ACDD header for its time coverage and bounds; GeoTIFF sources "
+            "are indexed through a catalogue source instead (12 section 5). An ortho-native "
+            "GeoTIFF is readable as a ROLE once indexed - it is the indexing that needs the "
+            "header.") from None
 
 
 def split_pattern(pattern: str) -> tuple[str, str]:

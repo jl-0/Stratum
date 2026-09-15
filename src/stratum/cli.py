@@ -24,13 +24,14 @@ from stratum.plugins import GROUPS, registered, resolve
 
 def _guarded(fn: Callable[..., Any], *args: Any, **kwargs: Any) -> Any:
     """Run a command body; a NotImplementedError or a planning error becomes a clean message."""
+    from stratum.access import SourceError
     from stratum.plan import PlanError
 
     try:
         return fn(*args, **kwargs)
     except NotImplementedError as e:
         raise click.ClickException(f"not implemented in this slice: {e}") from None
-    except PlanError as e:
+    except (PlanError, SourceError) as e:
         raise click.ClickException(str(e)) from None
 
 
@@ -241,6 +242,48 @@ def render(run_id: str, mapper: str) -> None:
 
 
 # ----------------------------------------------------------------------------------------- cache
+# --------------------------------------------------------------------------------------- preview
+@main.command()
+@click.option("--root", default=".", type=click.Path(),
+              help="Storage root, or the products directory itself. May be an s3:// prefix.")
+@click.option("--port", type=int, default=8787, help="0 asks the OS for a free port.")
+@click.option("--host", default="127.0.0.1", show_default=True,
+              help="Loopback by default: the server has no authentication.")
+@click.option("--open/--no-open", "open_browser", default=True,
+              help="Open the viewer in a browser once the server is up.")
+def preview(root: str, port: int, host: str, open_browser: bool) -> None:
+    """Serve a map of a published products tree.
+
+    Reads the STAC that publish already wrote (07 section 6), so the run picker is the run
+    directories and the layer picker is the assets each item declares. Renders tiles with
+    rasterio, which is what makes it work over `gtiff` output as well as `cog`.
+    """
+    import webbrowser
+
+    from stratum.preview.catalog import Products
+    from stratum.preview.server import serve
+
+    products = Products.open(root)
+    runs = products.run_ids()
+    if not runs:
+        raise click.ClickException(
+            f"no published runs under {products.uri} - point --root at a storage root "
+            f"(the directory holding products/) or at the products directory itself")
+
+    httpd = serve(products, host=host, port=port)
+    url = f"http://{host}:{httpd.server_address[1]}/"
+    click.echo(f"{products.uri}\n{len(runs)} run(s): {', '.join(runs)}\n\n  {url}\n")
+    click.echo("Ctrl-C to stop.")
+    if open_browser:
+        webbrowser.open(url)
+    try:
+        httpd.serve_forever()
+    except KeyboardInterrupt:
+        click.echo("")
+    finally:
+        httpd.server_close()
+
+
 @main.group()
 def cache() -> None:
     """Content-addressed artifacts (06 section 6)."""

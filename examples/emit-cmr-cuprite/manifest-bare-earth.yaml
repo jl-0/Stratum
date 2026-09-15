@@ -1,0 +1,204 @@
+# Stratum example: the Cuprite / Goldfield district of Nevada as SIX tiles, January-August 2026,
+# granules discovered in NASA's CMR catalogue and downloaded from LP DAAC on first touch.
+# Run from the repo root:
+#
+#     pixi run stratum index build -m examples/emit-cmr-cuprite/manifest.yaml   # metadata only
+#     pixi run stratum plan        -m examples/emit-cmr-cuprite/manifest.yaml   # read report.md
+#     pixi run stratum run         -m examples/emit-cmr-cuprite/manifest.yaml
+#
+# This is emit-cmr-nevada's science over a MULTI-TILE area: the same collections, roles, masks,
+# scorer and monthly vote, changed only in geometry - a half-degree `tile_size`, the `block_size`
+# that follows from it, and a `bbox` instead of an explicit tile list. Everything else being
+# identical is the point: the fan-out over tiles is a property of the grid and the AOI, never of
+# the pipeline. 719 work items against the single-tile example's 205.
+#
+# Every path below is relative to this file. README.md has the tile map and the measured cost.
+
+run_id: emit-cmr-cuprite-bare-earth             # the run label; the run id is this plus a hash of the manifest
+description: Cuprite 3 x 6 tiles - bare, well-lit ground wins; landcover from aux
+
+grid:
+  crs: EPSG:4326                                                # geographic degrees; every unit below is degrees
+  resolution: [0.000277777777777778, -0.000277777777777778]   # one arcsecond - IDENTICAL to emit-cmr-nevada
+  origin: [-180, -90]             # the same lattice too: cell edges fall at origin + n * resolution
+  tile_size: 0.5                  # a half degree per tile: 1800 x 1800 cells (nevada uses 1.0)
+                                  #   Tiles are cut on the CELL lattice, not on a lattice of their
+                                  #   own, so changing tile_size re-cuts the same cells into
+                                  #   different rectangles - no pixel moves, and no tile straddles
+                                  #   a cell. Six half-degree tiles cover 1.0 x 1.5 degrees; the
+                                  #   same 2 x 3 set at the delivered 1.0 would be 2 x 3 degrees
+                                  #   and 89 granules instead of 45 (measured against CMR), which
+                                  #   is more than an example should ask anyone to download.
+  block_size: 450                 # cells per block edge: a tile is 4 x 4 blocks, so 96 blocks in all
+                                  #   (nevada: 5 x 5 blocks in one tile = 25). Four times the work,
+                                  #   spread over six products instead of one.
+
+aoi:
+  # [west, south, east, north] in degrees. The tiles are DERIVED: every tile whose nominal bounds
+  # intersect the box, ordered south to north then west to east. This box sits exactly on tile
+  # edges, so it resolves to a clean 3 wide x 6 tall set and pulls in no extra row or column.
+  #
+  #   40.0 +---------+---------+---------+
+  #        | -236,79 | -235,79 | -234,79 |   Three times the area of the baseline's 2 x 3, and
+  #   39.5 +---------+---------+---------+   the point of it: 18 tiles, 288 blocks, ~2300 work
+  #        | -236,78 | -235,78 | -234,78 |   items in resolve alone. Granule count grows far
+  #   39.0 +---------+---------+---------+   more slowly than area - 41 -> 59 usable - because
+  #        | -236,77 | -235,77 | -234,77 |   an EMIT footprint is ~0.7 deg and already spans
+  #   38.5 +---------+---------+---------+   several 0.5 deg tiles.
+  #        | -236,76 | -235,76 | -234,76 |
+  #   38.0 +---------+---------+---------+   The bottom-left six tiles are exactly the
+  #        | -236,75 | -235,75 | -234,75 |   baseline's 2 x 3 set, so the two runs stay
+  #   37.5 +---------+---------+---------+   comparable on shared ground.
+  #        | -236,74 | -235,74 | -234,74 |
+  #   37.0 +---------+---------+---------+
+  #     -118.0    -117.5    -117.0    -116.5
+  #
+  #   Cuprite (37.52 N, 117.23 W) sits in -235,75.
+  #
+  bbox: [-118.0, 37.0, -116.5, 40.0]
+  # tiles: [[-236, 74], [-235, 74], [-234, 74], ...]
+  #                                 # the same eighteen, named outright. A tile index is a COUNT
+  #                                 # of tile_size steps from the origin, which reads as whole
+  #                                 # degrees only when tile_size is 1.0 - at 0.5 the indices are
+  #                                 # x2, which is why `-236_75` names lon [-118.0, -117.5) and
+  #                                 # not degree -236. Prefer bbox when the tiling follows from
+  #                                 # the area.
+  # zones: [cuprite-nv]             # alternative: ../zones.yaml has an approximate district box.
+  # registry: ../zones.yaml         #   It is 0.6 x 0.6 degrees, so it does NOT cut into a whole
+  #                                 #   number of tiles; it is the delivered-product zone, not
+  #                                 #   this demo's AOI.
+
+time:
+  start: 2026-01-01               # inclusive, UTC
+  end:   2026-09-01               # exclusive
+  epoch: P1M                      # the voting unit: one snapshot per calendar month
+  deliver: P8M                    # one delivered product PER TILE over the whole eight months
+
+inputs:
+  index_location: ./index         # where the granule index lives; `stratum plan` builds it here if absent
+  source:                         # how the index is BUILT (a run never talks to the catalogue)
+    kind: cmr                     # NASA's Common Metadata Repository, through earthaccess
+    provider: LPCLOUD             # the LP DAAC cloud provider that hosts EMIT
+    prefer: https                 # download over HTTPS with Earthdata Login (s3 direct access is not built)
+    patterns:                     # {collection: {asset: glob}}: which FILES of each record to index.
+      EMITL2BMIN:                 #   A file matching no glob is never indexed or downloaded; a collection
+        MIN: "EMIT_L2B_MIN_001_*.nc"            #   with no entry is not searched. The granule id is what `*`
+        MINUNCERT: "EMIT_L2B_MINUNCERT_001_*.nc" #   matched on the first asset (e.g. 20260604T180210_2615512_009).
+      EMITL2BFRCOV:               #   ortho-native GeoTIFFs, one file per cover fraction. Only BARE
+        FRCOVBARE: "EMIT_L2B_FRCOVBARE_001_*.tif"   #   is listed, so the PV/NPV/QC/UNC files are
+                                  #   never indexed or fetched. 41 of the 45 granules have FRCOV -
+                                  #   and they are exactly the 41 that survive the cloud filter,
+                                  #   so requiring it costs nothing (measured 2026-09-15).
+      EMITL1BRAD:                 #   OBS is the second file of an L1B RAD record; the 1.85 GB RAD file
+        OBS: "EMIT_L1B_OBS_001_*.nc"            #   is deliberately unlisted, so it is never fetched.
+  roles:                          # what the run reads: a name -> (collection, file, variable)
+    geometry: {collection: EMITL1BRAD, asset: OBS, var: obs}   # view/sun angles per pixel; also the geolocation
+    mineral:
+      collection: EMITL2BMIN      # the MIN file (the collection's first asset) is implied
+      var: group_1_mineral_id     # the group-1 mineral class per pixel
+      class_table:                # the product's own class table, read from every granule
+        source: embedded          # embedded in the file, never a checked-in CSV
+        path: /mineral_metadata   # the NetCDF group holding it
+        key: index                # the column the pixel values refer to
+        attributes: [name, record, library, group, url]   # matched on these, never on the integer
+    mineral_depth: {collection: EMITL2BMIN, var: group_1_band_depth}   # absorption depth of that class
+    frcov:                        # ORTHO-NATIVE (12 section 2): already on a map grid, so no GLT
+      collection: EMITL2BFRCOV    #   and no KD-tree - the framework warps it onto the block.
+      asset: FRCOVBARE            #   Cached once per (granule, tile), like a GLT, and windowed
+      var: EMIT_L2B_FRCOVBARE     #   per block: warping per block would repeat it hundreds of times.
+      resampling: bilinear        #   REQUIRED for an ortho role and refused for a sensor one. The
+                                  #   source is ~60 m against our 1 arcsec, so this upsamples by
+                                  #   1.95x; bilinear because a cover fraction is continuous.
+  # Band indices are 0-BASED into the L1B OBS `obs` variable, whose bands are:
+  #   0 path length, 1 to-sensor azimuth, 2 to-sensor zenith, 3 to-sun azimuth,
+  #   4 to-sun zenith, 5 phase, 6 slope, 7 aspect, 8 cosine i, 9 UTC time,
+  #   10 earth-sun distance.
+  band_aliases:
+    view_zenith:  {role: geometry, band: 2}   # how far off nadir the sensor looked
+    solar_zenith: {role: geometry, band: 4}   # how high the sun was
+
+aux:                              # 05: data that is not an observation at all. Declared by URI and
+                                  # addressed by ALIAS, never by path - an undeclared read would
+                                  # make a cache key that lies, so the accessor refuses one.
+  landcover:
+    uri:                          # ESA WorldCover 10 m v200: public, anonymous, and delivered as
+                                  # 3 x 3 degree tiles - so an AOI wider than one of them needs
+                                  # several, mosaicked. These four span this 3 x 6 box with room
+                                  # over; one that does not reach a tile is skipped without being
+                                  # read, so naming a spare costs nothing.
+      - https://esa-worldcover.s3.eu-central-1.amazonaws.com/v200/2021/map/ESA_WorldCover_10m_2021_v200_N36W120_Map.tif
+      - https://esa-worldcover.s3.eu-central-1.amazonaws.com/v200/2021/map/ESA_WorldCover_10m_2021_v200_N36W117_Map.tif
+      - https://esa-worldcover.s3.eu-central-1.amazonaws.com/v200/2021/map/ESA_WorldCover_10m_2021_v200_N39W120_Map.tif
+      - https://esa-worldcover.s3.eu-central-1.amazonaws.com/v200/2021/map/ESA_WorldCover_10m_2021_v200_N39W117_Map.tif
+                                  # Composited later over earlier, so the ORDER is part of the
+                                  # source's identity: reorder them and it is a different artifact
+                                  # under a different key. Staged, digested and warped onto all 18
+                                  # tiles at PLAN time, so no worker ever opens them.
+    kind: categorical             # class labels, not numbers that can be averaged
+    resampling: mode              # REQUIRED, never defaulted (05 section 2). 10 m -> 1 arcsec is a
+                                  # 3.3x downsample, so `mode` (the commonest class in the cell)
+                                  # and `nearest` (whichever cell centre lands) genuinely differ -
+                                  # about 16k cells per tile. `mode` is the honest one here.
+
+granule_filter:
+  - {max_cloud_fraction: 0.8, on_missing: fail}   # drop granules more than 80 % cloudy; a missing value is an error
+
+pixel_mask:
+  - {ref: edge_trim, columns: 7}  # sensor-space: 7 detector columns at each cross-track edge
+  - {ref: landcover, exclude: [water, built-up, tree]}
+                                  # map-space, and the first mask that reads ancillary data. Classes
+                                  # are named, not numbered: a raw code is positional and silently
+                                  # means something else in the next version of the product.
+                                  # Only covers that CANNOT carry a surface mineral signal are
+                                  # dropped here - shrub and grass are the scorer's business,
+                                  # because "unusable" and "merely worse" are different statements.
+
+scorer:
+  ref: prefer_bare_earth          # within a month, the best-exposed, best-lit look wins each cell
+  params:
+    hard_floor: 0.65              # below this the grain-size retrieval falls apart: NaN, meaning
+                                  #   this observation may not occupy the cell at all
+    min_soil: 0.80                # the bar recommended for mosaicking. Kept SEPARATE from the
+                                  #   floor so 0.65-0.80 still ranks instead of being discarded
+    sun_weight: 0.25              # illumination breaks ties among comparable ground; it never
+                                  #   outranks cover, because a well-lit look at a bush still
+                                  #   does not see the rock
+
+snapshot:                         # what one month's snapshot holds, and how months are combined
+  name: emit-cmr-cuprite-bare-earth-v1
+  layers:
+    mineral_1:
+      kind: categorical
+      source: mineral
+      classes: source             # the granules' own class table; every granule must agree by fingerprint
+      aggregate: {method: vote, min_count: 2, ignore: [none], tie_break: highest_score}
+                                  # a cell needs 2 agreeing months; `none` (nothing identified) does not vote
+    depth_1:
+      kind: continuous
+      source: mineral_depth
+      aggregate: {method: median, conditional_on: mineral_1, spread: iqr}
+                                  # median depth over the months that voted for the winner; spread = IQR
+    view_zenith:
+      kind: continuous
+      source: view_zenith
+      aggregate: {method: none}   # carried per month, not delivered as a product band
+
+outputs:
+  bucket: ./out                   # the storage root: assets/, cache/, runs/, products/ hang off it
+  # gtiff, not cog, for the same reason as emit-cmr-nevada: this example exists to be looked at,
+  # and a paletted COG is not readable by macOS ImageIO. Six tiles make that matter more, not
+  # less - checking that the seams line up means opening all six. Delivered products use `cog`.
+  formats: [gtiff]
+  stac: true                      # a STAC item per product - so six items - and one collection per run
+  render:
+    mineral_1:
+      mapper: categorical         # colour each class from the legend
+      on_unmapped: grey           # a class the legend does not name is grey, not an error
+      alpha_from: {band: mineral_1_agreement, domain: [0.25, 1.0], range: [60, 255]}
+                                  # fade cells the months disagreed on
+
+budget:                           # checked before the plan opens or downloads anything (on_exceed: warn proceeds)
+  max_tiles: 18                   # 3 x 6. The baseline's 2 x 3 is the bottom-left corner of it
+  max_granules: 100               # 59 survive the cloud filter here; the ceiling still guards
+  max_vcpu_hours: 4
+  on_exceed: fail

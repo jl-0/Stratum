@@ -139,6 +139,29 @@ own ortho grid, so it has no sensor space to window and no `loc` array to KD-tre
 which space it produces, and the framework warps ortho-native roles onto the block grid directly —
 the cheapest possible input, and the reason FRCOV was worth accepting as a first-class role.
 
+**As built** (`stratum/ancillary`, `stratum/resolve/observation.py::read_ortho_roles`). Four
+things it is worth being precise about, because "already on a map grid" is easy to over-read:
+
+- **It is a warp, not a crop.** [observed] 2026-09-15: FRCOV's cell is 0.000542232520256367°,
+  the EMIT ortho lattice exactly — so FRCOV, OBS and MIN do share one lattice. But against a
+  one-arcsecond run grid that is a ratio of 1.952, not an integer, so it resamples. "On the same
+  grid" in the tag-up notes means *EMIT's* grid, not ours.
+- **The reader hands back a location, not pixels.** `ortho_source(ctx, var) -> OrthoSource(uri,
+  band, nodata, dtype)`; the framework does the geometry. A reader that warped for itself would
+  be a reader that had to know what a tile is, which is the seam this spec exists to keep shut.
+  `read()` on an ortho reader raises, naming this section.
+- **The warp is cached per (granule, role, tile)**, exactly like a GLT, and windowed per block.
+  Warping inside the block read path would repeat it once per block, per epoch, per granule —
+  measured on the Cuprite 2 × 3 set, that is the difference between a 143 s resolve stage and a
+  9.9 s one.
+- **`resampling` is required on an ortho role** and refused on a sensor one, under
+  [05 §2](05-ancillary-data.md)'s declared-never-defaulted rule. A role's space is resolved by the
+  planner from the registered reader and recorded in `plan.json`, so no worker instantiates a
+  reader merely to decide how to read a role.
+
+A run still needs at least one sensor role: the GLT is what decides which granules reach a block,
+and an all-ortho run is refused at plan time.
+
 ---
 
 ## 3. `GranuleReader`

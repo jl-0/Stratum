@@ -256,6 +256,8 @@ def test_outputs_are_validated_at_plan_time(root: Path) -> None:
         plan_run(write_manifest(root / "bad.yaml", outputs=bad))
     with pytest.raises(PlanError, match="netcdf"):
         plan_run(write_manifest(root / "nc.yaml", outputs={**outputs, "formats": ["cog", "netcdf"]}))
-    with pytest.raises(PlanError, match="aux data is not in this slice"):
+    # aux runs now, but only from a scheme the asset store can stage: a run must never depend
+    # on an access path that is not built (12 section 4)
+    with pytest.raises(PlanError, match="s3.* is not supported"):
         plan_run(write_manifest(root / "aux.yaml", aux={
             "slope": {"uri": "s3://x/slope.tif", "kind": "continuous", "resampling": "bilinear"}}))

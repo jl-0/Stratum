@@ -19,6 +19,7 @@ class EdgeTrim:
 
     space = "sensor"
     required_roles: tuple[str, ...] = ()
+    required_aux: tuple[str, ...] = ()
 
     def __init__(self, columns: int = 7) -> None:
         if columns < 5:
@@ -44,6 +45,7 @@ class SlitDust:
 
     space = "sensor"
     required_roles: tuple[str, ...] = ()
+    required_aux: tuple[str, ...] = ()
 
     def __init__(self, columns: int = 3) -> None:
         self.columns = columns
@@ -61,6 +63,7 @@ class L2AStandard:
 
     space = "map"
     required_roles = ("mask",)
+    required_aux: tuple[str, ...] = ()
 
     #: flag keyword -> the band name the product carries; matched case-insensitively
     BANDS: Mapping[str, str] = {
@@ -106,6 +109,7 @@ class L2AStandard:
 class SoilFraction:
     space = "map"
     required_roles = ("frcov",)
+    required_aux: tuple[str, ...] = ()
 
     def __init__(self, min_soil: float = 0.65) -> None:
         self.min_soil = min_soil
@@ -114,4 +118,56 @@ class SoilFraction:
         return obs["frcov"] >= self.min_soil
 
 
-__all__ = ["EdgeTrim", "L2AStandard", "SlitDust", "SoilFraction"]
+class Landcover:
+    """Drop cells whose land cover is not ground worth mapping, from a declared aux raster.
+
+    The first mask that reads ancillary data rather than the granule. `classes` names what to
+    EXCLUDE, by name rather than by integer, for the reason 11 section 9 gives for mineral
+    classes: a raw value is positional and silently means something else in the next version,
+    while a name either matches or fails loudly.
+
+    Defaults to the three covers that cannot carry a useful surface mineral signal - open water,
+    built-up, and closed tree canopy - and deliberately not to the vegetated classes, which are
+    the scorer's business: "this pixel is unusable" and "this pixel is merely worse" are
+    different statements and mixing them is the mistake 04 section 3 exists to prevent.
+
+    Codes are ESA WorldCover's (10 m, v100/v200), the map this ships against. A different
+    landcover product means a different `codes` mapping, which is a parameter and not a fork.
+    """
+
+    space = "map"
+    required_roles: tuple[str, ...] = ()
+    required_aux = ("landcover",)
+
+    #: ESA WorldCover class name -> code. 0 is the product's nodata and is never a class.
+    CODES: Mapping[str, int] = {
+        "tree": 10, "shrubland": 20, "grassland": 30, "cropland": 40, "built-up": 50,
+        "bare": 60, "snow-ice": 70, "water": 80, "wetland": 90, "mangrove": 95,
+        "moss-lichen": 100,
+    }
+
+    def __init__(self, alias: str = "landcover",
+                 exclude: tuple[str, ...] = ("water", "built-up", "tree"),
+                 on_missing: str = "keep") -> None:
+        unknown = [c for c in exclude if c not in self.CODES]
+        if unknown:
+            raise ValueError(f"Landcover: unknown class(es) {unknown}; choose from "
+                             f"{sorted(self.CODES)}")
+        if on_missing not in ("keep", "reject"):
+            raise ValueError("Landcover: on_missing is 'keep' or 'reject'")
+        self.alias = alias
+        self.exclude = tuple(exclude)
+        self.on_missing = on_missing
+        self.required_aux = (alias,)
+
+    def valid(self, obs: ObsWindow, aux: AuxAccessor) -> np.ndarray:
+        cover = np.asarray(aux.raster(self.alias))
+        ok = np.ones(cover.shape, dtype=bool)
+        for name in self.exclude:
+            ok &= cover != self.CODES[name]
+        if self.on_missing == "reject":
+            ok &= cover != 0        # 0 is the product's nodata, not a class
+        return ok
+
+
+__all__ = ["EdgeTrim", "L2AStandard", "Landcover", "SlitDust", "SoilFraction"]

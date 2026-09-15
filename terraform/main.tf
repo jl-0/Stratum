@@ -37,6 +37,13 @@ provider "aws" {
 
 data "aws_caller_identity" "current" {}
 
+# Deployment level: the viewer reads its CIDR today, and the data plane will. Absent a `vpc_id`
+# nothing that needs a network is created, and this lookup does not happen.
+data "aws_vpc" "this" {
+  count = var.vpc_id != "" ? 1 : 0
+  id    = var.vpc_id
+}
+
 locals {
   account_id  = data.aws_caller_identity.current.account_id
   data_bucket = "stratum-${var.deployment}-${data.aws_caller_identity.current.account_id}"

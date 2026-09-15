@@ -61,6 +61,13 @@ echo
 echo "pushed  ${IMAGE}"
 echo "digest  ${DIGEST}"
 echo
-echo "This is what the deployment pins. Record it:"
-echo "    echo 'STRATUM_IMAGE_DIGEST=${DIGEST}' >> .env      # replacing any earlier line"
+echo "This is what the deployment pins. Record it in .env, replacing any earlier line:"
+echo
+echo "    STRATUM_IMAGE_DIGEST=${DIGEST}             # the worker, and the viewer with it"
+echo
+echo "One image, two pins. To move the viewer WITHOUT repointing a worker you have frozen,"
+echo "leave STRATUM_IMAGE_DIGEST alone and set the viewer's instead:"
+echo
+echo "    STRATUM_VIEWER_IMAGE_DIGEST=${DIGEST}      # the viewer only"
+echo
 echo "then  make stratum-infrastructure"

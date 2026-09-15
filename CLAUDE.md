@@ -128,6 +128,29 @@ Established by reading code and data. Do not re-derive; do not assume the opposi
   half-cell and forward-scatter are each ruled out — do not re-propose them. Adopting is the
   producer's registration, not a faster route to ours —
   [`heritage.md`](docs/notes/heritage.md), "The EMIT ortho lattice".
+- **FRCOV is on EMIT's ortho lattice, not ours.** Cell 0.000542232520256367° &mdash; the same one
+  lattice as OBS and MIN &mdash; which against a one-arcsecond grid is a ratio of 1.952, so the
+  ortho role path is a genuine resample and not an `adopt`-style crop. `resampling` is required
+  on an ortho role and refused on a sensor one. The warp is cached per (granule, role, tile) like
+  a GLT; warping per block would repeat it hundreds of times (measured: 143 s vs 9.9 s of resolve
+  over the Cuprite 2 × 3 set). Its `var` is the band DESCRIPTION (`EMIT_L2B_FRCOVBARE`), not an
+  index and not `soil`.
+- **FRCOV costs no granules but a lot of coverage.** [observed] 2026-09-15 over Cuprite: 41 of 45
+  granules have FRCOV and they are exactly the 41 that survive the cloud filter. But the median
+  bare-soil fraction is **0.53** at Cuprite, so `hard_floor: 0.65` admits only 29.6 % of covered
+  cells and drops the vote rate from 62.4 % to 19.7 %. That is the tag-up's "NPV
+  false-positive happy" caveat in numbers, not a bug &mdash; open with the science team.
+- **Aux is `raster()` only, and the planner warps it.** Static `https://`/`file://` sources, one
+  URI or a LIST of them (a global raster ships as a tile set, so any AOI wider than one tile needs
+  several composited later-over-earlier; the digest is over the parts in order, so reordering is a
+  different artifact),
+  staged and digested at plan time, warped once per tile because the artifact cache is shared
+  while the asset cache is node-local. Keys carry a content **digest**, not the ETag (06 §2 says
+  etag; 05 §6 records why the code differs), and carry every alias a plugin DECLARED, read or
+  not, because the snapshot key is built before the scorer runs. `temporal` date-keying is
+  refused: it needs a listing of what exists, and a run never queries a catalogue.
+- **A sensor-space mask may not declare `required_aux`.** Aux is on the block grid by definition;
+  resolve hands sensor-space masks `NullAux` and `validate_static` refuses the combination.
 - **Masks run in resolve, not regrid.** Regrid reads `loc` only and the GLT key has no mask term.
   Sensor-space masks apply to the sensor window before the gather, map-space masks to the block
   after it — [`03` §5](docs/specs/03-regrid-glt.md), [`12` §2](docs/specs/12-data-access.md).
@@ -153,7 +176,8 @@ Established by reading code and data. Do not re-derive; do not assume the opposi
   the role is `{collection: EMITL1BRAD, asset: OBS}`, and `patterns` lists only the OBS asset.
   `EMITL2AMASK` is published at collection version `002` (the mask role pins `version: "002"`).
   `EMITL2BFRCOV.001` is per-fraction GeoTIFFs (`FRCOVBARE`/`PV`/`NPV` + `UNC` twins, `FRCOVQC`),
-  not NetCDF, and has no reader yet. Verified against CMR 2026-09-02.
+  not NetCDF, read by `L2BFrcovTiff` as an **ortho-native role** (12 §2). Verified against CMR
+  2026-09-02.
 - **`patterns` is the one shape for every source**, `{collection: {asset: glob}}`. Locally the
   glob runs on disk; against CMR it is an `fnmatch` over each record's file names, and a file
   matching no glob is neither indexed nor downloaded — that rule, not a special case, is what
@@ -195,6 +219,36 @@ Established by reading code and data. Do not re-derive; do not assume the opposi
 - **The EDL secret's *name* is configuration; its value never is.** Anything in a Lambda's
   `environment` block is in Terraform state and readable by `lambda:GetFunction`. The handler
   fetches the value at run time, once per container — [`08 §5`](docs/specs/08-execution.md).
+- **The products tree is a STAC catalogue, and that is the viewer's only contract.**
+  `stratum preview` and the deployed viewer read `collection.json`, follow the item links and draw
+  whatever assets an item declares - so a run that delivers a new band needs no viewer change.
+  Nothing else may learn the products layout; `preview/catalog.py` is the one module that knows it.
+  Whether a band is categorical comes from the asset's own `classification:classes` (the STAC
+  Classification extension), never from its key - `mineral_1_runner_up` is categorical and
+  `mineral_1_agreement` is a fraction, and both start with `mineral_1`.
+  `formats: [cog]` does build overviews (verified 2026-09-15, `rio_copy` through GDAL's COG
+  driver); `gtiff` writes strips with none, which is why the viewer renders tiles with rasterio
+  rather than asking a browser to range-read them.
+- **The viewer is a server, never a static page in the bucket.** A browser cannot sign an S3
+  request, so serving products straight to one means anonymous `GetObject` on a prefix that sits
+  beside `cache/` and `runs/` behind a public access block - not available at this site. The
+  Fargate task (`terraform/ecs.tf`, `make viewer-up`) signs its own reads with the task role and
+  speaks plain HTTP to the VPC. It has **no authentication**; the security group is the control, and
+  the root *creates* that group rather than asking for one, and the control is the **port, not the
+  source**: the viewer's port in from anywhere that can route to the task, 443 and DNS out, nothing
+  else, and no public IP ever. The viewer has no network inputs of its own. `STRATUM_VPC_ID` is deployment-level - one VPC for
+  everything of ours that needs a network, the data plane included when it arrives - while subnets
+  and security groups stay per workload and default from it. The Lambda worker is **not**
+  VPC-attached and naming a VPC does not attach it: it downloads granules from the DAAC over the
+  public internet, so a VPC would mean a NAT gateway and an ENI per concurrent execution.
+- **One image, two pins.** The viewer runs the *same* image as the worker - no Dockerfile change,
+  because `docker/entrypoint.sh` runs any command outside the Lambda runtime. Measured: the image
+  is the pixi environment (botocore 124 MB, pandas 77, scipy 75, duckdb 60) and our own source is
+  732 KB of it, editable-installed; a viewer-only image would drop ~184 MB of 1.2 GB and buy a
+  second GDAL that could disagree with the one that wrote the pixels. So what is separated is
+  *when a digest moves*, not what is in it: `viewer_image_digest` defaults to `image_digest`, and
+  setting it lets a viewer rebuild leave a frozen worker alone. `make viewer-up` is a start
+  button - it runs the applied digest, never the working tree.
 - **Wrap SpectralUtil, never fork it.** EMIT-AMD depends on a personal fork for a CLI upstream now
   ships; do not repeat that.
 
@@ -210,6 +264,9 @@ several agree. Everything domain-specific lives in `stratum_emit`. If you find y
 ```
 src/stratum/       the framework - no EMIT, Tetracorder or mineral knowledge, ever
                    its own distribution; registers only the two catalogue sources
+  preview/         the product viewer: `stratum preview` (rasterio tiles) and the same three
+                   static files a deployed viewer serves. Reads products, writes nothing,
+                   and takes no part in a run
 plugins/           plugin distributions, installed beside the framework, never imported by it
   stratum-emit/    the EMIT plugin: readers, instrument masks, mineral scorers
                    (`src/stratum_emit/` + its own pyproject.toml carrying the entry points)
@@ -219,7 +276,7 @@ tests/             pytest; fixtures resolve from STRATUM_TRIAL_DATA / STRATUM_FI
 examples/          example manifests and classes files - configuration, not core
 docs/index.html    site landing page (GitHub Pages serves docs/)
 docs/guide/        concepts, running, reading-data, algorithms, plugins, caching,
-                   scaling                                          <- how to use it
+                   viewing, scaling                                 <- how to use it
 docs/reference/    manifest, types, cli                             <- field/API reference
 docs/developer/    codebase, lifecycle, objects, extending, working <- how to CHANGE it
 docs/decisions/    ADR digest (HTML) + the ADRs themselves (Markdown)

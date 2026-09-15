@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Stratum preview</title>
+<!-- Pinned to exact versions, jsDelivr, classic scripts - the same rule the design site keeps
+     for Mermaid. A range silently changes what renders; a module build would need a server. -->
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.css">
+<link rel="stylesheet" href="viewer.css">
+</head>
+<body>
+
+<div id="map" role="application" aria-label="Product map"></div>
+
+<aside id="panel">
+  <header>
+    <h1><span class="glyph" aria-hidden="true"></span> Stratum</h1>
+    <p id="root" class="muted">loading…</p>
+  </header>
+
+  <label for="run">Run</label>
+  <select id="run"></select>
+  <p id="runmeta" class="muted"></p>
+
+  <label for="layer">Layer</label>
+  <select id="layer"></select>
+  <p id="layermeta" class="muted"></p>
+
+  <label for="opacity">Opacity <output id="opacityval">100%</output></label>
+  <input id="opacity" type="range" min="0" max="100" value="100">
+
+  <div id="ramprow" hidden>
+    <label for="ramp">Ramp</label>
+    <select id="ramp"></select>
+  </div>
+
+  <label for="basemap">Basemap</label>
+  <select id="basemap">
+    <option value="osm">OpenStreetMap</option>
+    <option value="esri" selected>Esri imagery</option>
+    <option value="none">None</option>
+  </select>
+
+  <label><input id="tiles" type="checkbox" checked> Show tile outlines</label>
+
+  <div id="legend"></div>
+  <p id="status" class="muted"></p>
+</aside>
+
+<script src="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="viewer.js"></script>
+</body>
+</html>

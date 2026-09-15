@@ -145,6 +145,17 @@ arrays; in block space they are plain arrays and <code>valid</code> is beside th
 
     @property
     <span class="k">def</span> granule_index(self) -&gt; GranuleFrame: ...</code></pre>
+<p>Addressed by <strong>manifest alias, never URI</strong>. An undeclared alias raises; it does
+not fall back to opening a path.</p>
+<div class="warn">
+  <span class="label">Only <code>raster()</code> is built</span>
+  <p>And only for static sources. <code>vector</code>, <code>features</code>,
+  <code>distance</code>, <code>table</code> and <code>granule_index</code> raise, naming
+  <a href="../specs/05-ancillary-data.md">05 &sect;3</a>, as does <code>raster(alias, date=)</code>.
+  The accessor is built per block and holds the warp keys the snapshot key was built from, so it
+  cannot serve an alias the key does not name. A run with no aux, and every sensor-space
+  <code>PixelMask</code>, gets <code>NullAux</code>, which refuses everything.</p>
+</div>
 
 <p>Everything comes back windowed to your block, on your block's grid and CRS, already cached. You
 never reproject, resample or window anything.</p>

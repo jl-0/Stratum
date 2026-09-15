@@ -22,17 +22,21 @@ from typing import Any
 from urllib.parse import urlparse
 
 import pandas as pd
+import rasterio
 import yaml
 from rasterio.warp import transform_bounds
 
 from stratum.access import (
     AssetStore,
+    AssetStoreError,
     CachedAsset,
     CMRSource,
     LocalSource,
     asset_cache_for,
     reader_for,
+    to_uri,
 )
+from stratum.ancillary import AuxSource, aux_key_for, sources_digest, warp_aux_tile
 from stratum.cache import CacheRoot
 from stratum.classes import Enumeration, EnumerationError, Remap, identity_enumeration
 from stratum.filters import FilterError, FilterReport, apply_filters, build_filters
@@ -455,6 +459,86 @@ def _matches(value: Any, wanted: Any, tolerance: float | None) -> bool:
     return value == wanted or str(value).strip() == str(wanted).strip()
 
 
+def stage_aux(m: Manifest, store: AssetStore, manifest_dir: Path | None = None
+              ) -> dict[str, AuxSource]:
+    """Stage, digest and open every declared aux source (05 section 5).
+
+    Three things this buys, and they are the whole reason declaration is mandatory:
+
+    1. A typo in a DEM path fails here, before compute is provisioned - not in 4,000 concurrent
+       workers.
+    2. The bytes are local before any worker runs, so "a run never depends on third-party
+       uptime" (05 section 6, question 1) is a property of the code.
+    3. The source's CONTENT enters the cache key, so replacing a file in place under a stable
+       URI invalidates correctly (06 section 3, rule 4).
+
+    The digest is of the staged bytes rather than the server's ETag, which 06 section 2 names:
+    `AssetStore` never reads a response ETag, an aux file carries no catalogue checksum, and a
+    multipart ETag hashes part-hashes rather than content. The ETag is recorded beside it as
+    explanatory metadata when the caller knows one.
+    """
+    sources: dict[str, AuxSource] = {}
+    problems: list[str] = []
+    for alias, spec in m.aux.items():
+        uris = spec.uris
+        paths: list[Path] = []
+        etags: list[str] = []
+        for uri in uris:
+            try:
+                if "://" not in uri or uri.startswith("file://"):
+                    bare = uri.removeprefix("file://")
+                    local = (manifest_dir / bare) if manifest_dir is not None \
+                        else resolve_local(m, bare, f"aux.{alias}.uri")
+                    handle = store.open(to_uri(Path(local).resolve()))
+                else:
+                    handle = store.open(uri)
+                path = handle.path()
+                if path is None:
+                    raise AssetStoreError(f"{uri} did not stage to a local file")
+                with rasterio.open(str(path)) as src:
+                    if src.crs is None:
+                        problems.append(f"aux.{alias}: {uri} has no CRS, so it cannot be warped "
+                                        "onto the grid (05 section 2)")
+                        continue
+                paths.append(Path(path))
+                if handle.etag:
+                    etags.append(str(handle.etag))
+            except (AssetStoreError, OSError, rasterio.errors.RasterioIOError) as e:
+                problems.append(f"aux.{alias}: {uri} could not be read: {e}")
+        if paths and len(paths) == len(uris):
+            # the mosaic's identity is the digest of its parts IN ORDER: later sources win where
+            # they overlap, so reordering is a different artifact (05 section 2)
+            sources[alias] = AuxSource(
+                alias=alias, uri=uris[0] if len(uris) == 1 else f"{uris[0]} (+{len(uris) - 1})",
+                paths=tuple(paths), digest=sources_digest(paths), kind=spec.kind,
+                resampling=str(spec.resampling), etag=",".join(etags) or None)
+    if problems:
+        raise PlanError("aux sources are not usable (05 section 5):\n  - "
+                        + "\n  - ".join(problems))
+    return sources
+
+
+def warp_aux_for_tiles(cache: CacheRoot, tiles: Sequence[TileRef],
+                       sources: Mapping[str, AuxSource]) -> int:
+    """Warp every declared aux source onto every tile the run will touch, at PLAN time.
+
+    05 section 5 point 2 makes this an option; the deployment makes it the only sane default.
+    The node-local asset cache is per worker - a Lambda's own disk - so a worker that fetched aux
+    itself would pull the whole source once per invocation, hundreds of times. The artifact cache
+    is shared, so warping here means no worker ever opens the source at all: they window-read a
+    tile someone already warped. Locally it costs a second and makes resolve's first block
+    identical in cost to its last.
+    """
+    warped = 0
+    for tile in tiles:
+        for source in sources.values():
+            key = aux_key_for(cache, tile, source)
+            if not cache.hit(key):
+                warp_aux_tile(cache, tile, source)
+                warped += 1
+    return warped
+
+
 def inspect_granules(m: Manifest, refs: Mapping[str, GranuleRef], readers: Mapping[str, Any],
                      needed: Sequence[str], geolocation_role: str, store: AssetStore) -> Inspection:
     """The data-dependent checks of 09 section 5 / 12 section 7 against real granules, and the
@@ -498,15 +582,18 @@ def inspect_granules(m: Manifest, refs: Mapping[str, GranuleRef], readers: Mappi
                                 f"{uri}; it has {sorted(variables)} (12 section 7)")
                 continue
             specs[name] = variables[role.var]
-        read_shapes = {r: tuple(specs[r].shape[:2]) for r in needed if r in specs}
+        # only SENSOR roles share a sensor array, so only they must agree on its shape; an
+        # ortho role's `shape` is its own ortho raster and would always disagree (12 section 2)
+        sensor_needed = [r for r in needed
+                         if getattr(readers[roles[r].collection], "space", "sensor") == "sensor"]
+        read_shapes = {r: tuple(specs[r].shape[:2]) for r in sensor_needed if r in specs}
         if len(set(read_shapes.values())) > 1:
             problems.append(f"roles read together disagree on the sensor shape {read_shapes}; one "
                             "GLT indexes one sensor array (03 section 3)")
-        for r in needed:
-            if getattr(readers[roles[r].collection], "space", "sensor") != "sensor":
-                problems.append(f"inputs.roles.{r}: collection {roles[r].collection!r} is "
-                                "ortho-native; reading an ortho role is not in this slice "
-                                "(12 section 2)")
+        if not sensor_needed:
+            problems.append(
+                f"every role read ({sorted(needed)}) is ortho-native; a run still needs a sensor "
+                "role to build the GLT that decides which granules reach a block (03 section 3)")
 
         # -- `adopt` needs the product's own lookup table, on this run's lattice (03 section 3).
         # One header answers it for the whole run, so a grid that cannot be adopted fails here
@@ -535,6 +622,8 @@ def inspect_granules(m: Manifest, refs: Mapping[str, GranuleRef], readers: Mappi
 
         if problems:
             raise PlanError("plan-time validation failed:\n  - " + "\n  - ".join(problems))
+        # read_shapes holds SENSOR roles only, so this can never pick up an ortho raster's size
+        # and hand it to EdgeTrim as the detector width
         sensor_shape = read_shapes.get(geolocation_role) or next(iter(read_shapes.values()))
 
         # -- aliases (11 section 5)
@@ -721,7 +810,17 @@ def plan_run(manifest_path: Path | str, out_dir: Path | str | None = None,
             readers[role.collection] = reader_for(role.collection, overrides)
         except (LookupError, ImportError, AttributeError) as e:
             raise PlanError(f"inputs.roles.{name}: {e}") from None
-    geolocation_role = m.geolocation_role(lambda c: getattr(readers[c], "space", "sensor"))
+    try:
+        geolocation_role = m.geolocation_role(lambda c: getattr(readers[c], "space", "sensor"))
+    except ValueError as e:
+        # every role is ortho-native. The GLT is what decides which granules reach a block
+        # (03 section 3), and only a sensor role can build one - so this is a real limit, not a
+        # missing default, and it says so rather than surfacing a ValueError from the model.
+        raise PlanError(
+            f"{e}\n\nEvery role this run reads is ortho-native (already on a map grid). A run "
+            "still needs one sensor-space role: the GLT built from its geolocation is what "
+            "decides which granules reach which block. Mosaicking a set of already-orthorectified "
+            "files with no swath input is not built (12 section 2).") from None
 
     # -- the index (02 sections 3, 6): built when absent, and never planned against unless
     #    its recorded scope covers this manifest (a wider AOI or time window is a rebuild)
@@ -766,7 +865,14 @@ def plan_run(manifest_path: Path | str, out_dir: Path | str | None = None,
     scorer = instantiate("scorer", m.scorer.ref, m.scorer.params)
     masks = [instantiate("mask", mk.ref, mk.params) for mk in m.pixel_mask]
     needed = roles_needed(m, scorer, masks, geolocation_role)
-    bindings = {name: RoleBinding.from_spec(role) for name, role in m.inputs.roles.items()}
+    # the reader decides a role's SPACE (12 section 3 rule 1), and the planner records it so no
+    # worker has to instantiate a reader to find out how to read a role
+    bindings = {
+        name: dataclasses.replace(
+            RoleBinding.from_spec(role),
+            space=str(getattr(readers[role.collection], "space", "sensor")),
+            resampling=role.resampling)
+        for name, role in m.inputs.roles.items()}
     lacking = [gid for gid, ref in refs.items()
                if any(role_uri(ref, bindings[r]) is None for r in needed)]
     for gid in lacking:
@@ -847,6 +953,13 @@ def plan_run(manifest_path: Path | str, out_dir: Path | str | None = None,
     inspection = inspect_granules(m, refs, readers, needed, geolocation_role, store)
     max_distance = resolve_max_distance(grid, m.grid.max_distance)
 
+    # -- aux, staged and warped HERE rather than in a worker (05 section 5). A typo fails before
+    #    compute is provisioned; the bytes are local before any worker runs; and because the
+    #    artifact cache is shared while the asset cache is node-local, warping every tile now
+    #    means no worker ever opens the source.
+    aux_sources = stage_aux(m, store)
+    aux_warped = warp_aux_for_tiles(CacheRoot(ws), tiles, aux_sources)
+
     # -- outputs, validated against the resolved schema now, not after regrid has run
     #    (07 section 3 "declared in the manifest and validated at plan time"; 12 section 7)
     outputs = outputs_document(m)
@@ -861,7 +974,7 @@ def plan_run(manifest_path: Path | str, out_dir: Path | str | None = None,
         aliases=inspection.aliases, geolocation_role=geolocation_role, schema=inspection.schema,
         scorer=scorer, masks=masks, remaps=inspection.remaps, max_distance=max_distance,
         regrid_method=m.grid.regrid_method, regrid_algo_version=REGRID_ALGO_VERSION,
-        reader_overrides=overrides)
+        reader_overrides=overrides, aux_sources=aux_sources)
 
     # -- work lists (plan section 4)
     work = build_work_lists(ctx, refs, tiles, epochs, periods, aoi_boxes, geolocation_role)
@@ -884,6 +997,11 @@ def plan_run(manifest_path: Path | str, out_dir: Path | str | None = None,
                     "bytes": int(sum(a["bytes"] for a in inspection.staged)),
                     "uris": [a["uri"] for a in inspection.staged]},
         "class_tables": inspection.class_tables,
+        # what a plugin may reach, and the CONTENT it was keyed on (05 section 5, 06 section 2)
+        "aux": {"sources": {a: {"uri": src.uri, "kind": src.kind,
+                                "resampling": src.resampling, "digest": src.digest}
+                            for a, src in sorted(aux_sources.items())},
+                "tiles_warped": aux_warped},
         "counts": counts,
     })
     write_plan(run_dir, doc)

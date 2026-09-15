@@ -340,6 +340,33 @@ manifest resolves it — which is what lets the same scorer run against a differ
 plugin declares a role the manifest does not define, the run fails at plan time rather than in
 several thousand workers.</p>
 
+<h3 id="roles-vs-aux">Roles are granules; aux is everything else</h3>
+
+<p>These are the two ways data reaches a cost function, and they are easy to confuse because a
+plugin sees both as arrays on its block.</p>
+
+<table>
+<thead><tr><th></th><th>A <strong>role</strong></th><th>An <strong>aux</strong> source</th></tr></thead>
+<tbody>
+<tr><td>What it is</td><td>An observation &mdash; part of the granule being scored</td><td>Anything else: a DEM, a landcover map, claim polygons</td></tr>
+<tr><td>Declared as</td><td><code>inputs.roles</code>: a collection, an asset, a variable</td><td><code>aux</code>: a URI, a kind, a resampling method</td></tr>
+<tr><td>Found through</td><td>The frozen index, per granule</td><td>The manifest, once for the run</td></tr>
+<tr><td>Read as</td><td><code>obs["frcov"]</code></td><td><code>aux.raster("landcover")</code></td></tr>
+<tr><td>Varies per</td><td>Granule</td><td>Nothing &mdash; it is the same map for every observation</td></tr>
+</tbody>
+</table>
+
+<p>The test is whether the data is <em>of the acquisition</em>. EMIT's L2B fractional cover is a
+role, even though it is a different collection from the mineral product, because it is the same
+overpass of the same ground at the same moment. ESA WorldCover is aux, because it would be the
+same map whichever granule you were scoring.</p>
+
+<p>A role can still need warping: <strong>ortho-native</strong> products such as L2B FRCOV ship
+already on a map grid, so they have no sensor geometry and no GLT and the framework warps them
+onto the block directly. That makes them look like aux from the inside &mdash; but they are still
+per-granule, still found through the index, and still carry the granule's checksum into the cache
+key.</p>
+
 <h2 id="spaces">Coordinate spaces</h2>
 
 <p>Three spaces exist, and every array you receive tells you which one it is in.</p>

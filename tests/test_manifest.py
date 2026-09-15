@@ -113,11 +113,15 @@ def test_example_manifest_loads_and_derives():
                                                   "conditional_on": "mineral_1", "spread": "iqr"}
     assert m.geolocation_role() == "geometry"
     assert m.aux["snow"].max_age is not None and str(m.aux["snow"].max_age) == "P3D"
-    # Every reference resolves (the zone registry included). What remains is exactly what this
-    # slice does not run: the aux block, the scorer's required_aux, `formats: [netcdf]`.
+    # Every reference resolves (the zone registry included), and `cleanest_nadir`'s required_aux
+    # is now satisfied by the aux block - it is declared, which is all static validation can
+    # check. What remains is what this slice still does not run, and the reasons are narrow:
+    # the placeholder s3:// URIs, `temporal` date-keying, and `formats: [netcdf]`.
     problems = validate_static(m)
-    assert problems and all("slice" in p for p in problems), problems
-    assert any(p.startswith("aux ['slope', 'snow']") for p in problems), problems
+    assert problems, "the design manifest is a target, not a runnable file"
+    assert not any("required aux" in p for p in problems), problems
+    assert any("aux.slope" in p and "s3" in p for p in problems), problems
+    assert any("aux.snow" in p and "temporal" in p for p in problems), problems
     assert any("'netcdf'" in p for p in problems), problems
 
 
@@ -435,15 +439,30 @@ def test_hash_and_run_id_move_with_the_classes_file_content(tmp_path):
     assert s1["mineral_1"].lumping != s2["mineral_1"].lumping and s1.layers_hash != s2.layers_hash
 
 
-def test_this_slice_refuses_aux_and_netcdf_statically(tmp_path):
-    """First-slice plan section 1: what no worker can execute fails in `stratum validate`."""
+def test_this_slice_refuses_unreachable_aux_and_netcdf_statically(tmp_path):
+    """First-slice plan section 1: what no worker can execute fails in `stratum validate`.
+
+    Aux itself runs now, so the refusals are narrower - a scheme the asset store cannot stage,
+    and date templating that would need a catalogue listing. A DECLARED alias that a plugin
+    requires is no longer a problem at all, which is the point of the change.
+    """
     m = loaded(tmp_path, lambda d: d.update(
         aux={"slope": {"uri": "s3://x/slope.tif", "kind": "continuous", "resampling": "bilinear"}},
         scorer={"ref": "cleanest_nadir"}))
     problems = validate_static(m)
-    assert any(p.startswith("aux ['slope']") and "05" in p for p in problems), problems
-    assert any("required aux 'slope' is declared, but aux data is not in this slice" in p
-               for p in problems), problems
+    assert any("aux.slope" in p and "s3" in p and "12 section 4" in p for p in problems), problems
+    assert not any("required aux 'slope'" in p for p in problems), problems
+
+    # an alias a plugin requires but the manifest never declared is still refused, by name
+    m = loaded(tmp_path, lambda d: d.update(scorer={"ref": "cleanest_nadir"}))
+    assert any("required aux 'slope' is not declared" in p and "05 section 5" in p
+               for p in validate_static(m)), validate_static(m)
+
+    # date-keyed aux needs a listing of what exists, and a run never queries a catalogue
+    m = loaded(tmp_path, lambda d: d.update(aux={"snow": {
+        "uri": "https://example.invalid/snow/{date}.tif", "kind": "categorical",
+        "resampling": "nearest", "temporal": "nearest", "max_age": "P3D"}}))
+    assert any("temporal" in p and "02 section 6" in p for p in validate_static(m))
     m = loaded(tmp_path, lambda d: d["outputs"].update(formats=["cog", "netcdf"]))
     assert any("'netcdf'" in p and "07 section 2" in p for p in validate_static(m))
 

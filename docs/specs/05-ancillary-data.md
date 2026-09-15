@@ -140,7 +140,57 @@ file in place under a stable URI still invalidates correctly.
 
 ---
 
-## 6. Open questions
+## 6. As built
+
+`stratum/ancillary/` implements §1–§4 for rasters and nothing else. What is live, and what a
+manifest is refused for, as of 2026-09-15:
+
+| §3 call | State |
+|---|---|
+| `raster(alias)` | **Built.** Continuous and categorical, any source CRS and resolution. |
+| `raster(alias, date=)` / `epoch=` | Refused by name — see `temporal` below. |
+| `vector`, `features`, `distance`, `table`, `granule_index` | Refused, naming this section. |
+
+Four decisions worth recording, because the code and this page would otherwise disagree.
+
+**`temporal` is not built.** `nearest` and `previous` mean "the nearest date that *exists*",
+which requires enumerating what exists — and a run never queries a catalogue
+([02 §6](02-granule-index.md)). Honouring it means freezing an available-date list into the plan,
+which is a sub-feature in its own right and has no consumer yet. `AuxSpec` still validates the
+field; `validate_static` refuses a manifest that sets it.
+
+**Source identity is a content digest, not the ETag.** [06 §2](06-caching.md) names
+`source_etag`; the key carries `sha256` of the staged bytes instead. `AssetStore` never reads a
+response ETag, an aux file carries no catalogue checksum, and a multipart ETag hashes
+part-hashes rather than content. The digest is strictly stronger, works identically for
+`file://`, and needs no extra round-trip. The ETag is recorded beside it in provenance as
+explanatory metadata.
+
+**The planner warps, not the worker.** §5 point 2 offers plan-time warping as an option; it is
+the default, because the asset cache is node-local while the artifact cache is shared. A worker
+that fetched aux itself would pull the whole source once per invocation. Warping every tile in
+the AOI at plan time means no worker opens the source at all — six tiles of ESA WorldCover cost
+about three seconds.
+
+**A declared alias enters the key whether or not it is read.** §5's promise is enforced through
+the snapshot key, and that key is built *before* the scorer runs, so "what was actually read" is
+not knowable. Declaring a source you never read therefore costs spurious misses. That is the
+safe direction to err and the only computable rule.
+
+**A source may be several files.** `uri` takes a list, composited later-over-earlier, each
+contributing only where it has data; one that does not intersect a tile is skipped without being
+read. This is not a convenience — a global product is delivered as a tile set, and an AOI wider
+than one of those tiles cannot be covered otherwise. The digest that identifies the source is the
+digest of its parts *in order*, so reordering is a different artifact. There is no globbing: the
+URIs are written out, because discovering what a bucket holds is a listing, and §5 exists so that
+nothing about a run depends on what a remote directory happened to contain.
+
+**Schemes.** Aux is staged through `AssetStore`, so `https://` and `file://` work and `s3://` is
+refused — the same limit granule assets have ([12 §4](12-data-access.md)).
+
+---
+
+## 7. Open questions
 
 1. ~~Should `aux` support remote HTTP sources, or require staging into our bucket first?~~
    **Resolved:** staged. Aux is copied into the deployment's root first; a run never depends on

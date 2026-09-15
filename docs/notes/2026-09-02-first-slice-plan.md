@@ -27,7 +27,7 @@ The local cache root is a directory; nothing talks to S3.
 | Manifest models, validation, hash, `@ref` | Patch composition (`-p`) — parsed and refused |
 | Regrid by `kdtree` (wrapping SpectralUtil) | `warp_embedded` |
 | Resolve, `streaming` scorers | `stack` and `tile` capabilities |
-| Sensor- and map-space masks | Aux data — `AuxAccessor` exists, every declared alias raises "not implemented" |
+| Sensor- and map-space masks | Aux data — `AuxAccessor` exists, every declared alias raises "not implemented" *(superseded 2026-09-15: `raster()` is built; see [05 §6](../specs/05-ancillary-data.md))* |
 | Built-in schema-driven reducer, full vocabulary | `Reducer` plugins (resolved and refused) |
 | Publish: data COGs, `categorical`/`continuous` mappers, legend, STAC item, provenance | `threshold`/`composite` mappers, `stratum render` |
 | Trial run over tile (-118, 41), June 2026 | V002 parity against a real V002 cell — no V002 output is available locally; a SpectralUtil `build_obs_nc` parity run stands in |

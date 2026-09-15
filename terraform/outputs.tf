@@ -33,3 +33,29 @@ output "run_command" {
     "pixi run stratum run -m <manifest.yaml> --executor aws",
   ]) : "set STRATUM_IMAGE_DIGEST in .env and re-apply: no worker is deployed"
 }
+
+# --- the preview viewer -------------------------------------------------------------------------
+output "viewer_cluster" {
+  description = "ECS cluster the viewer task runs in. Null until vpc_id and an image digest are set."
+  value       = one(aws_ecs_cluster.viewer[*].name)
+}
+
+output "viewer_task_definition" {
+  description = "Task definition family:revision for the viewer. `make viewer-up` runs this."
+  value       = one(aws_ecs_task_definition.viewer[*].arn)
+}
+
+output "viewer_image_uri" {
+  description = "What the viewer task runs, by digest. Equals image_uri unless viewer_image_digest is set."
+  value       = local.deploy_viewer ? local.viewer_image_uri : null
+}
+
+output "viewer_network" {
+  description = "The awsvpc configuration `run-task` needs, from the site inputs."
+  value = local.deploy_viewer ? {
+    subnets          = data.aws_subnets.viewer[0].ids
+    security_groups  = [aws_security_group.viewer[0].id]
+    assign_public_ip = "DISABLED"
+    port             = var.viewer_port
+  } : null
+}

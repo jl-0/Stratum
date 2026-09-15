@@ -13,6 +13,7 @@ from typing import Literal
 import numpy as np
 
 from stratum.types import LocArray, SensorWindow
+from stratum_emit.readers.geotiff import GeoTIFFContext, GeoTIFFReader, L2BFrcovTiff
 from stratum_emit.readers.netcdf import EmitNetCDFReader, NetCDFContext
 
 # Source patterns for the delivered products (12 section 5): {collection: {asset: glob}}, the
@@ -66,25 +67,24 @@ class L2AMask(EmitNetCDFReader):
 
 
 class L2BFrcov(EmitNetCDFReader):
-    """Already orthorectified: no loc array, no KD-tree (12 section 2). The ortho-native read
-    path is out of the first slice, so `read` refuses; `open`/`variables` still work for
-    plan-time validation. The delivered EMITL2BFRCOV.001 is per-fraction GeoTIFFs
-    (`EMIT_L2B_FRCOVBARE_001_*.tif` etc., 12 section 5), not NetCDF; this class opens NetCDF
-    only, so the reader for the shipped files is not built."""
+    """The NetCDF form of EMITL2BFRCOV: already orthorectified, so no loc array and no KD-tree
+    (12 section 2). Kept for a NetCDF delivery; the SHIPPED EMITL2BFRCOV.001 is per-fraction
+    GeoTIFFs and is served by `L2BFrcovTiff`, which is what the entry point registers."""
 
-    collections = ("EMITL2BFRCOV",)
+    collections = ()
     space: Literal["sensor", "ortho"] = "ortho"
     band_names_var = None
 
     def read(self, ctx: NetCDFContext, var: str,
              window: SensorWindow | None = None) -> np.ma.MaskedArray:
         raise NotImplementedError(
-            "L2BFrcov is ortho-native; warping an ortho role onto the block grid is the "
-            "12 section 2 ortho path, not in the first slice")
+            "L2BFrcov is ortho-native: it has no sensor space to window. The framework warps an "
+            "ortho role onto the block grid (12 section 2); the delivered GeoTIFFs are read by "
+            "L2BFrcovTiff.")
 
     def geolocation(self, ctx: NetCDFContext) -> LocArray | None:
         return None
 
 
-__all__ = ["LOCAL_PATTERNS", "EmitNetCDFReader", "L1BRad", "L2AMask", "L2BFrcov", "L2BMin",
-           "NetCDFContext"]
+__all__ = ["LOCAL_PATTERNS", "EmitNetCDFReader", "GeoTIFFContext", "GeoTIFFReader", "L1BRad",
+           "L2AMask", "L2BFrcov", "L2BFrcovTiff", "L2BMin", "NetCDFContext"]

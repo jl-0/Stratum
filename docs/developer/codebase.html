@@ -139,6 +139,7 @@ flowchart TB
   index --> types
   reduce --> types
   hooks --> types
+  preview --> storage
   classDef leaf stroke-width:2px
   class types,plugins leaf
 </pre>
@@ -150,7 +151,7 @@ flowchart TB
 <thead><tr><th class="num">Level</th><th>Package</th><th>Imports from</th></tr></thead>
 <tbody>
 <tr><td class="num">0</td><td><code>types</code>, <code>plugins</code></td><td>&mdash; nothing in the repository</td></tr>
-<tr><td class="num">1</td><td><code>hooks</code>, <code>cache</code>, <code>classes</code>, <code>time</code>, <code>index</code>, <code>reduce</code>, <code>access</code></td><td><code>types</code> (and <code>plugins</code>, for <code>access</code>)</td></tr>
+<tr><td class="num">1</td><td><code>hooks</code>, <code>cache</code>, <code>classes</code>, <code>time</code>, <code>index</code>, <code>reduce</code>, <code>access</code>, <code>preview</code></td><td><code>types</code> (and <code>plugins</code>, for <code>access</code>; the <code>storage</code> module, for <code>preview</code>)</td></tr>
 <tr><td class="num">2</td><td><code>regrid</code>, <code>publish</code></td><td>level 0&ndash;1</td></tr>
 <tr><td class="num">3</td><td><code>resolve</code>, <code>manifest</code></td><td>level 0&ndash;2</td></tr>
 <tr><td class="num">4</td><td><code>filters</code></td><td><code>hooks</code>, <code>manifest</code>, <code>plugins</code></td></tr>
@@ -202,10 +203,10 @@ months and days only &mdash; no time components.</td><td><a class="src" data-sym
 granule's raw class table: the lumping from raw keys to product ids.</td><td><a class="src" data-sym="class Enumeration" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/classes.py#L74">Enumeration</a></td></tr>
 <tr><td><code>cache/</code></td><td>Content addressing: key construction, the
 <code>.inputs.json</code> sidecar, atomic file and directory writes,
-<code>explain</code>/<code>diff</code>.</td><td><a class="src" data-sym="def key(self, artifact: str, grid_id: str, tile: TileRef" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/cache/__init__.py#L90">CacheRoot.key</a></td></tr>
+<code>explain</code>/<code>diff</code>.</td><td><a class="src" data-sym="def key(self, artifact: str, grid_id: str, tile: TileRef" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/cache/__init__.py#L91">CacheRoot.key</a></td></tr>
 <tr><td><code>storage.py</code></td><td>The storage root, as one object: a local directory, or an
 <code>s3://</code> prefix with a node-local mirror. Everything above it is handed a real
-<code>pathlib.Path</code>, so no stage handles a URI.</td><td><a class="src" data-sym="class Workspace" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/storage.py#L125">Workspace</a></td></tr>
+<code>pathlib.Path</code>, so no stage handles a URI.</td><td><a class="src" data-sym="class Workspace" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/storage.py#L138">Workspace</a></td></tr>
 <tr><td><code>filters.py</code></td><td>The built-in <code>GranuleFilter</code> predicates and the
 <code>on_missing</code> policy machinery. Runs against the index at plan time, never against
 pixels.</td><td><a class="src" data-sym="def apply_filters" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/filters.py#L220">apply_filters</a></td></tr>
@@ -221,17 +222,17 @@ pixels.</td><td><a class="src" data-sym="def apply_filters" href="https://github
 <tbody>
 <tr><td><code>manifest/models.py</code></td><td>The Pydantic model of the whole manifest, about
 740 lines, <code>extra="forbid"</code> throughout so a misspelt key is an error rather than a
-silent default.</td><td><a class="src" data-sym="class Manifest(Strict)" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/manifest/models.py#L538">Manifest</a></td></tr>
+silent default.</td><td><a class="src" data-sym="class Manifest(Strict)" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/manifest/models.py#L566">Manifest</a></td></tr>
 <tr><td><code>manifest/validate.py</code></td><td>Every static check that needs no data:
 instantiating each named plugin, resolving each role, confirming the reducer can deliver the
-band names promised.</td><td><a class="src" data-sym="def validate_static" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/manifest/validate.py#L57">validate_static</a></td></tr>
+band names promised.</td><td><a class="src" data-sym="def validate_static" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/manifest/validate.py#L127">validate_static</a></td></tr>
 <tr><td><code>index/</code></td><td>The GeoParquet granule index: schema, build, merge, query,
 freeze, and the resolution from an index row to the <code>GranuleRef</code> a worker
 carries.</td><td><a class="src" data-sym="def build_index" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/index/build.py#L112">build_index</a></td></tr>
 <tr><td><code>access/sources.py</code></td><td>The two <code>GranuleSource</code>
 implementations. <code>LocalSource</code> walks a directory and reads each header;
 <code>CMRSource</code> bridges <code>earthaccess</code> and translates UMM-G into index
-rows.</td><td><a class="src" data-sym="class CMRSource" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/access/sources.py#L336">CMRSource</a></td></tr>
+rows.</td><td><a class="src" data-sym="class CMRSource" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/access/sources.py#L351">CMRSource</a></td></tr>
 <tr><td><code>access/store.py</code></td><td>Every worker's door to bytes: URI schemes, the
 node-local asset cache, checksum verification, retry, and the refusal to send an Earthdata
 session to an untrusted host.</td><td><a class="src" data-sym="class AssetStore" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/access/store.py#L280">AssetStore</a></td></tr>
@@ -249,12 +250,13 @@ process.</td><td><a class="src" data-sym="def earthdata_login" href="https://git
 <table>
 <thead><tr><th>Module</th><th>Owns</th><th>Start at</th></tr></thead>
 <tbody>
+<tr><td><code>ancillary/</code></td><td>One thing, used twice: warp a raster from any CRS and resolution onto a tile's exact grid, cache it per tile, and window it per block. Behind <code>AuxAccessor</code> for declared external sources, and behind the ortho-native role path for products that ship already orthorectified. Carries its own recorded module hash.</td><td><a class="src" data-sym="def warp_to_tile" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/ancillary/__init__.py#L132">warp_to_tile</a></td></tr>
 <tr><td><code>regrid/</code></td><td>Pure geometry: sensor <code>loc</code> arrays to a GLT by
 KD-tree, or a product's own embedded lookup table adopted onto the run's lattice. Also the
 recorded module hash that guards the algorithm version.</td><td><a class="src" data-sym="def regrid_granule_tile" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/regrid/__init__.py#L275">regrid_granule_tile</a></td></tr>
 <tr><td><code>resolve/</code></td><td>The block read path, masks, the gather, scoring, and the
 streaming argmax that produces one epoch snapshot. The densest package in the
-tree.</td><td><a class="src" data-sym="def resolve_block" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/resolve/block.py#L206">resolve_block</a></td></tr>
+tree.</td><td><a class="src" data-sym="def resolve_block" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/resolve/block.py#L249">resolve_block</a></td></tr>
 <tr><td><code>reduce/</code></td><td>The schema-driven built-in reducer: vote, best, and the
 continuous aggregations, plus the derivation of which bands a schema
 delivers.</td><td><a class="src" data-sym="def reduce_stack" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/reduce/builtin.py#L39">reduce_stack</a></td></tr>
@@ -273,17 +275,17 @@ record.</td><td><a class="src" data-sym="def publish_period" href="https://githu
 <tbody>
 <tr><td><code>plan/run.py</code></td><td>The plan stage end to end: load, validate, index, filter,
 freeze, budget-gate, inspect real granules, build the work lists. About a thousand lines and the
-largest module in the tree.</td><td><a class="src" data-sym="def plan_run" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/plan/run.py#L685">plan_run</a></td></tr>
+largest module in the tree.</td><td><a class="src" data-sym="def plan_run" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/plan/run.py#L774">plan_run</a></td></tr>
 <tr><td><code>plan/document.py</code></td><td>The serialisation seam: <code>plan.json</code>, the
 work lists, and the paired <code>*_to_doc</code> / <code>*_from_doc</code> functions that let a
-worker rebuild a planner's context from plain JSON.</td><td><a class="src" data-sym="class RunPlan" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/plan/document.py#L261">RunPlan</a></td></tr>
+worker rebuild a planner's context from plain JSON.</td><td><a class="src" data-sym="class RunPlan" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/plan/document.py#L273">RunPlan</a></td></tr>
 <tr><td><code>executors/worker.py</code></td><td>The portability seam: one handler per stage, and
 the single <code>exec_item</code> entry point every executor
 reduces to.</td><td><a class="src" data-sym="def exec_item" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/executors/worker.py#L189">exec_item</a></td></tr>
 <tr><td><code>executors/local.py</code></td><td>A spawn-context process pool over the work lists,
 the budget gate, and Finalize. <code>run_all</code> lives here and takes the stage runner as a
 parameter, so the stage order and Finalize are shared with every other
-executor.</td><td><a class="src" data-sym="def run_all" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/executors/local.py#L107">run_all</a></td></tr>
+executor.</td><td><a class="src" data-sym="def run_all" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/executors/local.py#L108">run_all</a></td></tr>
 <tr><td><code>executors/aws.py</code></td><td>The dispatch half of the cloud executor: a thread pool
 over <code>lambda:InvokeFunction</code>, writing the same outcome records. Imported only when
 <code>--executor aws</code> is asked for, so a local run never imports
@@ -292,9 +294,14 @@ boto3.</td><td><a class="src" data-sym="def run_stage(run_dir: Path | str, stage
 from Secrets Manager, run directory mirrored from the bucket, then the same
 <code>exec_item</code>.</td><td><a class="src" data-sym="def handler(event" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/executors/awslambda.py#L107">handler</a></td></tr>
 <tr><td><code>console.py</code></td><td>Terminal rendering of the plan report, via <code>rich</code>. <code>report.md</code> stays markdown because it is an artifact; only the screen view is rendered, and digests and absolute paths are abbreviated on the way there. Output is plain whenever stdout is not a tty, so pipes, CI and Lambda logs are unchanged.</td><td><a class="src" data-sym="def render_markdown" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/console.py#L68">render_markdown</a></td></tr>
+<tr><td><code>preview/</code></td><td>The viewer: a products tree read through its STAC, and a
+web-mercator tile rendered from a published raster. Takes no part in a run and writes nothing
+&mdash; <code>catalog.py</code> is the only module that knows the products layout, and the same
+three files under <code>preview/static/</code> are what a deployed viewer
+serves.</td><td><a class="src" data-sym="class Products" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/preview/catalog.py#L33">Products</a></td></tr>
 <tr><td><code>cli.py</code></td><td>The click command tree. Every command body imports its
 dependencies locally, which is what keeps <code>stratum --help</code>
-fast.</td><td><a class="src" data-sym="def main() -> None" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/cli.py#L65">main</a></td></tr>
+fast.</td><td><a class="src" data-sym="def main() -> None" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/cli.py#L66">main</a></td></tr>
 </tbody>
 </table>
 </div>
@@ -309,7 +316,7 @@ fast.</td><td><a class="src" data-sym="def main() -> None" href="https://github.
 walking, fill handling, band attributes, the sensor-space read.</td><td><a class="src" data-sym="class EmitNetCDFReader" href="https://github.com/jl-0/Stratum/blob/main/plugins/stratum-emit/src/stratum_emit/readers/netcdf.py#L85">EmitNetCDFReader</a></td></tr>
 <tr><td><code>stratum_emit/readers/__init__.py</code></td><td>One subclass per EMIT collection.
 <code>L2BFrcov</code> is the interesting one: already orthorectified, so it overrides the read
-path and reports no geolocation.</td><td><a class="src" data-sym="class L2BFrcov(EmitNetCDFReader)" href="https://github.com/jl-0/Stratum/blob/main/plugins/stratum-emit/src/stratum_emit/readers/__init__.py#L68">L2BFrcov</a></td></tr>
+path and reports no geolocation.</td><td><a class="src" data-sym="class L2BFrcov(EmitNetCDFReader)" href="https://github.com/jl-0/Stratum/blob/main/plugins/stratum-emit/src/stratum_emit/readers/__init__.py#L69">L2BFrcov</a></td></tr>
 <tr><td><code>stratum_emit/masks/</code></td><td>Four <code>PixelMask</code> implementations.
 <code>EdgeTrim</code> is sensor-space &mdash; it needs the absolute cross-track column &mdash;
 which is why the space declaration matters.</td><td><a class="src" data-sym="class EdgeTrim" href="https://github.com/jl-0/Stratum/blob/main/plugins/stratum-emit/src/stratum_emit/masks/__init__.py#L16">EdgeTrim</a></td></tr>
@@ -333,14 +340,14 @@ from either end. The coarse version:</p>
 <tr><td><a href="../specs/02-granule-index.md">02 — Granule index</a></td><td><code>index/</code></td></tr>
 <tr><td><a href="../specs/03-regrid-glt.md">03 — Regrid and GLT</a></td><td><code>regrid/</code></td></tr>
 <tr><td><a href="../specs/04-cost-functions.md">04 — Cost functions</a></td><td><code>hooks.py</code> (the contracts), <code>filters.py</code>, <code>resolve/</code>, <code>reduce/</code></td></tr>
-<tr><td><a href="../specs/05-ancillary-data.md">05 — Ancillary data</a></td><td><code>resolve/context.py</code> — <code>NullAux</code> only; aux is a later slice</td></tr>
+<tr><td><a href="../specs/05-ancillary-data.md">05 — Ancillary data</a></td><td><code>ancillary/</code> — <code>raster()</code> only; the other accessor calls still raise</td></tr>
 <tr><td><a href="../specs/06-caching.md">06 — Caching</a></td><td><code>cache/</code>, and every <code>*_inputs</code> function beside it</td></tr>
 <tr><td><a href="../specs/07-output-mapping.md">07 — Output mapping</a></td><td><code>publish/mappers.py</code>, <code>colors.py</code>, <code>legend.py</code></td></tr>
 <tr><td><a href="../specs/08-execution.md">08 — Execution</a></td><td><code>executors/</code></td></tr>
 <tr><td><a href="../specs/09-run-manifest.md">09 — Run manifest</a></td><td><code>manifest/</code>, and the budget gate in <code>plan/run.py</code></td></tr>
 <tr><td><a href="../specs/10-provenance.md">10 — Provenance</a></td><td><code>publish/provenance.py</code>, <code>publish/stac.py</code></td></tr>
 <tr><td><a href="../specs/11-types.md">11 — Core types</a></td><td><code>types.py</code>, <code>time.py</code></td></tr>
-<tr><td><a href="../specs/12-data-access.md">12 — Data access</a></td><td><code>access/</code>, <code>resolve/observation.py</code></td></tr>
+<tr><td><a href="../specs/12-data-access.md">12 — Data access</a></td><td><code>access/</code>, <code>resolve/observation.py</code></td>, and <code>ancillary/</code> for the ortho-native role path</tr>
 <tr><td><a href="../specs/13-snapshot-schema.md">13 — Snapshot schema</a></td><td><code>classes.py</code>, <code>reduce/bands.py</code>, <code>resolve/snapshot.py</code></td></tr>
 </tbody>
 </table>

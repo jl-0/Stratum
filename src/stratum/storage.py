@@ -96,6 +96,19 @@ class ObjectStore:
             keys += [o["Key"] for o in page.get("Contents", ())]
         return keys
 
+    def list_dirs(self, prefix: str) -> list[str]:
+        """The immediate sub-prefixes of `prefix`, each with its trailing slash.
+
+        A delimited list: it returns the directory names without walking what is inside them,
+        which is what lets a viewer learn the published runs without listing their thousands of
+        objects (`stratum.preview.catalog`).
+        """
+        prefixes: list[str] = []
+        paginator = self.client.get_paginator("list_objects_v2")
+        for page in paginator.paginate(Bucket=self.bucket, Prefix=prefix, Delimiter="/"):
+            prefixes += [p["Prefix"] for p in page.get("CommonPrefixes", ())]
+        return prefixes
+
     def get(self, key: str, dest: Path) -> None:
         """Download to `dest` through a temp file, so an interrupted download cannot be read as
         a complete mirror entry."""

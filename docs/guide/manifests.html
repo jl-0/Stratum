@@ -1,0 +1,429 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Authoring a manifest · Stratum</title>
+<link rel="stylesheet" href="../assets/stratum.css">
+</head>
+<body data-page="guide/manifests" data-root="../">
+<a class="skip" href="#content">Skip to content</a>
+<header class="masthead">
+  <a class="wordmark" href="../index.html"><span class="glyph"></span>Stratum</a>
+  <span class="stage">Pre-release</span>
+  <span class="spacer"></span>
+  <span class="repo">EMIT Critical Minerals L3</span>
+</header>
+<div class="layout">
+<nav id="sidebar" aria-label="Documentation"></nav>
+<main id="content">
+<div class="prose">
+
+<h1>Authoring a manifest</h1>
+<p class="lede">A manifest says what to mosaic, from what, and how a cell picks its winner.
+Everything else &mdash; which files are downloaded, what a scorer sees, what gets rebuilt when you
+change your mind &mdash; follows from it.</p>
+
+<h2 id="chain">How data reaches a scorer</h2>
+
+<p>The single most useful thing to hold in your head is that <strong>four manifest blocks form one
+chain</strong>, each answering a different question at a different time.</p>
+
+<div class="tw">
+<table>
+<thead><tr><th>Block</th><th>Question it answers</th><th>When</th></tr></thead>
+<tbody>
+<tr><td><code>inputs.source.patterns</code></td><td>Which <em>files</em> exist, for every granule?</td><td><code>stratum index build</code></td></tr>
+<tr><td><code>inputs.roles</code></td><td>Which of those files, and which variable inside, does this run read?</td><td><code>stratum plan</code></td></tr>
+<tr><td><code>inputs.band_aliases</code></td><td>Which single <em>band</em> of a role do I want to name?</td><td><code>stratum plan</code></td></tr>
+<tr><td><code>aux</code></td><td>What do I need that is not an observation at all?</td><td><code>stratum plan</code></td></tr>
+</tbody>
+</table>
+</div>
+
+<pre><code>patterns  &rarr;  the INDEX  &rarr;  roles  &rarr;  obs["name"]
+"what files          "granule id     "what this      "...as an array
+ exist"               &rarr; its assets"  run reads"      on this block"</code></pre>
+
+<p><code>obs</code> is <strong>not a file.</strong> It is assembled per granule per block, and its
+keys are exactly the names you wrote under <code>roles</code> and <code>band_aliases</code>
+&mdash; one namespace, so a name that appears in both is a validation error.</p>
+
+<h3 id="patterns">Why <code>patterns</code> is separate from <code>roles</code></h3>
+
+<p><code>patterns</code> is a <strong>discovery filter</strong>, shaped
+<code>{collection: {asset: glob}}</code> and matched against each catalogue record's file names.
+A file matching no glob is never indexed, and therefore can never be downloaded.</p>
+
+<pre><code>patterns:
+  EMITL2BMIN:
+    MIN:       "EMIT_L2B_MIN_001_*.nc"
+    MINUNCERT: "EMIT_L2B_MINUNCERT_001_*.nc"
+  EMITL1BRAD:
+    OBS:       "EMIT_L1B_OBS_001_*.nc"     <span class="c"># RAD is not listed, so it is invisible</span></code></pre>
+
+<div class="key">
+  <span class="label">That one rule is load-bearing</span>
+  <p>An <code>EMITL1BRAD</code> record contains a 1.85&nbsp;GB radiance file beside the small
+  geometry file. Listing only the <code>OBS</code> glob is the entire mechanism that keeps the
+  big one off the network &mdash; not a special case, not a size check.</p>
+</div>
+
+<p><code>roles</code> is a <strong>reading binding</strong>: of the files the index knows about,
+which one and which variable, under a name your plugins use. You may index more than you read
+&mdash; that costs only metadata. You may not read what you did not index, and the planner refuses
+that rather than letting a worker discover it.</p>
+
+<p>This is also why widening <code>patterns</code> forces an index rebuild: the index records the
+collections, area and time range it was built for, and a run refuses an index built for less.</p>
+
+<h3 id="granule-id">A granule is an acquisition, not a file</h3>
+
+<p>Several collections publish products derived from the same overpass. They share a
+<strong>granule id</strong>, and the index merges their rows into one record whose assets are
+keyed <code>{collection}/{asset}</code>. So a single <code>obs</code> can hold four files:</p>
+
+<div class="tw">
+<table>
+<thead><tr><th><code>obs[...]</code></th><th>Declared as</th><th>Comes from</th></tr></thead>
+<tbody>
+<tr><td><code>mineral</code></td><td>role &rarr; <code>EMITL2BMIN</code>, var <code>group_1_mineral_id</code></td><td><code>EMIT_L2B_MIN_001_*.nc</code></td></tr>
+<tr><td><code>mineral_depth</code></td><td>role &rarr; <code>EMITL2BMIN</code>, var <code>group_1_band_depth</code></td><td>the same file</td></tr>
+<tr><td><code>geometry</code></td><td>role &rarr; <code>EMITL1BRAD</code>, asset <code>OBS</code></td><td><code>EMIT_L1B_OBS_001_*.nc</code></td></tr>
+<tr><td><code>view_zenith</code></td><td><strong>alias</strong> &rarr; <code>geometry</code> band 2</td><td>sliced from the array above</td></tr>
+<tr><td><code>solar_zenith</code></td><td><strong>alias</strong> &rarr; <code>geometry</code> band 4</td><td>the same array</td></tr>
+<tr><td><code>frcov</code></td><td>role &rarr; <code>EMITL2BFRCOV</code>, asset <code>FRCOVBARE</code></td><td><code>EMIT_L2B_FRCOVBARE_001_*.tif</code></td></tr>
+</tbody>
+</table>
+</div>
+
+<div class="warn">
+  <span class="label">Use the same globs everywhere</span>
+  <p>The granule id is <em>what the first asset's wildcards matched</em>. So
+  <code>EMIT_L2B_MIN_*.nc</code> yields <code>001_2026&hellip;</code> while
+  <code>EMIT_L2B_MIN_001_*.nc</code> yields <code>2026&hellip;</code> &mdash; and two collections
+  globbed inconsistently produce ids that do not match, so their rows never merge. You get twice
+  as many granules, each missing half its roles, and every one fails the missing-role check with
+  a confusing message.</p>
+</div>
+
+<h2 id="aliases">Roles, aliases, and when you need which</h2>
+
+<p>A role reads a <strong>whole variable</strong>. EMIT's <code>obs</code> variable is
+<code>(downtrack, crosstrack, 11)</code> &mdash; eleven geometry bands in one array &mdash; so
+<code>obs["geometry"]</code> is <code>(H, W, 11)</code>, which is not what a scorer wants. A band
+alias names one band of it:</p>
+
+<pre><code>band_aliases:
+  view_zenith:  {role: geometry, band: 2}   <span class="c"># 0-BASED</span>
+  solar_zenith: {role: geometry, band: 4}</code></pre>
+
+<p>Two reasons this is not simply another role:</p>
+
+<ul>
+<li><strong>Cost.</strong> An alias slices an array that has already been read. Eleven roles on
+one variable would be eleven reads of the same file.</li>
+<li><strong>Portability.</strong> The scorer says <code>obs["solar_zenith"]</code>; the manifest
+says which band that is <em>for this instrument</em>. Point the same scorer at a different sensor
+and only the manifest changes.</li>
+</ul>
+
+<p>For spectra, where counting bands is hopeless, name the band by an attribute the reader
+reports instead. The planner resolves it to an index at plan time and fails unless exactly one
+band matches:</p>
+
+<pre><code>band_aliases:
+  swir_2200: {role: reflectance, match: {wavelength: 2200}, tolerance: 10}</code></pre>
+
+<p><strong>A single-band variable needs no alias.</strong> <code>frcov</code> is one band, so
+<code>obs["frcov"]</code> works directly. Reach for an alias only when the variable has a band
+axis.</p>
+
+<h2 id="aux-vs-roles">Roles or aux?</h2>
+
+<p>Both arrive at a plugin as arrays on its block, which is what makes them easy to confuse. The
+test is one question: <strong>would this be a different file for a different granule?</strong></p>
+
+<div class="tw">
+<table>
+<thead><tr><th></th><th>A <strong>role</strong></th><th>An <strong>aux</strong> source</th></tr></thead>
+<tbody>
+<tr><td>What it is</td><td>An observation &mdash; part of the acquisition being scored</td><td>Anything else: a DEM, a landcover map, claim polygons</td></tr>
+<tr><td>Declared in</td><td><code>inputs.roles</code>: collection, asset, variable</td><td><code>aux</code>: one URI or several, a kind, a resampling method</td></tr>
+<tr><td>Resolved through</td><td>The frozen index, per granule</td><td>The manifest, once for the run</td></tr>
+<tr><td>Read as</td><td><code>obs["frcov"]</code></td><td><code>aux.raster("landcover")</code></td></tr>
+<tr><td>Declared by a plugin as</td><td><code>required_roles</code></td><td><code>required_aux</code></td></tr>
+<tr><td>Varies per</td><td>Granule</td><td>Nothing</td></tr>
+</tbody>
+</table>
+</div>
+
+<p>EMIT's fractional cover is a <em>role</em>, even though it is a different collection from the
+mineral product, because it is the same overpass of the same ground at the same moment. ESA
+WorldCover is <em>aux</em>, because it would be the same map whichever granule you were scoring.</p>
+
+<p>A role can still need warping. <strong>Ortho-native</strong> products such as L2B FRCOV ship
+already on a map grid, so they have no sensor geometry and no lookup table, and the framework
+warps them onto the block directly. From inside a plugin that looks like aux &mdash; but it is
+still per-granule, still found through the index, and still carries the granule's checksum into
+the cache key. Such a role must declare <code>resampling</code>; a sensor-space role must not.</p>
+
+<h2 id="dataset">What an input dataset has to provide</h2>
+
+<p>Stratum is built around a <strong>catalogue</strong> &mdash; CMR today. That tie-in is what
+makes it useful, and it is also what it requires. A loose directory of files you want merged is
+better served by a different tool; what follows is what a dataset must carry to be usable here.</p>
+
+<h3 id="dataset-discovery">For discovery</h3>
+
+<p>Every granule, in every collection, needs each of these. They are the non-nullable columns of
+the index, so a source that cannot supply one cannot index that granule at all.</p>
+
+<div class="tw">
+<table>
+<thead><tr><th>Needed</th><th>From CMR</th><th>From a local directory</th></tr></thead>
+<tbody>
+<tr><td><strong>A stable granule id</strong>, identical across every collection of the same acquisition</td><td>What the first asset's glob wildcards matched</td><td>The same rule, on filenames</td></tr>
+<tr><td><strong>Time coverage</strong> (start and end)</td><td><code>TemporalExtent.RangeDateTime</code></td><td><code>time_coverage_start</code> / <code>_end</code> in the ACDD header</td></tr>
+<tr><td><strong>A footprint</strong> &mdash; a polygon, or at least a bounding box</td><td><code>SpatialExtent</code>: a GPolygon, else a BoundingRectangle</td><td>The four <code>*most_longitude</code> / <code>*most_latitude</code> attributes</td></tr>
+<tr><td><strong>One URL per asset</strong></td><td><code>RelatedUrls</code>, type <code>GET DATA</code></td><td>The file path</td></tr>
+<tr><td>A <strong>checksum</strong> per asset <em>(strongly wanted)</em></td><td>Published per file</td><td>None &mdash; recorded honestly as absent</td></tr>
+<tr><td>Cloud fraction, build and product versions <em>(optional)</em></td><td><code>CloudCover</code> and additional attributes</td><td>Header attributes, when present</td></tr>
+</tbody>
+</table>
+</div>
+
+<div class="warn">
+  <span class="label">A missing checksum is a real hole, not a nuisance</span>
+  <p>An asset's catalogue checksum is what enters the cache key as that observation's identity.
+  Without one, a granule re-delivered under the same id with new bytes reads as a cache hit
+  forever. A local source records no checksums and says so; a catalogue source is what makes
+  reprocessing safe.</p>
+</div>
+
+<h3 id="dataset-reading">For reading</h3>
+
+<ul>
+<li><strong>A reader registered for the collection.</strong> Readers are selected from what a role
+<em>declares</em>, never from what a file is called. Readers ship in a plugin package;
+<code>stratum plugins list</code> shows what an environment provides.</li>
+<li><strong>Declared fill values.</strong> The reader resolves them to a mask, so nothing above it
+ever sees a sentinel. A product that encodes "missing" as a magic number nobody declared will
+silently average it in.</li>
+<li><strong>At least one sensor-space role</strong>, with per-pixel latitude and longitude. This is
+the geolocation role, and the lookup table built from it is what decides which granules reach
+which block. A run in which <em>every</em> role is ortho-native is refused at plan time.</li>
+<li><strong>A CRS on every ortho-native input.</strong> There is nothing to warp from without one.</li>
+<li><strong>An embedded class table</strong>, for any categorical layer whose classes come from the
+product rather than from a checked-in file &mdash; matched on attributes, never on the integer.</li>
+</ul>
+
+<h3 id="dataset-consistency">For a run that means anything</h3>
+
+<ul>
+<li><strong>Every collection agrees on the granule id.</strong> Check it before trusting a run:
+the index prints one row count per collection and one granule count overall, and the granule
+count should not be the sum.</li>
+<li><strong>Every sensor role shares one sensor array shape.</strong> One lookup table indexes one
+sensor grid, so roles read together must agree; the planner checks this against real headers.</li>
+<li><strong>Class tables agree across granules</strong>, by fingerprint, unless you opt out
+explicitly. Mid-reprocessing archives are mixed-vintage and will otherwise blend two incompatible
+products into something entirely plausible.</li>
+</ul>
+
+<h2 id="changing">What changes cost</h2>
+
+<p>Every artifact is keyed on the inputs that determine it, so the honest answer to "can I try
+something?" is a lookup rather than a guess.</p>
+
+<div class="tw">
+<table>
+<thead><tr><th>Change</th><th>Lookup table</th><th>Warps</th><th>Snapshot</th><th>Product</th></tr></thead>
+<tbody>
+<tr><td><code>scorer.ref</code> or <code>scorer.params</code></td><td>hit</td><td>hit</td><td><strong>rebuild</strong></td><td>rebuild</td></tr>
+<tr><td><code>pixel_mask</code> entries</td><td>hit</td><td>hit</td><td><strong>rebuild</strong></td><td>rebuild</td></tr>
+<tr><td>Add or drop a role the run reads</td><td>hit</td><td>hit</td><td><strong>rebuild</strong></td><td>rebuild</td></tr>
+<tr><td><code>snapshot.layers</code> &mdash; what is recorded</td><td>hit</td><td>hit</td><td><strong>rebuild</strong></td><td>rebuild</td></tr>
+<tr><td><code>aggregate</code> &mdash; how epochs collapse</td><td>hit</td><td>hit</td><td>hit</td><td><strong>rebuild</strong></td></tr>
+<tr><td><code>outputs.render</code></td><td>hit</td><td>hit</td><td>hit</td><td>hit &mdash; re-renders only</td></tr>
+<tr><td>An aux file changes under its URI</td><td>hit</td><td><strong>rebuild</strong></td><td><strong>rebuild</strong></td><td>rebuild</td></tr>
+<tr><td><code>aux.resampling</code>, or an ortho role's</td><td>hit</td><td><strong>rebuild</strong></td><td><strong>rebuild</strong></td><td>rebuild</td></tr>
+<tr><td><code>grid.block_size</code></td><td>hit</td><td>hit</td><td><strong>rebuild</strong></td><td>rebuild</td></tr>
+<tr><td><code>grid.max_distance</code> / <code>regrid_method</code></td><td><strong>rebuild</strong></td><td>hit</td><td>rebuild</td><td>rebuild</td></tr>
+<tr><td><code>grid.crs</code>, <code>resolution</code>, <code>origin</code>, <code>tile_size</code></td><td><strong>rebuild</strong></td><td><strong>rebuild</strong></td><td>rebuild</td><td>rebuild</td></tr>
+<tr><td><code>inputs.source.patterns</code> &mdash; a new collection</td><td>hit</td><td>hit</td><td>rebuild <em>if a role reads it</em></td><td>rebuild</td></tr>
+</tbody>
+</table>
+</div>
+
+<p>Two entries are worth a sentence each. <strong><code>block_size</code></strong> is excluded from
+the grid's identity and from the lookup-table key, but a snapshot is keyed on its block's
+<em>window</em>, so renumbering the blocks rebuilds snapshots &mdash; it is a compute knob for
+everything except snapshot layout. And <strong>adding a collection to <code>patterns</code></strong>
+costs nothing by itself; it is binding a <em>role</em> to it that changes what every observation
+reads, and therefore every snapshot key.</p>
+
+<h2 id="walkthrough">Walkthrough: the bare-earth manifest</h2>
+
+<p><a href="https://github.com/jl-0/Stratum/blob/main/examples/emit-cmr-cuprite/manifest-bare-earth.yaml"><code>examples/emit-cmr-cuprite/manifest-bare-earth.yaml</code></a>
+scores 18 tiles around Cuprite on how much bare ground a pixel actually shows, rather than on
+where the sensor was looking. It is the smallest manifest that uses every input path at once, so
+it is worth tracing end to end.</p>
+
+<h3 id="w-declare">1. What it declares</h3>
+
+<pre><code>inputs:
+  source:
+    patterns:
+      EMITL2BMIN:   {MIN: "EMIT_L2B_MIN_001_*.nc", MINUNCERT: "..."}
+      EMITL2BFRCOV: {FRCOVBARE: "EMIT_L2B_FRCOVBARE_001_*.tif"}
+      EMITL1BRAD:   {OBS: "EMIT_L1B_OBS_001_*.nc"}
+  roles:
+    geometry: {collection: EMITL1BRAD, asset: OBS, var: obs}
+    mineral:  {collection: EMITL2BMIN, var: group_1_mineral_id, class_table: {...}}
+    frcov:
+      collection: EMITL2BFRCOV
+      asset: FRCOVBARE
+      var: EMIT_L2B_FRCOVBARE     <span class="c"># the BAND DESCRIPTION, not an index</span>
+      resampling: bilinear        <span class="c"># required: this role is ortho-native</span>
+  band_aliases:
+    solar_zenith: {role: geometry, band: 4}
+
+aux:
+  landcover:
+    uri: https://esa-worldcover.s3.eu-central-1.amazonaws.com/&hellip;_N36W120_Map.tif
+    kind: categorical
+    resampling: mode
+
+scorer: {ref: prefer_bare_earth, params: {hard_floor: 0.65, sun_weight: 0.25}}
+pixel_mask:
+  - {ref: edge_trim, columns: 7}
+  - {ref: landcover, exclude: [water, built-up, tree]}</code></pre>
+
+<h3 id="w-index">2. Index build &mdash; metadata only</h3>
+
+<p>CMR is searched once per collection, over the manifest's box and time range. Each record's file
+names are matched against that collection's globs; anything unmatched is not indexed and can never
+be fetched.</p>
+
+<pre><code>wrote index/granules.parquet: 197 row(s), 69 granule(s)
+  EMITL1BRAD     69 row(s)   69 with checksums
+  EMITL2BFRCOV   59 row(s)   59 with checksums
+  EMITL2BMIN     69 row(s)   69 with checksums</code></pre>
+
+<p><strong>197 rows, 69 granules</strong> &mdash; that gap is the id merge working. Had the three
+collections disagreed on ids you would see 197 granules, and every one would be missing two of its
+three roles. Ten granules have no fractional cover; they are exactly the ten the cloud filter drops
+anyway, so requiring the role costs nothing here. Not a byte of pixel data has moved.</p>
+
+<h3 id="w-plan">3. Plan &mdash; where cheap failures happen</h3>
+
+<p>The plan selects granules, applies the filters, freezes the survivors, and only then opens real
+files to check the manifest against the data: that each role's variable exists, that the sensor
+roles agree on shape, that every granule's class table has the same fingerprint. It also stages,
+digests and <strong>warps</strong> every aux source onto every tile:</p>
+
+<pre><code>"aux": {"sources": {"landcover": {"digest": "sha256:a667a785&hellip;",
+                                  "resampling": "mode"}},
+        "tiles_warped": 18}</code></pre>
+
+<p>Warping here rather than in a worker matters on a cluster: the artifact cache is shared but the
+download cache is per worker, so warping once at plan time means <em>no worker ever opens the
+source</em>. Eighteen tiles of WorldCover cost a few seconds and about 4&nbsp;MB of cache.</p>
+
+<p>Note the source is <em>four</em> files. WorldCover ships as 3&deg; tiles and this AOI spans the
+corner of four of them, so the manifest names all four and they are composited later-over-earlier.
+The digest is over the parts in order, which is why reordering them would be a different
+artifact.</p>
+
+<p>The plan also records what it worked out so no worker has to repeat it &mdash; including each
+role's space, which is why a worker never instantiates a reader just to decide how to read
+something:</p>
+
+<pre><code>frcov          EMITL2BFRCOV   space=ortho    resampling=bilinear
+geometry       EMITL1BRAD     space=sensor   resampling=None
+mineral        EMITL2BMIN     space=sensor   resampling=None</code></pre>
+
+<h3 id="w-regrid">4. Regrid &mdash; one lookup table per granule per tile</h3>
+
+<p>A lookup table maps every cell of one tile to a pixel of <strong>one granule</strong>. It is
+built from the geolocation role's per-pixel latitude and longitude and from nothing else &mdash;
+not the mineral data, not the fractional cover. So the manifest does not control what goes
+<em>into</em> one; it controls how many get built: every <code>(granule, tile)</code> pair whose
+footprints meet. Here that is 327 of the 18 &times; 59 = 1,062 possible pairs.</p>
+
+<p>Its key is the granule, the grid, the search radius and the algorithm version. No scorer, no
+mask, no role, no time range. That is why this run rebuilt none of them:</p>
+
+<pre><code>stage    items  hits  seconds
+regrid   327    146   117.15    <span class="c"># 146 reused from the smaller run over the same grid</span>
+resolve  1184   471    63.58    <span class="c"># and 471 of its snapshots, untouched by the wider box</span></code></pre>
+
+<p>That is the shape worth noticing: tripling the area rebuilt only the new tiles. A lookup table
+is keyed on its granule and grid, a snapshot on its own block's window &mdash; neither mentions the
+AOI, so widening it invalidates nothing.</p>
+
+<h3 id="w-resolve">5. Resolve &mdash; where <code>obs</code> is assembled</h3>
+
+<p>For each block and month, for each granule reaching it: read the lookup-table window, gather the
+sensor roles through it, warp the ortho roles onto it, and hand the scorer an
+<code>ObsWindow</code>. Only now does <code>obs["frcov"]</code> exist, and it exists on the block's
+grid, at the block's resolution &mdash; not on FRCOV's 60&nbsp;m ortho grid.</p>
+
+<pre><code><span class="k">def</span> score(self, obs, aux):
+    soil = np.clip(obs[<span class="k">"frcov"</span>], 0.0, 1.0)           <span class="c"># ortho role, warped</span>
+    sun  = np.cos(np.radians(obs[<span class="k">"solar_zenith"</span>]))   <span class="c"># band 4 of the geometry role</span>
+    s = soil + self.sun_weight * sun
+    s[soil &lt; self.hard_floor] = np.nan               <span class="c"># may not occupy this cell</span>
+    <span class="k">return</span> s</code></pre>
+
+<p>The landcover mask runs beside it on the same block, reading
+<code>aux.raster("landcover")</code> &mdash; already warped, already windowed, already cached.
+Neither the scorer nor the mask does any geometry, and neither knows that one input came from a
+granule and the other from a public bucket in Frankfurt.</p>
+
+<h3 id="w-again">6. Changing your mind</h3>
+
+<p>Re-running with only <code>hard_floor</code> and <code>min_soil</code> changed:</p>
+
+<pre><code>stage    items  hits  seconds
+regrid   327    327   3.85      <span class="c"># every lookup table already existed</span>
+resolve  1184   0     19.28     <span class="c"># recomputed, but the warps behind them were hits</span>
+reduce   288    0     51.05
+total   1817    327   80.44</code></pre>
+
+<p>Every snapshot was recomputed, because the thing that changed is in their key. But no lookup
+table and no fractional-cover warp was rebuilt &mdash; those are keyed on the granule and the grid,
+which did not move. An 80-second experiment over 18 tiles, from a run that first cost three and a
+half minutes.</p>
+
+<div class="key">
+  <span class="label">The shape of a good iteration</span>
+  <p>Geometry is expensive and rarely changes. Selection is cheap and changes hourly. Keeping them
+  in separate artifacts with separate keys is what turns "try a different cost function" from a
+  rebuild into a re-read.</p>
+</div>
+
+<div class="reading">
+  <span class="label">Further reading</span>
+  <ul>
+    <li><a href="../reference/manifest.html">Manifest reference</a> <span class="what">&mdash; every field, its type and its default</span></li>
+    <li><a href="caching.html">Caching &amp; reruns</a> <span class="what">&mdash; what is in each key, and how to ask why two differ</span></li>
+    <li><a href="reading-data.html">Reading data</a> <span class="what">&mdash; how a block gets its bytes, and how to add a reader or a source</span></li>
+    <li><a href="plugins.html">Writing plugins</a> <span class="what">&mdash; the other side of <code>obs</code> and <code>aux</code></span></li>
+  </ul>
+</div>
+
+</div>
+<nav class="pager" aria-label="Pagination"></nav>
+<footer class="site">
+  Specified in <a href="../specs/09-run-manifest.md"><code>specs/09-run-manifest.md</code></a>,
+  <a href="../specs/02-granule-index.md"><code>02</code></a>,
+  <a href="../specs/05-ancillary-data.md"><code>05</code></a>,
+  <a href="../specs/12-data-access.md"><code>12</code></a>
+</footer>
+</main>
+</div>
+<script src="../assets/stratum.js"></script>
+</body>
+</html>

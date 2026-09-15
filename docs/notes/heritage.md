@@ -266,3 +266,31 @@ registration*, not as a cheaper `kdtree`.
 - [`2026-09-02-first-slice-plan.md`](2026-09-02-first-slice-plan.md) — the build contract the
   first slice was written against; §5 lists the decisions made while building and the spec each
   landed in.
+
+## EMIT L2B FRCOV, measured
+
+[observed] 2026-09-15, `EMIT_L2B_FRCOVBARE_001_20260124T212614_2602413_003.tif` and the warped
+cache from the Cuprite 2 × 3 run.
+
+The Mines tag-up recorded FRCOV as "already orthorectified, **on the same grid**". That is true
+of EMIT's grid and not of ours. The delivered file is a single-band float64 COG, EPSG:4326, cell
+**0.000542232520256367°** — the EMIT ortho lattice exactly, shared with OBS and MIN — internally
+tiled 512 with overviews, nodata −9999, band description `EMIT_L2B_FRCOVBARE`. Against a
+one-arcsecond product grid that is a ratio of 1.952, so it upsamples; "costs nothing to regrid"
+means no KD-tree, not no work.
+
+It is publicly readable over HTTPS from `data.lpdaac.earthdatacloud.nasa.gov/lp-prod-public/`
+with **no Earthdata credential**, which is not true of the L2B MIN files.
+
+The substantive finding is the distribution. Over the six Cuprite tiles, 1.5 M covered cells:
+
+```
+  p10 0.216   p25 0.368   p50 0.531   p75 0.678   p90 0.786
+  >= 0.65:  29.6 %        >= 0.80:   8.5 %        negative residuals: none observed
+```
+
+A median bare-soil fraction of 0.53 at Cuprite — one of the most exposed mineral sites on Earth
+— is the "NPV false-positive happy" caveat quantified: the unmixing is assigning bare desert to
+the non-photosynthetic-vegetation endmember. V002's 0.65 cutoff, applied to the *bare* fraction
+alone, therefore discards two thirds of the scene. Whether the cutoff belongs lower, or on
+bare + NPV together, is open with Phil and Thomas.

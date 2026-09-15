@@ -10,6 +10,11 @@ resource "aws_cloudwatch_log_group" "worker" {
   retention_in_days = var.log_retention_days
 }
 
+# NOT VPC-attached, deliberately, even when the deployment names a `vpc_id`. The worker downloads
+# granules from the DAAC over the public internet (12 section 4); putting it in a VPC would mean a
+# NAT gateway for that egress, plus an ENI per concurrent execution on the cold path. It reaches S3
+# and Secrets Manager over AWS's own network either way. Attaching it is a real decision with a
+# real bill, not a consequence of having a VPC.
 resource "aws_lambda_function" "worker" {
   count = local.deploy_worker ? 1 : 0
 

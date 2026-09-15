@@ -68,14 +68,25 @@ Attributed to Phil, [22:35], [27:34]–[28:00]:
 
 - EMIT has an **L2B FRCOV** product: already orthorectified, **on the same grid**, three bands —
   photosynthetic vegetation, non-photosynthetic vegetation, soil.
+
+  > **[observed] 2026-09-15 — "the same grid" means EMIT's, not ours.** The delivered file is
+  > one band per fraction, float64, EPSG:4326, cell **0.000542232520256367°** — the EMIT ortho
+  > lattice, shared with OBS and MIN. Against a one-arcsecond product grid that is a ratio of
+  > 1.952, so it is a genuine resample. See [`heritage.md`](heritage.md), "EMIT L2B FRCOV,
+  > measured".
 - Caveat: the current version is **"NPV false-positive happy"** — it reads some soil as NPV.
 - V002 used a **65% soil-fraction cutoff**; the rationale was grain-size retrieval, which
   "completely falls apart" below that.
 - For mosaicking, the recommendation was to **bump it to ~80%**.
 
-**Design consequence.** `frcov` becomes a declared input role. Because it is already on the target
-grid, it needs no regridding — it is the cheapest possible input to a scorer. It also directly
-enables the bare-earth scorer in §4.
+**Design consequence.** `frcov` becomes a declared input role, and an **ortho-native** one: no
+GLT and no KD-tree, but a warp onto the block grid ([12 §2](../specs/12-data-access.md)). It is
+still the cheapest input a scorer has. It also directly enables the bare-earth scorer in §4.
+
+**[observed] The 65 % cutoff is very aggressive against this product.** Over the Cuprite 2 × 3
+tile set the median bare-soil fraction is 0.53 and only 29.6 % of covered cells clear 0.65,
+dropping the vote rate from 62.4 % to 19.7 %. That is the NPV caveat above, quantified. Open:
+whether the cutoff belongs lower, or on bare + NPV together rather than bare alone.
 
 ---
 

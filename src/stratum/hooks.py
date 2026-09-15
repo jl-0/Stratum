@@ -28,10 +28,18 @@ class GranuleFilter(Protocol):
 
 @runtime_checkable
 class PixelMask(Protocol):
-    """Runs in resolve's read path (04 section 3). Boolean: masking is not ranking."""
+    """Runs in resolve's read path (04 section 3). Boolean: masking is not ranking.
+
+    `required_aux` is declared here for the same reason it is on `Scorer`: an undeclared read
+    produces a cache key that lies (05 section 5). Only a `space: "map"` mask may declare it -
+    aux is on the BLOCK grid by definition (05 section 1) and a sensor-space mask sees sensor
+    geometry, so the arrays would not even share a shape. `validate_static` refuses the
+    combination and resolve hands a sensor-space mask `NullAux`.
+    """
 
     space: Literal["map", "sensor"]
     required_roles: tuple[str, ...]
+    required_aux: tuple[str, ...]
 
     def valid(self, obs: ObsWindow, aux: AuxAccessor) -> BoolArray: ...
 

@@ -8,15 +8,17 @@ and nothing else - no URIs, no sensor windows, no readers.
 """
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
 import numpy as np
+import rasterio
 from affine import Affine
 from rasterio.crs import CRS
 from rasterio.warp import transform as warp_transform
 
+from stratum.ancillary import ortho_key_for, read_window, warp_ortho_tile
 from stratum.cache import CacheKey
 from stratum.classes import UNMAPPED, Remap
 from stratum.index import role_asset, role_uri
@@ -107,6 +109,50 @@ def _sensor_bands(plan: PlanContext, read: Mapping[str, np.ma.MaskedArray]) -> d
     return bands
 
 
+def read_ortho_roles(ctx: ObsContext, roles: Sequence[str]) -> dict[str, np.ndarray]:
+    """Ortho-native roles over this block (12 section 2, "Ortho-native roles skip most of this").
+
+    Each is warped once per (granule, role, tile) into the artifact cache and windowed per block
+    from there - never warped inside this function. Warping here would repeat the work once per
+    block, per epoch, per granule, which for a real run is hundreds of times and would make "the
+    cheapest possible input" the most expensive thing in the pipeline (05 section 4).
+    """
+    if not roles:
+        return {}
+    plan, block, granule = ctx.plan, ctx.block, ctx.granule
+    out: dict[str, np.ndarray] = {}
+    for role in roles:
+        binding = plan.roles[role]
+        uri = role_uri(granule, binding)
+        if uri is None:
+            raise ValueError(
+                f"granule {granule.granule_id!r} has no asset for ortho role {role!r} "
+                f"(collection {binding.collection!r}); the planner should have excluded it "
+                "(12 section 7)")
+        asset = role_asset(granule, binding)
+        checksum = granule.checksums.get(asset) if asset else None
+        resampling = plan.role_resampling(role)
+        key = ortho_key_for(plan.cache, block.tile, granule.granule_id, role, binding.var,
+                            checksum, resampling)
+        if not plan.cache.hit(key):
+            reader = plan.reader(binding.collection)
+            rctx = reader.open(plan.store.open(uri, checksum=checksum))
+            try:
+                source = reader.ortho_source(rctx, binding.var)
+                warp_ortho_tile(plan.cache, block.tile, source, granule_id=granule.granule_id,
+                                role=role, var=binding.var, checksum=checksum,
+                                resampling=resampling)
+            finally:
+                close = getattr(rctx, "close", None)
+                if close is not None:
+                    close()
+        with rasterio.open(str(key.path)) as src:
+            fill = src.nodata
+        out[role] = read_window(key.path, block.window,
+                                nodata=float("nan") if fill is None else float(fill))
+    return out
+
+
 def read_observation(ctx: ObsContext) -> Observation | None:
     """Steps 5-15 of 12 section 2 for one granule over one block. None when the GLT has no hit
     in the block window (step 7). The returned ObsWindow is in BLOCK space with an entry per
@@ -118,9 +164,19 @@ def read_observation(ctx: ObsContext) -> Observation | None:
         return None
     sw = SensorWindow.covering(glt[..., 0], glt[..., 1])
 
-    roles = plan.roles_to_read()
-    if not roles:
+    # 12 section 2: an ortho-native role is already on a map grid, so it skips the sensor window,
+    # the gather and the sensor masks entirely - the framework warps it onto the block instead.
+    # Splitting here rather than branching five times through the body keeps the invariant the
+    # spec states ("an ortho role is just another way to fill `bands`") the shape of the code.
+    all_roles = plan.roles_to_read()
+    ortho_roles = [r for r in all_roles if plan.role_space(r) == "ortho"]
+    roles = [r for r in all_roles if r not in ortho_roles]
+    if not all_roles:
         raise ValueError("nothing to read: the schema, scorer and masks name no role")
+    if not roles:
+        raise ValueError(
+            f"every role read ({all_roles}) is ortho-native; a run still needs a sensor role to "
+            "build the GLT that decides which granules reach a block (03 section 3)")
     contexts: dict[str, Any] = {}
     readers: dict[str, Any] = {}
     try:
@@ -159,6 +215,9 @@ def read_observation(ctx: ObsContext) -> Observation | None:
     if len(set(shapes.values())) > 1:
         raise ValueError(f"roles disagree on the sensor shape {shapes}; one GLT indexes one "
                          "sensor array (03 section 3)")
+    # the geolocation role by preference, else any sensor role - never an ortho one, whose
+    # `shape` is its own ortho raster size. `EdgeTrim` reads this as the detector width, so an
+    # ortho shape here would silently trim the wrong columns.
     anchor = plan.geolocation_role if plan.geolocation_role in shapes else roles[0]
     sensor_shape = shapes[anchor]
     band_attrs = {role: dict(spec.band_attrs) for role, spec in specs.items() if spec.band_attrs}
@@ -174,8 +233,13 @@ def read_observation(ctx: ObsContext) -> Observation | None:
                                granules=(granule,), epoch=ctx.epoch, sensor_window=sw,
                                sensor_shape=sensor_shape, band_attrs=band_attrs)
         ok = np.ones((sw.height, sw.width), dtype=bool)
+        # NullAux, not ctx.aux: aux is on the BLOCK grid by definition (05 section 1) and this
+        # obs is in sensor geometry, so a real accessor would hand back an array of the wrong
+        # shape - silently, where a broadcast happens to work. `validate_static` refuses
+        # required_aux on a sensor-space mask; this makes the refusal impossible to slip past.
+        sensor_aux = NullAux()
         for mask in plan.sensor_masks:
-            ok &= np.asarray(mask.valid(sensor_obs, ctx.aux), dtype=bool)
+            ok &= np.asarray(mask.valid(sensor_obs, sensor_aux), dtype=bool)
 
     # step 14: the gather, per role
     gathered: dict[str, Gathered] = {role: gather(arr, glt, sw, ok) for role, arr in read.items()}
@@ -186,6 +250,13 @@ def read_observation(ctx: ObsContext) -> Observation | None:
         valid &= g.valid
         interpolated |= g.interpolated
         bands[role] = g.band
+    # step 14b: ortho-native roles, warped onto this block. They join `bands` exactly as a
+    # gathered role does and their nodata joins `valid`; they never touch `interpolated`, which
+    # means "the GLT reached beyond max_distance" and has no meaning for a warp.
+    for role, band in read_ortho_roles(ctx, ortho_roles).items():
+        bands[role] = band
+        valid &= np.isfinite(band) if band.dtype.kind == "f" else band != 0
+
     for name, alias in plan.aliases.items():
         if alias.role in bands:
             bands[name] = bands[alias.role][..., alias.band]

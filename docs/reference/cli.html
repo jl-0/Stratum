@@ -51,6 +51,7 @@ on a laptop, on a cluster, and as the worker entrypoint.</p>
 <tr><td><a href="#report"><code>stratum report</code></a></td><td>Print the run report</td><td><span class="chip chip-locked">built</span></td></tr>
 <tr><td><a href="#approve"><code>stratum approve</code> / <code>reject</code></a></td><td>Release or cancel a run paused at the budget gate</td><td><span class="chip chip-open">not yet</span></td></tr>
 <tr><td><a href="#render"><code>stratum render</code></a></td><td>Re-render published data with a different mapper</td><td><span class="chip chip-open">not yet</span></td></tr>
+<tr><td><a href="#preview"><code>stratum preview</code></a></td><td>Serve a map of a published products tree, locally</td><td><span class="chip chip-locked">built</span></td></tr>
 <tr><td><a href="#cache"><code>stratum cache</code></a></td><td>Explain and diff cache entries; collect the cache</td><td><span class="chip chip-locked">built</span> <code>explain</code>, <code>diff</code></td></tr>
 <tr><td><a href="#index"><code>stratum index</code></a></td><td>Build, query and verify the granule index</td><td><span class="chip chip-locked">built</span> <code>build</code>, <code>query</code></td></tr>
 <tr><td><a href="#plugins"><code>stratum plugins</code></a></td><td>List registered plugins and show what one declares</td><td><span class="chip chip-locked">built</span></td></tr>
@@ -235,6 +236,46 @@ proceed, or raise the ceiling.</p>
 <p><span class="chip chip-open">not yet</span> The pieces it would call over published data —
 the config mappers and the image writer — exist and run inside <code>publish</code>; the
 standalone command does not.</p>
+
+<h2 id="preview">stratum preview</h2>
+
+<pre><code>stratum preview [--root PATH] [--port N] [--host ADDR] [--no-open]</code></pre>
+
+<p>Opens a map of what a run published. The run picker is the run directories under the products
+root, the layer picker is the assets each STAC item declares, and the legend is the one publish
+wrote &mdash; so a run that delivers a new band appears without any configuration.</p>
+
+<div class="tw">
+<table>
+<thead><tr><th>Option</th><th>Does</th></tr></thead>
+<tbody>
+<tr><td><code>--root</code></td><td>The storage root, or the products directory itself &mdash; both are accepted. May be an <code>s3://</code> prefix, read with your own credentials. Default <code>.</code></td></tr>
+<tr><td><code>--port</code></td><td>Default <code>8787</code>. <code>0</code> asks the OS for a free port</td></tr>
+<tr><td><code>--host</code></td><td>Default <code>127.0.0.1</code>. The server has no authentication &mdash; see the warning below</td></tr>
+<tr><td><code>--no-open</code></td><td>Do not open a browser</td></tr>
+</tbody>
+</table>
+</div>
+
+<pre><code>stratum preview --root out                     <span class="c"># a local run</span>
+stratum preview --root s3://my-bucket/          <span class="c"># a cloud run, over your credentials</span></code></pre>
+
+<div class="warn">
+<p><strong>Loopback only.</strong> The server has no authentication and does no rate limiting. It
+reads a directory you can already read, and a path from a URL cannot leave the products root, but
+it is a development tool and must not be bound to a public address.</p>
+</div>
+
+<p>Clicking the map reports every delivered band at that point, with class names resolved from each
+asset's <code>classification:classes</code>.</p>
+
+<p>Rasters are rendered server-side, so it works over <code>gtiff</code> output as well as
+<code>cog</code>. Over a bucket, each raster is copied into a node-local mirror the first time a
+tile needs it &mdash; the first pan over a tile is slow and the rest are not.</p>
+
+<p>The same command runs as a Fargate task inside a VPC, reading the bucket with the task role and
+serving on its own private IP &mdash; <code>make viewer-up</code>. See
+<a href="../guide/viewing.html">Viewing products</a>.</p>
 
 <h2 id="cache">stratum cache</h2>
 

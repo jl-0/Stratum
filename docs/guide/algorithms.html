@@ -113,7 +113,7 @@ of metadata: URLs, footprints, times, cloud cover, checksums. It reads no pixel 
 <tr>
   <td>Resolve the AOI</td>
   <td>AOI bbox → the set of tiles on the grid lattice that intersect it; time range → epochs</td>
-  <td><a class="src" data-sym="plan_run" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/plan/run.py#L685">plan/run.py:677</a></td>
+  <td><a class="src" data-sym="plan_run" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/plan/run.py#L774">plan/run.py:677</a></td>
 </tr>
 <tr>
   <td>Filter</td>
@@ -128,14 +128,14 @@ of metadata: URLs, footprints, times, cloud cover, checksums. It reads no pixel 
       <em>remap</em> — an integer lookup array from that granule's ids to the run's ids — and
       fails if two granules disagree irreconcilably. The remap is applied later, at the gather,
       where the granule is still known</td>
-  <td><a class="src" data-sym="granule_remap" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/resolve/block.py#L96">block.py:96</a></td>
+  <td><a class="src" data-sym="granule_remap" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/resolve/block.py#L121">block.py:96</a></td>
 </tr>
 <tr>
   <td>Freeze</td>
   <td>The surviving granule set is written to the run directory and hashed. Every later stage
       reads the frozen set, never the live catalogue, so a re-run cannot silently include a
       granule that appeared since</td>
-  <td><a class="src" data-sym="# -- freeze (02 section 6)" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/plan/run.py#L788">plan/run.py:773</a></td>
+  <td><a class="src" data-sym="# -- freeze (02 section 6)" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/plan/run.py#L894">plan/run.py:773</a></td>
 </tr>
 </tbody>
 </table>
@@ -303,7 +303,7 @@ falling back, since a silent fallback would mix two derivations under one cache 
   <td>Candidates</td>
   <td>Granules in the frozen set whose footprint intersects this block and whose acquisition
       time falls in this epoch</td>
-  <td><a class="src" data-sym="candidates" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/resolve/block.py#L72">block.py:72</a></td>
+  <td><a class="src" data-sym="candidates" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/resolve/block.py#L65">block.py:72</a></td>
 </tr>
 <tr>
   <td class="num">2</td>
@@ -325,7 +325,7 @@ falling back, since a silent fallback would mix two derivations under one cache 
   <td>Read</td>
   <td>Each role (geometry, mineral, mask…) read over that window as a masked array — fill values
       arrive already masked</td>
-  <td><a class="src" data-sym="read_observation" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/resolve/observation.py#L110">observation.py:110</a></td>
+  <td><a class="src" data-sym="read_observation" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/resolve/observation.py#L156">observation.py:110</a></td>
 </tr>
 <tr>
   <td class="num">5</td>
@@ -333,7 +333,7 @@ falling back, since a silent fallback would mix two derivations under one cache 
   <td>Every <code>PixelMask</code> evaluated in the granule's own geometry, combined by
       conjunction — cheaper here than on the map, and some masks (slit artefacts, edge trims)
       only make sense in sensor space</td>
-  <td><a class="src" data-sym="for mask in plan.sensor_mask" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/resolve/observation.py#L177">observation.py:177</a></td>
+  <td><a class="src" data-sym="for mask in plan.sensor_mask" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/resolve/observation.py#L241">observation.py:177</a></td>
 </tr>
 <tr>
   <td class="num">6</td>
@@ -342,23 +342,41 @@ falling back, since a silent fallback would mix two derivations under one cache 
   <td><a class="src" data-sym="gather" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/resolve/gather.py#L31">gather.py:31</a></td>
 </tr>
 <tr>
+  <td class="num">6a</td>
+  <td>Ortho roles</td>
+  <td>A role whose product is already on a map grid skips steps 3&ndash;6 entirely: it is warped
+      onto the tile once per (granule, role, tile), cached, and windowed to this block. It joins
+      <code>bands</code> like a gathered role and its nodata joins <code>valid</code> &mdash; but
+      never <code>interpolated</code>, which means "the GLT reached beyond
+      <code>max_distance</code>" and has no meaning for a warp</td>
+  <td><a class="src" data-sym="def read_ortho_roles" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/resolve/observation.py#L112">observation.py</a></td>
+</tr>
+<tr>
+  <td class="num">6b</td>
+  <td>Aux</td>
+  <td>Every alias the scorer and the map-space masks declared, already warped onto this tile by
+      the planner, read as a window on this block. The accessor holds the warp keys the snapshot
+      key was built from, so it cannot serve an alias the key does not name</td>
+  <td><a class="src" data-sym="class BlockAux" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/ancillary/__init__.py#L318">ancillary</a></td>
+</tr>
+<tr>
   <td class="num">7</td>
   <td>Map-space masks</td>
   <td>Masks that need map geometry or ancillary rasters, on the block, by conjunction</td>
-  <td><a class="src" data-sym="for mask in plan.map_masks:" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/resolve/observation.py#L200">observation.py:200</a></td>
+  <td><a class="src" data-sym="for mask in plan.map_masks:" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/resolve/observation.py#L271">observation.py:200</a></td>
 </tr>
 <tr>
   <td class="num">8</td>
   <td>Class remap</td>
   <td>The granule's own class ids → the run's, by the lookup array plan built. A value with no
       mapping is marked invalid rather than guessed</td>
-  <td><a class="src" data-sym="values = apply_remap(values," href="https://github.com/jl-0/Stratum/blob/main/src/stratum/resolve/observation.py#L215">observation.py:215</a></td>
+  <td><a class="src" data-sym="values = apply_remap(values," href="https://github.com/jl-0/Stratum/blob/main/src/stratum/resolve/observation.py#L286">observation.py:215</a></td>
 </tr>
 <tr>
   <td class="num">9</td>
   <td>Score and keep</td>
   <td>The scorer runs on the block; the running best is updated — see below</td>
-  <td><a class="src" data-sym="resolve_window" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/resolve/block.py#L154">block.py:154</a></td>
+  <td><a class="src" data-sym="resolve_window" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/resolve/block.py#L194">block.py:154</a></td>
 </tr>
 </tbody>
 </table>
@@ -487,7 +505,7 @@ then:</p>
   <li><strong>Data COGs</strong> — one tiled, deflate-compressed GeoTIFF per delivered band, with
   nodata, band descriptions, units, and the run's provenance tags. Categorical bands carry a GDAL
   colour table so a plain viewer can render them.
-  <a class="src" data-sym="write_geotiff" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/publish/cogs.py#L112">cogs.py:77</a></li>
+  <a class="src" data-sym="write_geotiff" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/publish/cogs.py#L113">cogs.py:77</a></li>
   <li><strong>Images</strong> — a categorical mapper is a class → RGBA lookup
   (<a class="src" data-sym="CategoricalMapper" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/publish/mappers.py#L92">mappers.py:91</a>);
   a continuous mapper clips to a domain and interpolates a ramp
@@ -549,7 +567,7 @@ then:</p>
 <tr>
   <td>Per-cell winner within an epoch</td>
   <td>Stratum — the point of the framework; the rule itself is a plugin</td>
-  <td><a class="src" data-sym="resolve_window" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/resolve/block.py#L154">resolve_window</a></td>
+  <td><a class="src" data-sym="resolve_window" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/resolve/block.py#L194">resolve_window</a></td>
 </tr>
 <tr>
   <td>Mode through time, agreement, runner-up, continuous statistics</td>

@@ -7,7 +7,7 @@ lazily by the store on the first https open so a local run never loads earthacce
 from __future__ import annotations
 
 from stratum.access.readers import clear_cache, reader_for, reader_ref
-from stratum.access.sources import CMRSource, LocalSource, read_header
+from stratum.access.sources import CMRSource, LocalSource, SourceError, read_header
 from stratum.access.store import (
     ASSET_CACHE_ENV,
     TRUSTED_HOSTS,
@@ -30,7 +30,8 @@ from stratum.access.store import (
 __all__ = [
     "ASSET_CACHE_ENV", "TRUSTED_HOSTS", "AssetCacheUnconfigured", "AssetFetchError",
     "AssetStore", "AssetStoreError", "CMRSource", "CachedAsset", "ChecksumMismatch",
-    "LocalAsset", "LocalSource", "UntrustedScheme", "asset_cache_for", "asset_cache_path",
+    "LocalAsset", "LocalSource",
+    "SourceError", "UntrustedScheme", "asset_cache_for", "asset_cache_path",
     "clear_cache", "is_local", "is_trusted_host", "local_path", "read_header", "reader_for",
     "reader_ref", "to_uri",
 ]

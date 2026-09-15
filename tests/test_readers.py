@@ -11,11 +11,11 @@ import netCDF4 as nc
 import numpy as np
 import pytest
 from affine import Affine
+from stratum_emit.readers import L1BRad, L2AMask, L2BFrcov, L2BFrcovTiff, L2BMin
 
 from stratum.access import AssetStore, LocalAsset, clear_cache, reader_for, to_uri
 from stratum.access.store import AssetCacheUnconfigured
 from stratum.types import ClassTable, EmbeddedGLT, LocArray, SensorWindow
-from stratum_emit.readers import L1BRad, L2AMask, L2BFrcov, L2BMin
 
 
 def _open(path: Path):
@@ -197,7 +197,10 @@ def test_reader_registry_by_collection_and_override():
     assert isinstance(r, L2BMin) and reader_for("EMITL2BMIN") is r     # cached per process
     assert isinstance(reader_for("EMITL1BRAD"), L1BRad)
     assert isinstance(reader_for("EMITL2AMASK"), L2AMask)
-    assert isinstance(reader_for("EMITL2BFRCOV"), L2BFrcov)
+    # EMITL2BFRCOV.001 is delivered as per-fraction GeoTIFFs, so the registered reader is the
+    # ortho-native GeoTIFF one; L2BFrcov is the NetCDF form and is registered for nothing
+    frcov = reader_for("EMITL2BFRCOV")
+    assert isinstance(frcov, L2BFrcovTiff) and frcov.space == "ortho"
     over = reader_for("TETRAPY_L2B", {"TETRAPY_L2B": "stratum_emit.readers:L2BMin"})
     assert isinstance(over, L2BMin) and over is not r
     with pytest.raises(LookupError) as exc:

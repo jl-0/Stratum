@@ -554,6 +554,7 @@ generated file is what executes, and it is gitignored because the root names the
 <tr><td>Your terminal</td><td>How far along each stage is. The runner draws a progress bar per stage as items complete</td></tr>
 <tr><td><code>work/{stage}.results.jsonl</code> in the run prefix</td><td>What happened to each item: its key or its error and traceback, whether it was a cache hit, how long it took. One line per item, written whether or not the stage succeeded</td></tr>
 <tr><td>CloudWatch Logs</td><td>What a <em>worker</em> did. Everything a Lambda wrote, including the traceback behind a failed item</td></tr>
+<tr><td>The function's <strong>Monitor</strong> tab in the Lambda console</td><td>How many workers are running <em>right now</em>. <code>ConcurrentExecutions</code> is the live fan-out; <code>Invocations</code>, <code>Duration</code>, <code>Errors</code> and <code>Throttles</code> sit beside it. Throttles climbing means the dispatcher is offering work faster than <code>reserved_concurrency</code> allows</td></tr>
 </tbody>
 </table>
 </div>
@@ -568,6 +569,32 @@ aws logs filter-log-events --log-group-name /aws/lambda/&lt;function&gt; \
 <p>The log group is created by Terraform rather than left to the function, which would create it
 with no retention and never expire; <code>log_retention_days</code> sets it, defaulting to 30.
 <code>make infra-output</code> prints the function name.</p>
+
+<h3 id="concurrency">How many run at once</h3>
+
+<p>One Lambda invocation per work item. These are not containers you manage &mdash; Lambda reuses
+execution environments between invocations, so a warm one skips the import cost.</p>
+
+<div class="tw">
+<table>
+<thead><tr><th>Knob</th><th>Where</th><th>Default</th><th>What it does</th></tr></thead>
+<tbody>
+<tr><td><code>--workers</code></td><td>The <code>stratum run</code> command</td><td>32</td><td>How many invocations the dispatcher keeps in flight. Also <code>$STRATUM_LAMBDA_CONCURRENCY</code></td></tr>
+<tr><td><code>reserved_concurrency</code></td><td>Terraform</td><td>64</td><td>The ceiling that actually binds. A guard rail so one run cannot exhaust the account's Lambda concurrency and starve another &mdash; not a throughput target</td></tr>
+<tr><td><code>memory_mb</code></td><td>Terraform</td><td>4096</td><td>Lambda gives CPU in proportion, so this is the compute knob too</td></tr>
+<tr><td><code>ephemeral_storage_mb</code></td><td>Terraform</td><td>10240</td><td><code>/tmp</code>: the storage mirror plus staged granules. An EMIT OBS file alone is about 107&nbsp;MB</td></tr>
+</tbody>
+</table>
+</div>
+
+<p>Asking for more workers than the reservation allows does not go faster; it produces throttles,
+which the dispatcher retries. Raise the reservation first.</p>
+
+<pre><code><span class="c"># live concurrency, without opening the console</span>
+aws cloudwatch get-metric-statistics --namespace AWS/Lambda \
+  --metric-name ConcurrentExecutions --dimensions Name=FunctionName,Value=&lt;function&gt; \
+  --start-time <span class="k">$(date -u -v-15M +%FT%TZ)</span> --end-time <span class="k">$(date -u +%FT%TZ)</span> \
+  --period 60 --statistics Maximum</code></pre>
 
 <div class="note">
   <span class="label">A failed item is a queryable record, not a log grep</span>

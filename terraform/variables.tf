@@ -86,6 +86,18 @@ variable "budget_alert_email" {
 # Ordinary configuration.
 # ---------------------------------------------------------------------------------------------
 
+# --- the deployment's network ------------------------------------------------------------------
+# Deployment level, not per workload: everything of ours that needs a network needs this one.
+# Today that is the viewer task; the data plane (08 section 2) will be the next.
+#
+# NOT the Lambda worker, which is deliberately not VPC-attached - see the note in lambda.tf.
+
+variable "vpc_id" {
+  description = "VPC for the deployment's networked workloads. The CIDR and, where they are not named explicitly, the subnets are derived from it. Empty means no workload that needs a network is created."
+  type        = string
+  default     = ""
+}
+
 variable "aws_profile" {
   description = "Local AWS profile name. PLACEHOLDER - change to the profile your login produces."
   type        = string
@@ -102,4 +114,48 @@ variable "deployment" {
   description = "Deployment name. One deployment serves many runs; a new experiment is a new manifest, never a new deployment (ADR-0002)."
   type        = string
   default     = "dev"
+}
+
+# --- the preview viewer task (guide/viewing.html) ----------------------------------------------
+# No network inputs of its own: the VPC above is the whole of it. The task runs in the VPC's
+# subnets and behind a security group this root creates, because every choice those knobs offered
+# was one a debug tool should not be asking.
+#
+# There is deliberately no `assign_public_ip`. With ingress open on the port, a public IP would put
+# an unauthenticated server on the internet - so a subnet that cannot reach ECR is a subnet to fix,
+# not one to route around.
+
+variable "viewer_image_digest" {
+  description = "Digest for the viewer task. Empty tracks image_digest - the worker's. Set it to pin the viewer separately, so rebuilding the viewer cannot repoint a worker you have frozen mid-campaign."
+  type        = string
+  default     = ""
+
+  validation {
+    condition     = var.viewer_image_digest == "" || can(regex("^sha256:[0-9a-f]{64}$", var.viewer_image_digest))
+    error_message = "viewer_image_digest must be empty, or a full digest like sha256:<64 hex>. A tag is not a digest; run `make image` and use what it prints."
+  }
+}
+
+variable "viewer_port" {
+  description = "Port the viewer listens on."
+  type        = number
+  default     = 8787
+}
+
+variable "viewer_cpu" {
+  description = "Fargate CPU units. 1024 = 1 vCPU; tile rendering is single-request and light."
+  type        = number
+  default     = 1024
+}
+
+variable "viewer_memory_mb" {
+  description = "Fargate memory. Must be a valid pairing with viewer_cpu."
+  type        = number
+  default     = 2048
+}
+
+variable "viewer_storage_gib" {
+  description = "Ephemeral storage for the raster mirror. 21 is the Fargate minimum above the 20 GiB default."
+  type        = number
+  default     = 21
 }

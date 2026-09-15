@@ -1,0 +1,113 @@
+/* One stylesheet, no build step, no framework. The palette is the design site's, so a screenshot
+   of the viewer sits beside a screenshot of the docs without looking like a different project. */
+:root {
+  --bg: #fbfaf8; --fg: #1c1b19; --muted: #6a675f; --line: #e2ded6;
+  --accent: #9a5b2c; --panel: #ffffffee;
+  color-scheme: light;
+}
+:root:not([data-theme="light"]) { }
+@media (prefers-color-scheme: dark) {
+  :root { --bg: #16150f; --fg: #eceae4; --muted: #9b968a; --line: #332f26;
+          --accent: #d79a63; --panel: #1c1b15ee; color-scheme: dark; }
+}
+
+* { box-sizing: border-box; }
+html, body { height: 100%; margin: 0; }
+body {
+  font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif;
+  color: var(--fg); background: var(--bg);
+}
+
+#map { position: absolute; inset: 0; background: var(--bg); }
+
+/* The panel floats over the map and scrolls on its own: the legend for a mineral map is three
+   hundred classes and must never push the controls off the screen. */
+#panel {
+  position: absolute; z-index: 1000;
+  top: env(safe-area-inset-top, 0px); right: 0; bottom: env(safe-area-inset-bottom, 0px);
+  width: 320px; max-width: 100%;
+  padding: 1rem 1.1rem 1.5rem;
+  overflow-y: auto; overscroll-behavior: contain;
+  background: var(--panel); backdrop-filter: blur(8px);
+  border-left: 1px solid var(--line);
+}
+@media (max-width: 640px) {
+  #panel { top: auto; left: 0; max-height: 52%; border-left: 0; border-top: 1px solid var(--line); }
+}
+
+#panel h1 { font-size: 1rem; font-weight: 600; margin: 0 0 .15rem; letter-spacing: .01em; }
+#panel header { margin-bottom: 1.1rem; }
+
+/* The wordmark, as one flat mask so it inherits --accent in both themes. Same eight-point rose
+   as the design site, defined once. */
+.glyph {
+  display: inline-block; width: 15px; height: 15px; vertical-align: -2px;
+  background: var(--accent);
+  -webkit-mask: var(--compass) center/contain no-repeat; mask: var(--compass) center/contain no-repeat;
+}
+:root {
+  --compass: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><path d="M16 0l3.2 12.8L32 16l-12.8 3.2L16 32l-3.2-12.8L0 16l12.8-3.2z"/><path d="M25.9 6.1l-3.6 7.2 7.2-3.6zM6.1 25.9l3.6-7.2-7.2 3.6zM25.9 25.9l-7.2-3.6 3.6 7.2zM6.1 6.1l7.2 3.6-3.6-7.2z" opacity=".55"/></svg>');
+}
+
+label { display: block; margin: .9rem 0 .25rem; font-weight: 600; font-size: .82rem;
+        letter-spacing: .02em; text-transform: uppercase; color: var(--muted); }
+label:has(input[type=checkbox]) { text-transform: none; font-size: .85rem; color: var(--fg);
+        font-weight: 400; display: flex; gap: .45rem; align-items: center; }
+
+select, input[type=range] { width: 100%; }
+select {
+  padding: .35rem .4rem; font: inherit; color: var(--fg);
+  background: var(--bg); border: 1px solid var(--line); border-radius: 4px;
+}
+input[type=range] { accent-color: var(--accent); margin: .2rem 0 0; }
+output { float: right; font-weight: 400; color: var(--muted); font-variant-numeric: tabular-nums; }
+
+.muted { color: var(--muted); font-size: .8rem; margin: .3rem 0 0; word-break: break-word; }
+.muted code { font-size: .95em; }
+
+/* The legend. A categorical one is a long list, so it is dense and scrolls with the panel. */
+#legend { margin-top: 1.2rem; }
+#legend h2 { font-size: .82rem; text-transform: uppercase; letter-spacing: .02em;
+             color: var(--muted); margin: 0 0 .5rem; }
+#legend ul { list-style: none; margin: 0; padding: 0; font-size: .8rem; }
+#legend li { display: flex; gap: .5rem; align-items: baseline; padding: .12rem 0; }
+/* `display: flex` above outranks the hidden attribute's own rule, so the filter needs this or it
+   sets a property that changes nothing visible. */
+#legend li[hidden] { display: none; }
+#legend .sw { flex: 0 0 auto; width: .8em; height: .8em; border: 1px solid var(--line);
+              border-radius: 2px; }
+#legend .name { overflow-wrap: anywhere; }
+#legend .count { margin-left: auto; color: var(--muted); font-variant-numeric: tabular-nums; }
+
+.bar { height: 10px; border: 1px solid var(--line); border-radius: 2px; }
+.ticks { display: flex; justify-content: space-between; font-size: .78rem;
+         color: var(--muted); margin-top: .25rem; font-variant-numeric: tabular-nums; }
+
+.err { color: #b3261e; }
+@media (prefers-color-scheme: dark) { .err { color: #f2b8b5; } }
+
+/* Tile outlines: the grid this run was cut on, drawn over whatever is beneath. */
+.tile-label {
+  font: 600 10px/1 ui-monospace, SFMono-Regular, Menlo, monospace;
+  color: var(--fg); background: var(--panel); padding: 2px 4px; border-radius: 3px;
+  border: 1px solid var(--line); white-space: nowrap;
+}
+.leaflet-container { background: var(--bg); font: inherit; }
+
+/* The reading popup: what is at this point, in every band. */
+.leaflet-popup-content-wrapper { background: var(--panel); color: var(--fg);
+  border: 1px solid var(--line); border-radius: 6px; box-shadow: 0 4px 16px #0003; }
+.leaflet-popup-tip { background: var(--panel); border: 1px solid var(--line); }
+.leaflet-popup-content { margin: .7rem .85rem; font: inherit; }
+.leaflet-popup-content p { margin: .5rem 0 0; }
+
+table.read { border-collapse: collapse; width: 100%; font-size: .82rem; }
+table.read th { text-align: left; font-weight: 600; color: var(--muted);
+  padding: .18rem .7rem .18rem 0; white-space: nowrap; vertical-align: baseline; }
+table.read td { padding: .18rem 0; vertical-align: baseline; overflow-wrap: anywhere;
+  font-variant-numeric: tabular-nums; }
+table.read .sw { display: inline-block; width: .75em; height: .75em; border: 1px solid var(--line);
+  border-radius: 2px; vertical-align: -1px; margin-right: .25rem; }
+
+#legendfilter { width: 100%; padding: .3rem .4rem; font: inherit; color: var(--fg);
+  background: var(--bg); border: 1px solid var(--line); border-radius: 4px; margin-bottom: .1rem; }

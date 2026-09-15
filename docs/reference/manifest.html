@@ -209,6 +209,7 @@ index touches nothing else. It lives here so one document drives both. See
 <tr><td><code>patterns</code></td><td><code>{collection: {asset: glob}}</code></td><td><code>local</code> and <code>cmr</code>; required for both at build time (a <code>cmr</code> source without it validates and fails in <code>plan</code>). Locally the glob runs on disk; against the archive it is matched on each record's file names, and a file matching no glob is never indexed or fetched. The granule id is what the first asset's glob matched, so the MIN and MINUNCERT files of one granule land in one record. Pin a collection version with the long form <code>{collection: {version: "001", assets: {asset: glob}}}</code>; a role's <code>version:</code> is folded in for you</td></tr>
 <tr><td><code>pattern</code></td><td>glob</td><td><code>local</code> only — one glob, accepted only when every role reads a single collection</td></tr>
 </tbody>
+<tr><td><code>roles.*.resampling</code></td><td>ortho roles only</td><td><code>nearest</code> | <code>bilinear</code> | <code>cubic</code> | <code>mode</code> | <code>average</code></td><td>How an <strong>ortho-native</strong> role is warped onto the block grid. Required for one and refused for a sensor-space role &mdash; the framework will not guess, for the same reason aux will not.</td></tr>
 </table>
 </div>
 
@@ -269,6 +270,18 @@ replacement.</p>
     kind: vector
     burn: claim_type
     all_touched: true</code></pre>
+<div class="warn">
+  <span class="label">What runs today</span>
+  <p><code>kind: continuous</code> and <code>categorical</code> over <code>https://</code> and
+  <code>file://</code>. <code>uri</code> is one string <strong>or a list</strong>: a global
+  raster ships as a tile set, so an AOI wider than one tile needs several mosaicked. They
+  composite later-over-earlier, so the order is part of the source's identity. No globbing. <code>vector</code> and
+  <code>table</code> sources, <code>temporal</code> in any form, and <code>s3://</code> are each
+  refused at validation with the spec section named &mdash; a manifest never discovers them in a
+  worker.</p>
+  <p>Sources are staged, digested and warped onto every tile at <strong>plan</strong> time, so a
+  typo fails before compute is provisioned and no worker ever opens the source.</p>
+</div>
 
 <div class="tw">
 <table>

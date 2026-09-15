@@ -116,6 +116,7 @@ the second cannot be expressed after regridding has discarded the source column.
 class PixelMask(Protocol):
     space: Literal["map", "sensor"] = "map"
     required_roles: tuple[str, ...] = ()
+    required_aux:   tuple[str, ...] = ()      # map-space only - see below
 
     def valid(self, obs: ObsWindow, aux: AuxAccessor) -> BoolArray:
         """(H, W) bool. True = usable.
@@ -129,6 +130,14 @@ masks to the block after it ([12 §2](12-data-access.md)). Neither touches the G
 mask spec is not in its key. (Sensor masks *could* be evaluated in map space by thresholding GLT
 band 1, which holds the source column — but that is a trick, and it fails for any mask needing raw
 values rather than raw indices. Applying them on the sensor window is honest and simpler.)
+
+**Only a map-space mask may declare `required_aux`.** Aux is on the block grid by definition
+([05 §1](05-ancillary-data.md)), so a sensor-space mask — which sees `(downtrack, crosstrack)` —
+could not use it even if it were handed one; `validate_static` refuses the combination and
+resolve passes such a mask `NullAux`. A map-space mask's aux enters the **masked observation**
+key as well as the snapshot key ([06 §2](06-caching.md)): a mask that thresholds a water raster
+is determined by that raster, and neither `pixel_mask_spec` nor `mask_plugin_version` would
+notice it changing.
 
 ### Built-in EMIT masks
 
@@ -299,22 +308,23 @@ class CleanestNadir:
 
 
 class PreferBareEarth:
-    """Prefer the observation that actually sees ground.
+    """Prefer the observation that actually sees ground, under usable illumination.
 
     Thomas Monecke's decision-tree idea from the Mines tag-up: given several
     observations of a pixel, most of which are vegetation, take the one that
     isn't. Soil fraction comes from the already-orthorectified L2B FRCOV
-    product, so this costs nothing to regrid.
+    product, so it needs a warp onto the block grid and no KD-tree.
     """
     capability = "streaming"
-    required_roles = ("frcov",)
+    required_roles = ("frcov", "solar_zenith")
 
-    def __init__(self, min_soil=0.80, hard_floor=0.65):
-        self.min_soil, self.hard_floor = min_soil, hard_floor
+    def __init__(self, min_soil=0.80, hard_floor=0.65, sun_weight=0.25):
+        ...
 
     def score(self, obs, aux):
-        soil = obs["frcov"]
-        s = soil.copy()
+        soil = np.clip(obs["frcov"], 0.0, 1.0)
+        sun  = np.cos(np.radians(np.clip(obs["solar_zenith"], 0.0, 90.0)))
+        s = soil + self.sun_weight * sun       # cover decides; light breaks ties
         s[soil < self.hard_floor] = np.nan     # unrecoverable; V002 used 0.65
         return s
 ```
@@ -340,9 +350,15 @@ mosaicking. Keeping them separate lets the scorer *rank* between 0.65 and 0.80 r
 discarding that range outright — which is the "don't destroy information" principle applied at the
 smallest possible scale.
 
-> **Caveat to carry:** the current FRCOV is reportedly NPV-false-positive-prone — it reads some
+> **Caveat to carry, now measured.** The current FRCOV is NPV-false-positive-prone — it reads some
 > bare soil as non-photosynthetic vegetation — so this scorer is conservative in a way that will
-> improve when FRCOV does.
+> improve when FRCOV does. **[observed] 2026-09-15**, over the Cuprite 2 × 3 tile set: the median
+> bare-soil fraction is **0.53**, and only 29.6 % of covered cells clear `hard_floor: 0.65`.
+> Coverage falls from the baseline's 62.4 % of cells receiving a vote to 19.7 %, and the loss is
+> at the observation level — 43 % of cells have any admissible observation, averaging 0.89 months
+> against 3.60. Whether the cutoff belongs lower, or on bare + NPV together rather than on bare
+> alone, is a science decision and is open
+> ([examples/emit-cmr-cuprite](../../examples/emit-cmr-cuprite/README.md) §8).
 
 ### The score band is persisted
 

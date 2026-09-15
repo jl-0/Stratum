@@ -133,9 +133,19 @@ what it means.</p>
 raster, mining-claim polygons. Declare it in the manifest and read it through <code>aux</code>:</p>
 
 <pre><code>aux:
-  slope: {uri: "s3://.../slope.tif", kind: continuous, resampling: bilinear}
-  snow:  {uri: "s3://.../snow/{date}.tif", kind: categorical, resampling: nearest,
-          temporal: nearest, max_age: P3D}</code></pre>
+  landcover:
+    uri: https://esa-worldcover.s3.eu-central-1.amazonaws.com/v200/2021/map/ESA_WorldCover_10m_2021_v200_N36W120_Map.tif
+    kind: categorical
+    resampling: mode</code></pre>
+
+<pre><code><span class="k">class</span> Landcover:
+    <span class="c">"""Drop cells whose cover cannot carry a surface mineral signal."""</span>
+    space = <span class="k">"map"</span>
+    required_aux = (<span class="k">"landcover"</span>,)
+
+    <span class="k">def</span> valid(self, obs, aux):
+        cover = aux.raster(<span class="k">"landcover"</span>)
+        <span class="k">return</span> (cover != 80) &amp; (cover != 50) &amp; (cover != 10)   <span class="c"># water, built-up, tree</span></code></pre>
 
 <pre><code><span class="k">class</span> CleanestNadir:
     <span class="c">"""Nadir-preferring, penalised for steep terrain, rejecting snow."""</span>
@@ -148,6 +158,10 @@ raster, mining-claim polygons. Declare it in the manifest and read it through <c
         s -= 0.5 * (aux.raster(<span class="k">"slope"</span>) &gt; 30)
         s[aux.raster(<span class="k">"snow"</span>, date=obs.granule.datetime) &gt; 0] = np.nan
         <span class="k">return</span> s</code></pre>
+
+<p><em>This particular scorer does not run yet</em> — <code>snow</code> is date-keyed, and that is
+the one aux form still unbuilt. It is kept here because it shows both calls; the landcover mask
+above is the shape that works today.</p>
 
 <div class="key">
   <span class="label">The block grid is the contract</span>
@@ -168,14 +182,25 @@ and neither raises an error on its own, so Stratum will not guess — a categori
 continuous resampling method is a plan-time error.</li>
 </ul>
 
-<pre><code>aux.raster(<span class="k">"dem"</span>)                          <span class="c"># (H, W) on this block's grid</span>
-aux.raster(<span class="k">"snow"</span>, date=obs.granule.datetime)
-aux.raster(<span class="k">"ndvi"</span>, epoch=obs.epoch)          <span class="c"># resolved once per epoch — temporal: epoch</span>
-aux.vector(<span class="k">"claims"</span>)                       <span class="c"># rasterized to this block</span>
-aux.features(<span class="k">"claims"</span>)                     <span class="c"># the geometries, clipped to this block</span>
-aux.distance(<span class="k">"mines"</span>)                      <span class="c"># (H, W) distance to the nearest feature, cached</span>
-aux.table(<span class="k">"climate_index"</span>).at(date)         <span class="c"># scalar, no gridding</span>
-aux.granule_index                          <span class="c"># the frozen index</span></code></pre>
+<pre><code>aux.raster(<span class="k">"dem"</span>)                          <span class="c"># (H, W) on this block's grid — BUILT</span>
+aux.raster(<span class="k">"snow"</span>, date=...)              <span class="c"># date-keyed sources — not built</span>
+aux.vector(<span class="k">"claims"</span>)                       <span class="c"># rasterized to this block — not built</span>
+aux.features(<span class="k">"claims"</span>)                     <span class="c"># the geometries, clipped — not built</span>
+aux.distance(<span class="k">"mines"</span>)                      <span class="c"># distance to the nearest feature — not built</span>
+aux.table(<span class="k">"climate_index"</span>).at(date)         <span class="c"># scalar lookup — not built</span>
+aux.granule_index                          <span class="c"># the frozen index — not built</span></code></pre>
+
+<div class="warn">
+  <span class="label">What is built today</span>
+  <p><code>raster()</code>, for <strong>static</strong> sources over <code>https://</code> and
+  <code>file://</code>. The rest raise and name the spec section. Date-keyed sources
+  (<code>temporal: nearest</code>) are the notable gap: resolving one means finding the nearest
+  date that <em>exists</em>, which needs a directory listing, and a run never queries a
+  catalogue.</p>
+  <p>A <strong>sensor-space</strong> mask cannot declare <code>required_aux</code> at all. Aux is
+  on the block grid by definition, and a sensor-space mask sees raw detector geometry — the two
+  shapes do not even agree.</p>
+</div>
 
 <div class="reading">
   <span class="label">Further reading</span>

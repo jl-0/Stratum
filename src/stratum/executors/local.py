@@ -21,6 +21,7 @@ from pathlib import Path
 from typing import Any
 
 from stratum import __version__, console
+from stratum.ancillary import WARP_ALGO_VERSION
 from stratum.executors.worker import exec_item, load_cached
 from stratum.plan.document import (
     REPORT_NAME,
@@ -187,7 +188,13 @@ def provenance_record(run: RunPlan, started: datetime, finished: datetime,
                 # the granules that have any; a local source records none, honestly
                 "asset_checksums": {gid: dict(ref.checksums)
                                     for gid, ref in ctx.granules.items() if ref.checksums}},
-        code={"regrid_algo_version": ctx.regrid_algo_version},
+        # 10 section 2: what the run reached outside the granules, and the content it was keyed
+        # on. `[]` until now, which was true only because nothing could be declared.
+        aux=[{"alias": a, "uri": src.uri, "kind": src.kind, "resampling": src.resampling,
+              "digest": src.digest, "etag": src.etag}
+             for a, src in sorted(ctx.aux_sources.items())],
+        code={"regrid_algo_version": ctx.regrid_algo_version,
+              "warp_algo_version": WARP_ALGO_VERSION},
         plugins={"scorer": ctx.scorer.identity(),
                  "masks": [m.identity() for m in ctx.masks],
                  "reducer": {"ref": "schema", "version": __version__},

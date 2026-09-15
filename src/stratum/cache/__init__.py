@@ -29,8 +29,9 @@ from stratum.storage import Workspace, local_workspace
 from stratum.types import GridDef, TileRef, canonical_hash
 
 # artifact_type -> kind. A file artifact carries a suffix; a directory artifact is renamed whole.
-ARTIFACT_KINDS: Mapping[str, str] = {"glt": "file", "snapshot": "dir", "product": "dir"}
-FILE_SUFFIX: Mapping[str, str] = {"glt": ".tif"}
+ARTIFACT_KINDS: Mapping[str, str] = {"aux": "file", "glt": "file", "snapshot": "dir",
+                                     "ortho": "file", "product": "dir"}
+FILE_SUFFIX: Mapping[str, str] = {"aux": ".tif", "glt": ".tif", "ortho": ".tif"}
 INPUTS_NAME = ".inputs.json"
 # A directory artifact also carries the list of its own members. Locally it is redundant - the
 # commit is a whole-directory rename and cannot tear - but a remote commit is N uploads, and
@@ -264,6 +265,54 @@ def glt_inputs(granule_id: str, grid: GridDef, max_distance: float | None, regri
     return inputs
 
 
+def aux_inputs(alias: str, digest: str, grid: GridDef, resampling: str,
+               warp_algo_version: int) -> dict[str, Any]:
+    """Aux warp key: source x tile x grid x resampling (06 section 2). The tile is in the key's
+    path, so it is not a field here.
+
+    `digest` is the CONTENT of the source, not its URI: a DEM swapped in place under a stable URI
+    is the classic silent-staleness bug (06 section 3, rule 4). 06 section 2 names `source_etag`
+    for this; a digest of the staged bytes is what is actually used, because `AssetStore` never
+    reads a response ETag, an aux file has no catalogue checksum, and a multipart ETag is a hash
+    of part-hashes rather than of content. The alias is in the key because it is what a manifest
+    and a plugin agree on (05 section 5); two aliases on one file are two artifacts, which costs
+    a warp and keeps `stratum cache explain` legible.
+
+    `warp_algo_version` is the 06 section 3 rule 2 guard: without it a fix to the warp serves
+    stale rasters forever. `stratum.ancillary.ALGO_HASH` records it against the module's content
+    hash and a test fails when the module changes without a bump.
+    """
+    return {
+        "artifact_type": "aux",
+        "alias": alias,
+        "source_digest": digest,
+        "grid_def": grid_def_fields(grid),
+        "resampling": resampling,
+        "warp_algo_version": int(warp_algo_version),
+    }
+
+
+def ortho_inputs(granule_id: str, role: str, asset_checksum: str | None, var: str, grid: GridDef,
+                 resampling: str, warp_algo_version: int) -> dict[str, Any]:
+    """Ortho role warp key: granule x role x tile x grid x resampling (12 section 2).
+
+    The ortho twin of `glt_inputs`, and cached for the same reason: an ortho role is warped once
+    per (granule, tile) and windowed per block, not re-warped for every block of every epoch
+    (05 section 4, "warp once, slice many"). Unlike a GLT this DOES carry the asset's identity
+    and the variable, because the pixels - not merely the geometry - are what it holds.
+    """
+    return {
+        "artifact_type": "ortho",
+        "granule_id": granule_id,
+        "role": role,
+        "asset_checksum": asset_checksum,
+        "var": var,
+        "grid_def": grid_def_fields(grid),
+        "resampling": resampling,
+        "warp_algo_version": int(warp_algo_version),
+    }
+
+
 def snapshot_inputs(obs_keys: Sequence[CacheKey | str], aux_keys: Sequence[CacheKey | str],
                     scorer_ref: str, scorer_version: str, scorer_params: Mapping[str, Any],
                     layers_hash: str, epoch_bounds: Sequence[str]) -> dict[str, Any]:
@@ -298,6 +347,6 @@ def product_inputs(snapshot_keys: Sequence[CacheKey | str], aux_keys: Sequence[C
 
 
 __all__ = [
-    "ARTIFACT_KINDS", "INPUTS_NAME", "MEMBERS_NAME", "CacheKey", "CacheRoot", "glt_inputs",
-    "grid_def_fields", "product_inputs", "snapshot_inputs",
+    "ARTIFACT_KINDS", "INPUTS_NAME", "MEMBERS_NAME", "CacheKey", "CacheRoot", "aux_inputs",
+    "glt_inputs", "grid_def_fields", "ortho_inputs", "product_inputs", "snapshot_inputs",
 ]

@@ -67,13 +67,31 @@ class FakePaginator:
     def __init__(self, client: FakeS3) -> None:
         self.client = client
 
-    def paginate(self, *, Bucket: str, Prefix: str) -> list[dict[str, Any]]:
+    def paginate(self, *, Bucket: str, Prefix: str,
+                 Delimiter: str | None = None) -> list[dict[str, Any]]:
         base = self.client.root / Bucket
         if not base.is_dir():
             return [{}]
         keys = sorted(str(p.relative_to(base).as_posix()) for p in base.rglob("*") if p.is_file())
-        hits = [{"Key": k} for k in keys if k.startswith(Prefix)]
-        return [{"Contents": hits}] if hits else [{}]
+        hits = [k for k in keys if k.startswith(Prefix)]
+        if Delimiter is None:
+            return [{"Contents": [{"Key": k} for k in hits]}] if hits else [{}]
+        # A delimited list: keys with no further delimiter come back as Contents, and everything
+        # deeper is rolled up into CommonPrefixes. S3 does exactly this, and `ObjectStore.list_dirs`
+        # depends on it - a fake that returned every key would let a broken caller pass.
+        contents, prefixes = [], set()
+        for k in hits:
+            rest = k[len(Prefix):]
+            if Delimiter in rest:
+                prefixes.add(Prefix + rest.split(Delimiter, 1)[0] + Delimiter)
+            else:
+                contents.append({"Key": k})
+        page: dict[str, Any] = {}
+        if contents:
+            page["Contents"] = contents
+        if prefixes:
+            page["CommonPrefixes"] = [{"Prefix": p} for p in sorted(prefixes)]
+        return [page] if page else [{}]
 
 
 def install(monkeypatch: Any, root: Path) -> FakeS3:

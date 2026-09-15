@@ -55,8 +55,9 @@ def check_formats(formats: Sequence[str]) -> None:
         if f not in FORMATS:
             raise ValueError(f"outputs.formats: {f!r} is not one of {FORMATS}")
         if f not in IMPLEMENTED_FORMATS:
-            raise NotImplementedError(f"outputs.formats: {f!r} is not implemented in the first "
-                                      "slice; only `cog` is (07 section 2)")
+            raise NotImplementedError(
+                f"outputs.formats: {f!r} is not implemented in the first slice; "
+                f"{' and '.join(repr(i) for i in IMPLEMENTED_FORMATS)} are (07 section 2)")
 
 
 #: GDAL's COG driver refuses a smaller BLOCKSIZE ("should be >= 128") and, having refused it,

@@ -180,3 +180,16 @@ than the ergonomics here.
 | IaC | Terraform |
 | CLI | click |
 | Tests | pytest + seam-equivalence + cache-key fixtures |
+
+---
+
+## Amendment, 2026-09-15 — `stratum-emit` declares rasterio
+
+The plugin distribution originally listed `stratum`, `numpy` and `netCDF4` only. The
+ortho-native GeoTIFF reader opens rasters directly, so `rasterio` is now a declared dependency of
+`stratum-emit` rather than something it inherits from `stratum`. A reader's core import must not
+rest on a transitive dependency: that works until someone installs the plugin against a slimmer
+framework, and then fails at run time rather than at install time.
+
+No new dependency enters the environment — `stratum` already required rasterio (§3, "aux
+warping"), and the lock file is unchanged.

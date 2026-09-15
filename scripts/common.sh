@@ -34,7 +34,17 @@ export TF_VAR_role_name_prefix="$STRATUM_ROLE_NAME_PREFIX"
 # bucket, repository, secret and roles and no function. That is the bootstrap order, because the
 # repository must exist before there is an image to push to it.
 export TF_VAR_image_digest="${STRATUM_IMAGE_DIGEST:-}"
-export TF_VAR_budget_alert_email="${STRATUM_BUDGET_ALERT_EMAIL:-}"
+
+export TF_VAR_vpc_id="${STRATUM_VPC_ID:-}"
+export TF_VAR_viewer_image_digest="${STRATUM_VIEWER_IMAGE_DIGEST:-}"
+
+# A viewer needs a VPC and nothing else. Saying so here beats an apply that succeeds at creating
+# no viewer and reports it as success.
+if [ -n "${STRATUM_VIEWER_IMAGE_DIGEST:-}" ] && [ -z "${STRATUM_VPC_ID:-}" ]; then
+  echo "STRATUM_VIEWER_IMAGE_DIGEST is set but STRATUM_VPC_ID is empty - no viewer would be" >&2
+  echo "  created. The VPC id is the deployment's one network input." >&2
+  exit 1
+fi
 
 account_id() { aws sts get-caller-identity --profile "$AWS_PROFILE" --query Account --output text; }
 state_bucket() { echo "stratum-tfstate-$(account_id)"; }

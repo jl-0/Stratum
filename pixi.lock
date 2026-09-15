@@ -8868,6 +8868,7 @@ packages:
   - stratum>=0.0.1
   - numpy>=1.26
   - netcdf4>=1.6,<1.7.1
+  - rasterio>=1.3
   requires_python: '>=3.11'
 - pypi: ./vendor/SpectralUtil
   name: spectral-util

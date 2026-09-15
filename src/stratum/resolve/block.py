@@ -19,6 +19,7 @@ from typing import Any
 import numpy as np
 from rasterio.warp import transform_bounds
 
+from stratum.ancillary import BlockAux, aux_key_for
 from stratum.cache import CacheKey, glt_inputs, snapshot_inputs
 from stratum.classes import Remap
 from stratum.index import role_asset
@@ -26,7 +27,14 @@ from stratum.regrid import read_glt
 from stratum.resolve.context import NullAux, PlanContext
 from stratum.resolve.observation import ObsContext, block_coords, is_lonlat, read_observation
 from stratum.resolve.snapshot import empty_layer, write_snapshot
-from stratum.types import BlockRef, Epoch, GranuleRef, TileRef, canonical_hash
+from stratum.types import (
+    AuxAccessor,
+    BlockRef,
+    Epoch,
+    GranuleRef,
+    TileRef,
+    canonical_hash,
+)
 
 
 # ------------------------------------------------------------------------------------ work item
@@ -93,6 +101,23 @@ def glt_key_for(plan: PlanContext, tile: TileRef, granule_id: str) -> CacheKey:
     return plan.cache.key("glt", plan.grid.id, tile, inputs)
 
 
+def aux_keys_for(plan: PlanContext, tile: TileRef) -> dict[str, CacheKey]:
+    """alias -> the warp key for every aux source a plugin declared (06 section 2).
+
+    PURE: no IO, no cache probe, no network. That is not tidiness. `snapshot_key` is recomputed
+    by `product_key` once per epoch per block through the whole reduce stage, and again at
+    publish, so a stat or an open in here turns reduce into an IO storm of O(blocks x epochs).
+
+    Keyed on the DECLARATION (`PlanContext.aux_to_read`), not on what a plugin goes on to read:
+    the snapshot key is built before the scorer runs, so what was read is not knowable yet. A
+    declared-but-unread source therefore costs a spurious miss - the safe direction, and the only
+    computable rule. Per tile, not per block: a warp is shared by every block of the tile
+    (05 section 4).
+    """
+    return {alias: aux_key_for(plan.cache, tile, plan.aux_sources[alias])
+            for alias in plan.aux_to_read()}
+
+
 def granule_remap(plan: PlanContext, layer: str, granule_id: str) -> Remap:
     """The raw -> product lookup the planner resolved for one granule on one categorical layer
     (13 section 3 rule 2); a missing one is a plan defect, not a resolve decision."""
@@ -103,7 +128,8 @@ def granule_remap(plan: PlanContext, layer: str, granule_id: str) -> Remap:
                        "per-granule resolution is a plan-time step (13 section 3 rule 2)") from None
 
 
-def observation_inputs(plan: PlanContext, glt_key: CacheKey, granule: GranuleRef) -> dict[str, Any]:
+def observation_inputs(plan: PlanContext, glt_key: CacheKey, granule: GranuleRef,
+                       aux_keys: Mapping[str, CacheKey] | None = None) -> dict[str, Any]:
     """The masked-observation identity of 06 section 2 for ONE granule: `glt_key`,
     `asset_roles` (which collection/asset/variable each role reads - the bindings, not URIs,
     which vary between environments - plus that asset's catalogue checksum, the asset identity
@@ -113,7 +139,13 @@ def observation_inputs(plan: PlanContext, glt_key: CacheKey, granule: GranuleRef
     (13 section 3 rule 3) and so determines the observation as much as a mask does. Nothing is
     written under this key in this slice, but its hash is what enters the snapshot key as an
     `obs_key`, so a mask, a lumping or a re-delivered table invalidates snapshots and not
-    GLTs (06 section 3 rule 1)."""
+    GLTs (06 section 3 rule 1).
+
+    A MAP-space mask that reads an aux raster is determined by that raster too, and neither
+    `pixel_mask_spec` nor `mask_plugin_version` captures it - swap the raster and the mask would
+    silently admit different pixels. `mask_aux_keys` closes that, and is emitted only when a mask
+    actually declares aux, so a run without one produces exactly the keys it produced before aux
+    existed (the same trick `glt_inputs` uses for `source_checksum`)."""
     read = plan.roles_to_read()
     asset_roles: dict[str, Any] = {}
     for role, b in plan.roles.items():
@@ -130,7 +162,7 @@ def observation_inputs(plan: PlanContext, glt_key: CacheKey, granule: GranuleRef
         remaps[layer.name] = {"raw_fingerprint": remap.raw_fingerprint,
                               "enumeration": remap.enumeration,
                               "lookup": canonical_hash(remap.lookup.tolist())}
-    return {
+    inputs: dict[str, Any] = {
         "artifact_type": "observation",
         "glt_key": glt_key.hash,
         "asset_roles": asset_roles,
@@ -138,6 +170,14 @@ def observation_inputs(plan: PlanContext, glt_key: CacheKey, granule: GranuleRef
         "mask_plugin_version": [m.version for m in plan.masks],
         "remaps": remaps,
     }
+    mask_aux = plan.map_mask_aux()
+    if mask_aux:
+        if aux_keys is None:
+            raise ValueError(
+                "a map-space mask declares required_aux, so the observation key needs the aux "
+                "warp keys; pass aux_keys= (a tile is not recoverable from a GLT key)")
+        inputs["mask_aux_keys"] = {a: aux_keys[a].hash for a in mask_aux}
+    return inputs
 
 
 # ------------------------------------------------------------------------------------- the loop
@@ -152,7 +192,8 @@ class Resolved:
 
 
 def resolve_window(plan: PlanContext, block: BlockRef, epoch: Epoch,
-                   reached: list[tuple[GranuleRef, CacheKey, np.ndarray]]) -> Resolved:
+                   reached: list[tuple[GranuleRef, CacheKey, np.ndarray]],
+                   aux: AuxAccessor | None = None) -> Resolved:
     """Score every observation that reaches the block and keep the best per cell (04 section 4,
     streaming). `reached` is [(granule, glt_key, glt_window)] in candidate order. A cell is
     taken by observation i when valid, its score is not NaN, and it is strictly greater than
@@ -163,7 +204,9 @@ def resolve_window(plan: PlanContext, block: BlockRef, epoch: Epoch,
     won = np.zeros(shape, dtype=bool)
     layers: dict[str, np.ndarray] = {}
     contributing: list[str] = []
-    aux = NullAux()
+    if aux is None:
+        aux = NullAux() if not plan.aux_to_read() else BlockAux(
+            aux_keys_for(plan, block.tile), plan.aux_sources, block)
     scorer = plan.scorer.instance
     core = _core_slices(block)
     coords = block_coords(block.transform, shape, plan.grid.crs)
@@ -222,7 +265,9 @@ def resolve_block(item: Mapping[str, Any], plan: PlanContext) -> CacheKey:
     if plan.cache.hit(snap_key):
         return snap_key
 
-    resolved = resolve_window(plan, block, epoch, reached)
+    aux_keys = aux_keys_for(plan, tile)
+    aux = NullAux() if not aux_keys else BlockAux(aux_keys, plan.aux_sources, block)
+    resolved = resolve_window(plan, block, epoch, reached, aux)
     core_transform = BlockRef(tile, block.bx, block.by, halo=0).transform
     plan.cache.write_dir(snap_key, lambda d: write_snapshot(
         d, layers=resolved.layers, score=resolved.score, valid=resolved.valid,
@@ -252,9 +297,12 @@ def reached_observations(plan: PlanContext, parsed: ResolveItem
 
 def _snapshot_key(plan: PlanContext, parsed: ResolveItem,
                   reached: list[tuple[GranuleRef, CacheKey, np.ndarray]]) -> CacheKey:
-    obs_keys = sorted(canonical_hash(observation_inputs(plan, key, granule))
+    aux_keys = aux_keys_for(plan, parsed.tile)
+    obs_keys = sorted(canonical_hash(observation_inputs(plan, key, granule, aux_keys))
                       for granule, key, _ in reached)
-    inputs = snapshot_inputs(obs_keys, [], plan.scorer.ref, plan.scorer.version,
+    # sorted by alias, so plugin declaration order cannot change a key (06 section 2)
+    inputs = snapshot_inputs(obs_keys, [aux_keys[a].hash for a in sorted(aux_keys)],
+                             plan.scorer.ref, plan.scorer.version,
                              plan.scorer.params, plan.schema.layers_hash,
                              list(parsed.epoch.bounds))
     # 13 section 6: every contributing raw table's fingerprint is in the snapshot's

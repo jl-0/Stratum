@@ -26,6 +26,7 @@ from urllib.request import url2pathname
 import numpy as np
 from shapely.geometry.base import BaseGeometry
 
+from stratum.ancillary import AuxSource
 from stratum.cache import CacheRoot
 from stratum.classes import Remap
 from stratum.hooks import PixelMask, Scorer
@@ -82,17 +83,25 @@ class Store(Protocol):
 @dataclass(frozen=True)
 class RoleBinding:
     """A role as resolve reads it (02 section 5, 12 section 6): which collection's asset and
-    which variable. Shaped so `stratum.index.role_uri` accepts it directly."""
+    which variable. Shaped so `stratum.index.role_uri` accepts it directly.
+
+    `space` and `resampling` are recorded by the planner rather than looked up in a worker, so a
+    worker never instantiates a reader merely to decide HOW to read a role - and so the two can
+    never disagree between the process that planned and the process that ran (12 section 2).
+    """
 
     collection: str
     var: str
     asset: str | None = None
+    space: str = "sensor"
+    resampling: str | None = None
 
     @classmethod
     def from_spec(cls, spec: Any) -> RoleBinding:
         """From a manifest RoleSpec (or any object / mapping with collection, var, asset)."""
         get = spec.get if isinstance(spec, Mapping) else lambda k, d=None: getattr(spec, k, d)
-        return cls(collection=str(get("collection")), var=str(get("var")), asset=get("asset"))
+        return cls(collection=str(get("collection")), var=str(get("var")), asset=get("asset"),
+                   space=str(get("space") or "sensor"), resampling=get("resampling"))
 
 
 @dataclass(frozen=True)
@@ -189,6 +198,10 @@ class PlanContext:
                     `inputs.readers`: collection -> plugin ref (12 section 3 rule 1).
     reader_lookup   Optional: collection -> GranuleReader; defaults to stratum.access.reader_for
                     with `reader_overrides`. A test injects a fake reader here.
+    aux_sources     alias -> AuxSource for every source the manifest declared (05 section 5),
+                    already staged and digested by the planner. Empty for a run with no aux,
+                    which is what keeps such a run's keys bit-identical to a run before aux
+                    existed.
     """
 
     grid: GridDef
@@ -207,6 +220,7 @@ class PlanContext:
     regrid_algo_version: int = 1
     reader_overrides: Mapping[str, str] = field(default_factory=dict)
     reader_lookup: Callable[[str], GranuleReader] | None = None
+    aux_sources: Mapping[str, AuxSource] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         for name in self.aliases:
@@ -220,6 +234,16 @@ class PlanContext:
             if getattr(m.instance, "space", None) not in ("sensor", "map"):
                 raise ValueError(f"mask {m.ref!r} must declare space 'sensor' or 'map' "
                                  "(04 section 3)")
+        missing = [a for a in self.aux_to_read() if a not in self.aux_sources]
+        if missing:
+            raise ValueError(f"aux alias(es) {missing} are required by a plugin but were not "
+                             "declared in the manifest's `aux` block (05 section 5)")
+        for m in self.masks:
+            if (getattr(m.instance, "space", None) == "sensor"
+                    and getattr(m.instance, "required_aux", ())):
+                raise ValueError(
+                    f"mask {m.ref!r} is sensor-space and declares required_aux; aux is on the "
+                    "BLOCK grid (05 section 1) and a sensor-space mask sees sensor geometry")
         if self.scorer.instance.capability != "streaming":
             raise NotImplementedError(
                 f"scorer {self.scorer.ref!r} has capability "
@@ -256,6 +280,19 @@ class PlanContext:
         raise KeyError(f"{name!r} is neither a role nor a band alias; declared: "
                        f"{sorted(self.roles)} / {sorted(self.aliases)}")
 
+    def role_space(self, role: str) -> str:
+        """"sensor" | "ortho" for a role (12 section 2). From the plan, never from a reader."""
+        return getattr(self.roles[role], "space", "sensor") or "sensor"
+
+    def role_resampling(self, role: str) -> str:
+        """How an ortho role is warped onto the block grid. Declared, never defaulted
+        (05 section 2), and `validate_static` requires it for an ortho role."""
+        value = getattr(self.roles[role], "resampling", None)
+        if value is None:
+            raise ValueError(f"ortho role {role!r} declares no `resampling`; the framework warps "
+                             "it onto the block grid and will not guess how (12 section 2)")
+        return str(value)
+
     def roles_to_read(self) -> list[str]:
         """Every role an observation must carry: the schema's sources, the scorer's and the
         masks' `required_roles`, each resolved through aliases to its role. Manifest order."""
@@ -268,6 +305,37 @@ class PlanContext:
             for name in getattr(m.instance, "required_roles", ()):
                 wanted.add(self.role_of(name))
         return [r for r in self.roles if r in wanted]
+
+    def aux_to_read(self) -> list[str]:
+        """Every aux alias this run may read: the scorer's `required_aux` and the masks',
+        deduped and sorted (05 section 5).
+
+        The ONE union. `aux_keys_for` builds the snapshot key's `aux_keys` from it and `BlockAux`
+        admits exactly these aliases, so the key can never disagree with what the accessor will
+        serve - two independent unions would drift and the disagreement would show up as a
+        corrupt cache, not an error. Sorted because `snapshot_inputs` stores the list verbatim
+        (06 section 2): plugin declaration order must not change a key.
+
+        A declared alias enters the key whether or not the plugin goes on to read it. That is
+        conservative - declaring an unused source costs spurious misses - and it is the only
+        computable rule, because the key is built before the scorer runs (`resolve_block`).
+        """
+        wanted = set(self.scorer.instance.required_aux or ())
+        for m in self.masks:
+            wanted.update(getattr(m.instance, "required_aux", ()) or ())
+        return sorted(wanted)
+
+    def map_mask_aux(self) -> list[str]:
+        """The aliases the MAP-space masks declare, sorted. These determine the masked
+        observation (06 section 2) and not only the snapshot: a mask reading a raster is
+        determined by that raster, which `pixel_mask_spec` and `mask_plugin_version` do not
+        capture. Sensor-space masks cannot declare aux at all - aux is on the block grid
+        (05 section 1) - and `validate_static` refuses it."""
+        wanted: set[str] = set()
+        for m in self.masks:
+            if getattr(m.instance, "space", None) == "map":
+                wanted.update(getattr(m.instance, "required_aux", ()) or ())
+        return sorted(wanted)
 
 
 __all__ = [

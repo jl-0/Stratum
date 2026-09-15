@@ -27,6 +27,7 @@ index.html                what it does, the pipeline, where you plug in
 guide/
   concepts.html           grid/tile/block, epochs & delivery, roles, spaces, nodata, class tables
   running.html            write a manifest, dry-run it, submit it, read the output
+  manifests.html          patterns -> index -> roles -> obs; roles vs aux; what an input dataset must provide
   reading-data.html       the block read path; sources, readers, staging, credentials
   algorithms.html         every arithmetic step, linked to the line that performs it
   plugins.html            authoring guide for all five science hooks

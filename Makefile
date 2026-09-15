@@ -2,7 +2,8 @@
 # repository names an account, a profile, a bucket, or a site's IAM requirements.
 SHELL := /usr/bin/env bash
 .PHONY: help env-check bootstrap stratum-infrastructure infra infra-plan infra-output \
-        cloud-run image image-local destroy test lint
+        cloud-run image image-local destroy test lint viewer viewer-up viewer-url \
+        viewer-down viewer-logs
 
 help:
 	@echo "bootstrap               create the Terraform state bucket (once per account)"
@@ -13,6 +14,9 @@ help:
 	@echo "cloud-run               run examples/emit-cmr-nevada in AWS (MANIFEST=... to pick another)"
 	@echo "image                   build the worker image and push it; prints the digest to pin"
 	@echo "image-local             build it without pushing, for a local docker run"
+	@echo "viewer                  serve a map of a products tree (ROOT=... to pick one)"
+	@echo "viewer-up / -url        run the viewer as a Fargate task; print its private URL"
+	@echo "viewer-down / -logs     stop it; tail its log"
 	@echo "test lint               pixi run test / pixi run lint"
 	@echo ""
 	@echo "First time:  make bootstrap && make stratum-infrastructure"
@@ -52,6 +56,17 @@ cloud-run: env-check
 
 image:       env-check ; ./scripts/build-image.sh
 image-local: env-check ; ./scripts/build-image.sh --local
+
+# The viewer, two ways. `viewer` needs no deployment and no .env - it reads a local directory, or
+# an s3:// root with your own credentials. The `viewer-*` targets run the same thing as a Fargate
+# task on its own private IP, for showing someone else, and bill only while one is up.
+ROOT ?= examples/emit-cmr-nevada/out
+viewer: ; pixi run stratum preview --root $(ROOT)
+
+viewer-up:   env-check ; ./scripts/viewer-task.sh up
+viewer-url:  env-check ; ./scripts/viewer-task.sh url
+viewer-down: env-check ; ./scripts/viewer-task.sh down
+viewer-logs: env-check ; ./scripts/viewer-task.sh logs
 
 test: ; pixi run test
 lint: ; pixi run lint

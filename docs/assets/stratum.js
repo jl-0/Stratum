@@ -16,10 +16,12 @@
     { section: 'Guide', items: [
       { id: 'guide/concepts',   href: 'guide/concepts.html',   label: 'Concepts' },
       { id: 'guide/running',    href: 'guide/running.html',    label: 'Running a mosaic' },
+      { id: 'guide/manifests',  href: 'guide/manifests.html',  label: 'Authoring a manifest' },
       { id: 'guide/reading-data', href: 'guide/reading-data.html', label: 'Reading data' },
       { id: 'guide/algorithms', href: 'guide/algorithms.html', label: 'Algorithms, step by step' },
       { id: 'guide/plugins',    href: 'guide/plugins.html',    label: 'Writing plugins' },
       { id: 'guide/caching',    href: 'guide/caching.html',    label: 'Caching & reruns' },
+      { id: 'guide/viewing',    href: 'guide/viewing.html',    label: 'Viewing products' },
       { id: 'guide/scaling',    href: 'guide/scaling.html',    label: 'Running at scale' },
       { id: 'guide/deploying',  href: 'guide/deploying.html',  label: 'Deploying to AWS' }
     ]},

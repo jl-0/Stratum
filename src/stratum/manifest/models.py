@@ -195,12 +195,21 @@ class ClassTableSpec(Strict):
 
 
 class RoleSpec(Strict):
-    """A role resolves to (asset URI, variable) through the index (02 section 5)."""
+    """A role resolves to (asset URI, variable) through the index (02 section 5).
+
+    `resampling` applies only to an ORTHO-NATIVE role - a product already on a map grid, which
+    the framework warps onto the block grid rather than gathering through a GLT (12 section 2).
+    It is required for one and refused for a sensor-space role, under the same rule aux lives by
+    (05 section 2): interpolating a class label produces a number that is not a class, and
+    nothing downstream can detect it, so the manifest says which and the framework never guesses.
+    Which roles are ortho is known statically, from the reader registered for the collection.
+    """
 
     collection: str
     var: str
     asset: str | None = None
     version: str | None = None
+    resampling: Literal["nearest", "bilinear", "cubic", "mode", "average"] | None = None
     class_table: ClassTableSpec | None = None
 
 
@@ -280,15 +289,32 @@ class InputsSpec(Strict):
 
 # ------------------------------------------------------------------------------------------- aux
 class AuxSpec(Strict):
-    """05 section 2: `kind` and `resampling` are declared, never defaulted, and must agree."""
+    """05 section 2: `kind` and `resampling` are declared, never defaulted, and must agree.
 
-    uri: str
+    `uri` is one source or several. Several is not a convenience: a global raster is delivered as
+    a tile set, so any AOI wider than one of its tiles needs them mosaicked. They are composited
+    in the order written, later over earlier, each contributing only where it has data - so the
+    order is part of the source's identity and reordering is a different artifact. A source that
+    does not intersect a tile is skipped without being read, which is what makes naming four
+    continental tiles cheap for a one-degree run.
+
+    No globbing: the URIs are written out. Discovering what a bucket holds is a listing, and the
+    declaration requirement (05 section 5) exists precisely so that nothing about a run depends
+    on what a remote directory happened to contain at the time.
+    """
+
+    uri: str | list[str]
     kind: Literal["continuous", "categorical", "vector", "table"]
     resampling: Literal["nearest", "bilinear", "cubic", "mode", "average"] | None = None
     temporal: Literal["nearest", "previous", "epoch"] | None = None
     max_age: DurationField | None = None
     burn: str | None = None
     all_touched: bool | None = None
+
+    @property
+    def uris(self) -> list[str]:
+        """The source(s) as a list, whichever form was written."""
+        return [self.uri] if isinstance(self.uri, str) else list(self.uri)
 
     @model_validator(mode="after")
     def _agree(self) -> AuxSpec:
@@ -304,8 +330,10 @@ class AuxSpec(Strict):
             raise ValueError("burn and all_touched apply to kind: vector only")
         if self.max_age is not None and self.temporal not in ("nearest", "previous"):
             raise ValueError("max_age applies to temporal: nearest | previous")
-        if self.temporal is not None and "{date}" not in self.uri:
-            raise ValueError("temporal needs a {date} placeholder in uri")
+        if self.temporal is not None and not all("{date}" in u for u in self.uris):
+            raise ValueError("temporal needs a {date} placeholder in every uri")
+        if isinstance(self.uri, list) and not self.uri:
+            raise ValueError("uri is an empty list; name at least one source")
         return self
 
 

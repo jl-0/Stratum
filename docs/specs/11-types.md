@@ -325,6 +325,14 @@ Addressed by **manifest alias, never URI** — that is what makes the declaratio
 [05 §5](05-ancillary-data.md) enforceable. An undeclared alias raises; it does not fall back to
 opening a path.
 
+**[design] As built** (`stratum/ancillary/BlockAux`): only `raster(alias)` is implemented, and
+only for static sources — the other five members raise, naming [05 §3](05-ancillary-data.md).
+The accessor is constructed **per block**, holding the warp keys the snapshot key was built from
+rather than the sources themselves, so it is structurally incapable of serving an alias the key
+does not name. `NullAux` remains what a run with no aux and every sensor-space `PixelMask` gets:
+aux is on the block grid by definition, and a sensor-space mask sees sensor geometry, so the two
+shapes do not even agree ([04 §3](04-cost-functions.md)).
+
 ---
 
 ## 7. GLT

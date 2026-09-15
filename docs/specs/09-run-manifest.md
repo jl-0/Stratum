@@ -88,7 +88,8 @@ inputs:
     mineral_uncert: {collection: EMITL2BMIN,  asset: MINUNCERT, var: group_1_band_depth_unc}
     mask:           {collection: EMITL2AMASK, version: "002", var: mask}   # EMITL2AMASK is published
                                                                           # at collection version 002
-    frcov:          {collection: EMITL2BFRCOV, asset: FRCOVBARE, var: soil}   # already orthorectified;
+    frcov:          {collection: EMITL2BFRCOV, asset: FRCOVBARE, var: EMIT_L2B_FRCOVBARE,
+                     resampling: bilinear}                                   # already orthorectified;
                     # ships per-fraction GeoTIFFs (FRCOVBARE/PV/NPV + UNC twins, FRCOVQC) - reader not built
   # geolocation: geometry                    # the role regrid takes loc from; default: the
   #                                          # first sensor-space role above - see 03 section 3
@@ -192,6 +193,8 @@ misspelt key is an error with a location. Choices the build settled:
 | `band_aliases` | `band:` is a **0-based** index, validated against the reader's band count at plan time; `match:` selects the single band whose reported attribute equals the value (string comparison, or within `tolerance`) and fails unless exactly one matches ([11 §5](11-types.md)). EMIT L1B OBS: 0 path length, 1 to-sensor azimuth, **2 to-sensor zenith**, 3 to-sun azimuth, **4 to-sun zenith**, 5 phase, 6 slope, 7 aspect, 8 cosine i, 9 UTC time, 10 earth–sun distance |
 | `granule_filter` | The four built-ins plus `product_version`, `collection_version` and `day_night`. `on_missing` is `reject \| keep \| fail`, `fail` when omitted — so `{max_solar_zenith: 70}` is valid and means `fail`; `on_missing` on `month_in` is a schema error, since nothing can be missing. A `{ref, params}` entry resolves a `GranuleFilter` plugin |
 | `snapshot.layers.*.aggregate` | Parameters are validated per `(kind, method)`: `vote` takes `min_count` / `ignore` / `tie_break`; `percentile` requires `p` in `[0, 100]`; `inverse_variance` requires `unc`; `conditional_on` and `spread` apply to any delivered continuous method and not to `none`. A parameter a method does not take is an error ([13 §4](13-snapshot-schema.md)) |
+| `inputs.roles.*.resampling` | **Required** for an ortho-native role and **refused** for a sensor-space one, under [05 §2](05-ancillary-data.md)'s declared-never-defaulted rule: the framework warps an ortho role onto the block grid and will not guess how. Which roles are ortho is known statically, from the reader registered for the collection, so both are `validate_static` problems ([12 §2](12-data-access.md)) |
+| `aux.*` | `uri` is one string **or a list**. A global raster ships as a tile set, so any AOI wider than one of its tiles needs several mosaicked; they composite later-over-earlier, so the order is part of the source's identity and reordering is a different artifact. No globbing — the URIs are written out, because discovering what a bucket holds is a listing. `kind` and `resampling` are both required and must agree. Only `continuous` and `categorical` are built — `vector` and `table` are refused, as is `temporal` in any form, and any scheme other than `https://` and `file://` ([05 §6](05-ancillary-data.md)) |
 | `budget.on_exceed` | `require_approval` (default) \| `fail` \| `warn` — §4 |
 
 ---
@@ -259,7 +262,9 @@ Everything below fails in the plan stage, loudly, while it is cheap:
 - every plugin's `required_aux` declared in `aux` — undeclared reads are refused
   ([05 §5](05-ancillary-data.md));
 - aux sources exist and are readable;
-- `kind`/`resampling` consistent for each aux source;
+- `kind`/`resampling` consistent for each aux source, the source's scheme stageable, and every
+  alias a plugin's `required_aux` names actually declared;
+- `resampling` present on every ortho-native role and absent from every sensor-space one;
 - `capability` and `halo` consistent with `block_size`;
 - `deliver.every` and `deliver.window` are whole multiples of `epoch`, and
   `window >= every`; `deliver.align` is `exact` only when `window == every`;

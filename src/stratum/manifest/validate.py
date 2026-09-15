@@ -6,6 +6,7 @@ readability, per-granule enumeration resolution - belongs to the planner.
 """
 from __future__ import annotations
 
+from collections.abc import Mapping
 from typing import Any
 
 from stratum.manifest.models import CONFIG_MAPPERS, Manifest
@@ -38,9 +39,78 @@ def _roles_and_aux(obj: Any, where: str, m: Manifest, problems: list[str]) -> No
         if alias not in m.aux:
             problems.append(f"{where}: required aux {alias!r} is not declared in aux "
                             "(05 section 5)")
-        else:
-            problems.append(f"{where}: required aux {alias!r} is declared, but aux data is not "
-                            "in this slice (05; first-slice plan section 1)")
+    if getattr(obj, "space", None) == "sensor" and getattr(obj, "required_aux", ()):
+        problems.append(f"{where}: a sensor-space mask cannot declare required_aux - aux is on "
+                        "the BLOCK grid (05 section 1) and this mask sees sensor geometry")
+
+
+#: Aux source kinds the accessor can actually serve (05 section 3). The rest of `AuxAccessor`
+#: - vector, features, distance, table - is specified and not built, so a manifest naming one is
+#: refused here rather than in a worker.
+AUX_KINDS_BUILT = ("continuous", "categorical")
+
+
+def _aux_source_problems(alias: str, spec: Any) -> list[str]:
+    """One declared aux source, checked without opening it (05 section 2, 5).
+
+    `kind` vs `resampling` agreement is already enforced by `AuxSpec` itself, so what is left is
+    what this slice can execute: a raster, from a scheme the asset store can stage, with no date
+    templating.
+    """
+    problems: list[str] = []
+    where = f"aux.{alias}"
+    if spec.kind not in AUX_KINDS_BUILT:
+        problems.append(f"{where}: kind {spec.kind!r} is not built; the accessor serves "
+                        f"{list(AUX_KINDS_BUILT)} through raster() and vector/features/distance/"
+                        "table still raise (05 section 3)")
+    if spec.temporal is not None:
+        problems.append(f"{where}: temporal {spec.temporal!r} is not built (05 section 2). "
+                        "Resolving a date against `{date}` means finding the nearest date that "
+                        "EXISTS, which needs a listing, and a run never queries a catalogue "
+                        "(02 section 6); declare a static uri")
+    for uri in spec.uris:
+        scheme = str(uri).split("://", 1)[0].lower() if "://" in str(uri) else "file"
+        if scheme not in ("https", "file"):
+            problems.append(f"{where}: uri scheme {scheme!r} is not supported; aux is staged "
+                            "through the asset store, which opens https:// and file:// "
+                            "(12 section 4). s3:// direct access is in-region only, not built")
+    return problems
+
+
+def _reader_space(collection: str, overrides: Mapping[str, str]) -> str | None:
+    """"sensor" | "ortho" for the reader registered for `collection`, or None when none is."""
+    from stratum.access import reader_for
+
+    try:
+        return str(getattr(reader_for(collection, overrides), "space", "sensor"))
+    except (LookupError, ImportError, AttributeError, TypeError):
+        return None
+
+
+def _role_space_problems(m: Manifest) -> list[str]:
+    """`resampling` is required for an ortho-native role and refused for a sensor-space one
+    (12 section 2, under 05 section 2's declared-never-defaulted rule).
+
+    Checkable without data: a reader is selected from what the role DECLARES, so the registry
+    answers "is this collection ortho?" from entry-point metadata alone (12 section 3 rule 1). A
+    collection with no reader is left alone - `_instantiate`-style resolution failures are the
+    planner's to report, and duplicating them here would say the same thing twice.
+    """
+    problems: list[str] = []
+    for name, role in m.inputs.roles.items():
+        space = _reader_space(role.collection, m.inputs.readers)
+        if space is None:      # no reader resolves; the planner reports that, not this
+            continue
+        where = f"inputs.roles.{name}"
+        if space == "ortho" and role.resampling is None:
+            problems.append(f"{where}: collection {role.collection!r} is ortho-native, so the "
+                            "role must declare `resampling` - the framework warps it onto the "
+                            "block grid and will not guess how (12 section 2, 05 section 2)")
+        elif space != "ortho" and role.resampling is not None:
+            problems.append(f"{where}: `resampling` applies to an ortho-native role only; "
+                            f"{role.collection!r} is read in sensor space and gathered through a "
+                            "GLT (12 section 2)")
+    return problems
 
 
 def _delivered_names(m: Manifest, problems: list[str]) -> set[str]:
@@ -132,9 +202,9 @@ def validate_static(m: Manifest) -> list[str]:
 
     # -- what this slice cannot execute is refused here, not in a worker (first-slice plan
     #    section 1; 09 section 5 "a typo fails in the planner, not in workers")
-    if m.aux:
-        problems.append(f"aux {sorted(m.aux)}: aux data is not in this slice (05); remove the "
-                        "aux block and any plugin with required_aux")
+    for alias, spec in m.aux.items():
+        problems.extend(_aux_source_problems(alias, spec))
+    problems.extend(_role_space_problems(m))
     try:
         check_formats(list(m.outputs.formats))
     except (NotImplementedError, ValueError) as e:

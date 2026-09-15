@@ -28,6 +28,7 @@ import numpy as np
 import pyarrow as pa
 
 from stratum.access import AssetStore, asset_cache_for
+from stratum.ancillary import AuxSource
 from stratum.cache import CacheRoot
 from stratum.classes import Remap
 from stratum.plugins import resolve
@@ -212,7 +213,8 @@ def context_to_doc(ctx: PlanContext) -> dict[str, Any]:
         "grid": grid_to_doc(ctx.grid),
         "grid_id": ctx.grid.id,
         "granules": {gid: granule_to_doc(ref) for gid, ref in ctx.granules.items()},
-        "roles": {name: {"collection": b.collection, "var": b.var, "asset": b.asset}
+        "roles": {name: {"collection": b.collection, "var": b.var, "asset": b.asset,
+                         "space": b.space, "resampling": b.resampling}
                   for name, b in ctx.roles.items()},
         "aliases": {name: {"role": a.role, "band": a.band} for name, a in ctx.aliases.items()},
         "geolocation_role": ctx.geolocation_role,
@@ -224,6 +226,10 @@ def context_to_doc(ctx: PlanContext) -> dict[str, Any]:
         "regrid_method": ctx.regrid_method,
         "regrid_algo_version": int(ctx.regrid_algo_version),
         "reader_overrides": dict(ctx.reader_overrides),
+        # 05 section 5: the sources the planner staged and digested. A worker never re-stages and
+        # never re-hashes - it reads the digest the key was built from, which is also what makes
+        # the key the SAME key in every process.
+        "aux_sources": {a: src.to_doc() for a, src in sorted(ctx.aux_sources.items())},
     }
 
 
@@ -253,6 +259,12 @@ def context_from_doc(doc: Mapping[str, Any], root: Path | Workspace) -> PlanCont
         regrid_method=doc["regrid_method"],
         regrid_algo_version=int(doc["regrid_algo_version"]),
         reader_overrides=dict(doc.get("reader_overrides", {})),
+        # `.get`, and PLAN_SCHEMA_VERSION deliberately NOT bumped: `load_run` compares it with
+        # strict equality, so a bump would make every plan.json written before this change
+        # unloadable. A plan with no aux block reads back as a run with no aux, which is exactly
+        # what it was.
+        aux_sources={a: AuxSource.from_doc(a, d)
+                     for a, d in dict(doc.get("aux_sources", {})).items()},
     )
 
 

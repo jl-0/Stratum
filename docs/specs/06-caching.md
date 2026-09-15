@@ -27,7 +27,8 @@ a full rebuild into a re-read.
 | **Prepared asset**<br>asset | `asset_checksum`, `prepare_version` | No |
 | **GLT**<br>granule × tile | `granule_id`, `grid_def`, `max_distance`, `regrid_method`, `regrid_algo_version`, and under `adopt` only, `source_checksum` | **No** |
 | **Masked observation**<br>granule × tile × block | `glt_key`, `asset_roles` (per role read: the collection/asset/variable binding **and** the asset's catalogue checksum, `null` when the source has none), `pixel_mask_spec`, `mask_plugin_version`, `remaps` (per categorical layer: the raw table's fingerprint and a hash of the resolved lookup) | No |
-| **Aux warp**<br>source × tile | `source_uri`, `source_etag`, `grid_def`, `resampling` | No |
+| **Aux warp**<br>source × tile | `alias`, `source_digest`, `grid_def`, `resampling`, `warp_algo_version` | No |
+| **Ortho role warp**<br>granule × role × tile | `granule_id`, `role`, `asset_checksum`, `var`, `grid_def`, `resampling`, `warp_algo_version` | No |
 | **Epoch snapshot**<br>tile × epoch × block | `obs_keys[]` (sorted), `aux_keys[]`, `scorer_ref`, `scorer_version`, `scorer_params`, `schema.layers_hash`, `epoch_bounds`, `window` | **Yes** |
 | **Product block**<br>tile × block | `snapshot_keys[]`, `aux_keys[]`, `schema.aggregate_hash`; plus `reducer_ref`, `reducer_version`, `reducer_params` when a plugin is named | Yes |
 | **Rendered image**<br>tile | `product_keys[]`, `aux_keys[]`, `mapper_ref`, `mapper_version`, `mapper_params` | No — see [07](07-output-mapping.md) |
@@ -68,8 +69,10 @@ snapshot's `.inputs.json` also lists `class_tables` — layer → the raw finger
 observations were remapped from — already inside each `obs_key`, repeated so `stratum cache diff`
 can name a vintage change rather than an opaque hash ([13 §6](13-snapshot-schema.md)).
 
-`aux_keys[]` are the warp keys of every aux source the hook declared in `required_aux`, resolved
-for the dates or epochs it actually used. A scorer that reads a DEM must have its snapshots
+`aux_keys[]` are the warp keys of every aux source the hook declared in `required_aux`. **Declared,
+not read**: the snapshot key is built before the scorer runs, so what a plugin went on to read is
+not knowable yet, and a declared-but-unread source costs a spurious miss rather than a silent
+stale hit. The list is sorted by alias, so plugin declaration order cannot change a key. A scorer that reads a DEM must have its snapshots
 invalidated when the DEM changes; that is the whole reason declaration is mandatory
 ([05 §5](05-ancillary-data.md)), and it is why the key carries the resolved warps rather than the
 source URIs.
