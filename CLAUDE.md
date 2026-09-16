@@ -154,6 +154,13 @@ Established by reading code and data. Do not re-derive; do not assume the opposi
 - **Masks run in resolve, not regrid.** Regrid reads `loc` only and the GLT key has no mask term.
   Sensor-space masks apply to the sensor window before the gather, map-space masks to the block
   after it — [`03` §5](docs/specs/03-regrid-glt.md), [`12` §2](docs/specs/12-data-access.md).
+- **Reduction is DECLARED per layer, not named once.** There is no "which reducer" - the built-in
+  one executes each layer's `aggregate`. A `Reducer` plugin replaces that vocabulary and is only
+  for what it cannot say; `joint_mineral_vote` is the one shipped, because combining two
+  categorical layers is not expressible as an `aggregate`. A plugin's `outputs` replace the
+  schema-derived bands (the schema still governs what a SNAPSHOT holds), `n_epochs` is appended
+  for it, `halo > 0` and aux are refused, and its bands cannot be rendered - `outputs.render`
+  names a schema layer.
 - **Lumping runs at the gather in resolve**, into the snapshot schema's enumeration, so snapshots
   hold product ids and never raw Tetracorder classes. `ignore` names classes; `none` is the reserved
   id 0 — [`13` §3](docs/specs/13-snapshot-schema.md).

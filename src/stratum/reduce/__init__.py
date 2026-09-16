@@ -11,26 +11,33 @@ from stratum.reduce.bands import (
     CATEGORICAL_NODATA,
     CONTINUOUS_DTYPE,
     COUNT_DTYPE,
+    N_EPOCHS,
     SchemaError,
+    VoteParams,
     delivered_bands,
     layer_band_count,
     parse_schema,
+    product_bands,
     resolve_class_names,
     validate_schema,
 )
-from stratum.reduce.builtin import band_counts, reduce_stack
+from stratum.reduce.builtin import band_counts, reduce_stack, vote
 
 __all__ = [
     "CATEGORICAL_DTYPE",
     "CATEGORICAL_NODATA",
     "CONTINUOUS_DTYPE",
     "COUNT_DTYPE",
+    "N_EPOCHS",
     "SchemaError",
+    "VoteParams",
     "band_counts",
     "delivered_bands",
     "layer_band_count",
     "parse_schema",
+    "product_bands",
     "reduce_stack",
     "resolve_class_names",
     "validate_schema",
+    "vote",
 ]

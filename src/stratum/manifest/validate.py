@@ -12,7 +12,8 @@ from typing import Any
 from stratum.manifest.models import CONFIG_MAPPERS, Manifest
 from stratum.plugins import resolve
 from stratum.publish.cogs import check_formats
-from stratum.reduce import SchemaError, delivered_bands
+from stratum.reduce import SchemaError, product_bands
+from stratum.types import BandSpec
 
 
 def _instantiate(kind: str, ref: str, params: dict[str, Any], where: str,
@@ -113,12 +114,48 @@ def _role_space_problems(m: Manifest) -> list[str]:
     return problems
 
 
-def _delivered_names(m: Manifest, problems: list[str]) -> set[str]:
+def _reducer_problems(ref: str, reducer: Any) -> list[str]:
+    """What a Reducer plugin must declare before a worker will run it (04 section 5).
+
+    Its `outputs` are the contract - there is no schema to fall back on, and publish stitches
+    exactly the bands it names - so a bad declaration fails here rather than after the first
+    block has been reduced.
+    """
+    problems: list[str] = []
+    outputs = getattr(reducer, "outputs", None)
+    if not outputs:
+        problems.append(f"reducer {ref}: declares no `outputs`; a Reducer names the bands it "
+                        "delivers up front, so a bad declaration fails at plan time "
+                        "(04 section 5)")
+    else:
+        if not all(isinstance(b, BandSpec) for b in outputs):
+            problems.append(f"reducer {ref}: every entry of `outputs` must be a BandSpec")
+        else:
+            names = [b.name for b in outputs]
+            dupes = sorted({n for n in names if names.count(n) > 1})
+            if dupes:
+                problems.append(f"reducer {ref}: `outputs` names {dupes} more than once; one "
+                                "band, one name")
+    halo = getattr(reducer, "halo", 0)
+    if isinstance(halo, int) and halo:
+        problems.append(
+            f"reducer {ref}: halo {halo} is not built. Snapshots are written at their block's "
+            "CORE extent and their cache key excludes the halo, so a reducer that needs "
+            "neighbouring cells would have to read and stitch the surrounding blocks "
+            "(04 section 5, 06 section 2); declare halo = 0")
+    if getattr(reducer, "required_aux", ()):
+        problems.append(f"reducer {ref}: aux in the reduce stage is not built; the Reducer "
+                        "protocol declares no required_aux and reduce() receives NullAux "
+                        "(05 section 3)")
+    return problems
+
+
+def _delivered_names(m: Manifest, problems: list[str], reducer: Any = None) -> set[str]:
     """Band names the built-in reducer delivers for this schema - the actual rule
     (`stratum.reduce.delivered_bands`, 13 section 4), not every suffix for every layer, so an
     `alpha_from` naming a band the reducer never writes fails here and not at publish."""
     try:
-        return {b.name for b in delivered_bands(m.snapshot_schema())}
+        return {b.name for b in product_bands(m.snapshot_schema(), reducer)}
     except SchemaError as e:
         problems.append(f"snapshot: {e}")
         return set()
@@ -154,9 +191,11 @@ def validate_static(m: Manifest) -> list[str]:
         inst = _instantiate("mask", mask.ref, mask.params, f"pixel_mask[{i}]", problems)
         if inst is not None:
             _roles_and_aux(inst, f"pixel_mask[{i}] {mask.ref}", m, problems)
+    reducer = None
     if m.reducer is not None:
-        problems.append(f"reducer {m.reducer.ref!r}: Reducer plugins are a later slice "
-                        "(plan section 1); the schema vocabulary runs when reducer is omitted")
+        reducer = _instantiate("reducer", m.reducer.ref, m.reducer.params, "reducer", problems)
+        if reducer is not None:
+            problems.extend(_reducer_problems(m.reducer.ref, reducer))
     for i, f in enumerate(m.granule_filter):
         if f.ref is not None:
             _instantiate("filter", f.ref, f.params, f"granule_filter[{i}]", problems)
@@ -211,7 +250,7 @@ def validate_static(m: Manifest) -> list[str]:
         problems.append(str(e))
 
     # -- render names layers and their classes (07 section 3, 09 section 5)
-    delivered = _delivered_names(m, problems)
+    delivered = _delivered_names(m, problems, reducer)
     for band, r in m.outputs.render.items():
         where = f"outputs.render.{band}"
         target = r.layer or band

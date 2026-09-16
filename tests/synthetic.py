@@ -325,7 +325,8 @@ def binding(instance: Any, ref: str | None = None, params: Mapping[str, Any] | N
 def build_plan(root: Path, observations: Sequence[SyntheticObservation], *, scorer: Any,
                masks: Sequence[Any] = (), tile: TileRef = TILE,
                max_distance: float | None = None,
-               snapshot_schema: SnapshotSchema | None = None) -> PlanContext:
+               snapshot_schema: SnapshotSchema | None = None,
+               reducer: Any | None = None) -> PlanContext:
     """A PlanContext over `observations` with their GLTs already built into `root`."""
     cache = CacheRoot(root)
     md = resolve_max_distance(tile.grid, max_distance)
@@ -346,6 +347,7 @@ def build_plan(root: Path, observations: Sequence[SyntheticObservation], *, scor
         geolocation_role="mineral", schema=sch,
         scorer=binding(scorer, params=dict(vars(scorer))),
         masks=[binding(m, params=dict(vars(m))) for m in masks],
+        reducer=binding(reducer, params=dict(vars(reducer))) if reducer is not None else None,
         remaps={layer.name: {o.ref.granule_id: remap for o in observations}
                 for layer in sch.layers if layer.kind == "categorical"},
         max_distance=md, regrid_method="kdtree", regrid_algo_version=REGRID_ALGO_VERSION,

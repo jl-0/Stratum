@@ -206,7 +206,7 @@ mutable for a reason:</p>
 <table>
 <thead><tr><th>Class</th><th>Why not frozen</th></tr></thead>
 <tbody>
-<tr><td><a class="src" data-sym="class PlanContext" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/resolve/context.py#L169">PlanContext</a>, <a class="src" data-sym="class RunPlan" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/plan/document.py#L273">RunPlan</a></td><td>Assembled field by field and held live handles (a <code>CacheRoot</code>, an <code>AssetStore</code>); freezing would buy nothing since they are never shared across threads</td></tr>
+<tr><td><a class="src" data-sym="class PlanContext" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/resolve/context.py#L169">PlanContext</a>, <a class="src" data-sym="class RunPlan" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/plan/document.py#L279">RunPlan</a></td><td>Assembled field by field and held live handles (a <code>CacheRoot</code>, an <code>AssetStore</code>); freezing would buy nothing since they are never shared across threads</td></tr>
 <tr><td><code>Resolved</code>, <code>Observation</code>, <code>ObsContext</code></td><td>Short-lived carriers of NumPy arrays. Freezing a dataclass does not freeze the arrays inside it, so it would be a promise the type cannot keep</td></tr>
 <tr><td><a class="src" data-sym="class GLT" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/types.py#L349">GLT</a>, <code>EmbeddedGLT</code></td><td>Same reason — array wrappers</td></tr>
 <tr><td><a class="src" data-sym="class Remap" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/classes.py#L60">Remap</a></td><td>Holds a NumPy lookup array indexed by raw key</td></tr>
@@ -219,7 +219,7 @@ anything whose payload is an array.</p>
 
 <h2 id="serialisation">7. The serialisation seam</h2>
 
-<p><a class="src" data-sym="class RunPlan" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/plan/document.py#L273">plan/document.py</a>
+<p><a class="src" data-sym="class RunPlan" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/plan/document.py#L279">plan/document.py</a>
 is the only module that knows how a live object becomes JSON and back. Every conversion is a
 <em>pair</em>, and the pairing is the point: a round trip has to produce an object that computes
 the same hashes.</p>
@@ -236,7 +236,7 @@ the same hashes.</p>
 <tr><td><code>Remap</code> (per layer, per granule)</td><td><a class="src" data-sym="def remaps_to_doc" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/plan/document.py#L162">remaps_to_doc</a></td><td><a class="src" data-sym="def remaps_from_doc" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/plan/document.py#L178">remaps_from_doc</a></td></tr>
 <tr><td><code>PluginBinding</code></td><td><a class="src" data-sym="def plugin_to_doc" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/plan/document.py#L187">plugin_to_doc</a></td><td><a class="src" data-sym="def plugin_from_doc" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/plan/document.py#L191">plugin_from_doc</a></td></tr>
 <tr><td><code>GridDef</code></td><td><a class="src" data-sym="def grid_to_doc" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/plan/document.py#L199">grid_to_doc</a></td><td><a class="src" data-sym="def grid_from_doc" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/plan/document.py#L204">grid_from_doc</a></td></tr>
-<tr><td><code>PlanContext</code></td><td><a class="src" data-sym="def context_to_doc" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/plan/document.py#L209">context_to_doc</a></td><td><a class="src" data-sym="def context_from_doc" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/plan/document.py#L236">context_from_doc</a></td></tr>
+<tr><td><code>PlanContext</code></td><td><a class="src" data-sym="def context_to_doc" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/plan/document.py#L209">context_to_doc</a></td><td><a class="src" data-sym="def context_from_doc" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/plan/document.py#L238">context_from_doc</a></td></tr>
 </tbody>
 </table>
 </div>

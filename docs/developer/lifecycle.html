@@ -57,7 +57,7 @@ sequenceDiagram
 <thead><tr><th></th><th>The planner</th><th>A worker</th></tr></thead>
 <tbody>
 <tr><td><strong>Runs</strong></td><td>Once per run</td><td>Once per work item &mdash; thousands of times</td></tr>
-<tr><td><strong>Entry</strong></td><td><a class="src" data-sym="def plan_run" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/plan/run.py#L774">plan_run</a></td><td><a class="src" data-sym="def exec_item" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/executors/worker.py#L189">exec_item</a></td></tr>
+<tr><td><strong>Entry</strong></td><td><a class="src" data-sym="def plan_run" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/plan/run.py#L774">plan_run</a></td><td><a class="src" data-sym="def exec_item" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/executors/worker.py#L221">exec_item</a></td></tr>
 <tr><td><strong>Reads</strong></td><td>The manifest, the index, and a handful of real granules</td><td><code>plan.json</code>, one work list line, and the assets that line names</td></tr>
 <tr><td><strong>Decides</strong></td><td>Everything: tiles, epochs, granules, plugins, schema, class lumping, fan-out</td><td>Nothing. It executes a decision already recorded</td></tr>
 <tr><td><strong>Writes</strong></td><td>The run directory</td><td>One cache artifact, and one outcome line</td></tr>
@@ -139,7 +139,7 @@ is about two hundred lines of sequence, and the order is load-bearing.</p>
   <span class="label">Step 8 before step 9 is not an accident</span>
   <p>Swapping them would make an over-budget plan download granules before refusing. The comment
   at
-  <a class="src" data-sym="the budget gate (09 section 4) comes BEFORE" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/plan/run.py#L897">plan/run.py:776</a>
+  <a class="src" data-sym="the budget gate (09 section 4) comes BEFORE" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/plan/run.py#L898">plan/run.py:776</a>
   says so explicitly; treat it as a constraint on any reordering.</p>
 </div>
 
@@ -162,7 +162,7 @@ which is what you ship. A run directory is disposable; the cache is not.</p>
 <h2 id="work-lists">4. The four work lists</h2>
 
 <p>A work item is one JSON object on one line, and it is the entire input to a worker besides
-<code>plan.json</code>. <a class="src" data-sym="def build_work_lists" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/plan/run.py#L1044">build_work_lists</a>
+<code>plan.json</code>. <a class="src" data-sym="def build_work_lists" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/plan/run.py#L1045">build_work_lists</a>
 emits all four in a single pass over the tiles.</p>
 
 <div class="tw">
@@ -209,8 +209,8 @@ traceback &mdash; so a crashed item is queryable rather than lost.</p>
 <tbody>
 <tr><td><code>regrid_item</code></td><td>The geolocation asset, only on a miss</td><td>One GLT GeoTIFF</td><td><a class="src" data-sym="def regrid_item" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/executors/worker.py#L52">worker.py:52</a></td></tr>
 <tr><td><code>resolve_item</code></td><td>GLT windows, then every contributing granule</td><td>One snapshot directory</td><td><a class="src" data-sym="def resolve_item" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/executors/worker.py#L105">worker.py:105</a></td></tr>
-<tr><td><code>reduce_item</code></td><td>The listed epochs' snapshots</td><td>One product-block directory</td><td><a class="src" data-sym="def reduce_item" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/executors/worker.py#L127">worker.py:127</a></td></tr>
-<tr><td><code>publish_item</code></td><td>Every product block of the tile &times; period</td><td>COGs, RGBA images, legends, a STAC item</td><td><a class="src" data-sym="def publish_item" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/executors/worker.py#L153">worker.py:153</a></td></tr>
+<tr><td><code>reduce_item</code></td><td>The listed epochs' snapshots</td><td>One product-block directory</td><td><a class="src" data-sym="def reduce_item" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/executors/worker.py#L153">worker.py:153</a></td></tr>
+<tr><td><code>publish_item</code></td><td>Every product block of the tile &times; period</td><td>COGs, RGBA images, legends, a STAC item</td><td><a class="src" data-sym="def publish_item" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/executors/worker.py#L184">worker.py:184</a></td></tr>
 </tbody>
 </table>
 </div>

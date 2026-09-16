@@ -34,6 +34,11 @@ cleanest_nadir    = "stratum_emit.scorers:CleanestNadir"
 prefer_bare_earth = "stratum_emit.scorers:PreferBareEarth"
 max_band_depth    = "stratum_emit.scorers:MaxBandDepth"
 
+[project.entry-points."stratum.reducers"]
+# The ONLY reducer, and it earns its place: combining two categorical layers is the one thing
+# 13 section 4's vocabulary cannot express. Everything else is an `aggregate` entry.
+joint_mineral_vote = "stratum_emit.reducers:JointMineralVote"
+
 [project.entry-points."stratum.masks"]
 edge_trim     = "stratum_emit.masks:EdgeTrim"
 slit_dust     = "stratum_emit.masks:SlitDust"

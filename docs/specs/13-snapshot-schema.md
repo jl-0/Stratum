@@ -225,7 +225,11 @@ Every method applies band-wise to a multi-band layer. Options any continuous met
 
 ### Framework outputs
 
-`n_epochs` — epochs with `valid` true — is delivered once per product block regardless of schema.
+`n_epochs` — epochs with `valid` true — is delivered once per product block regardless of schema,
+**and regardless of reducer**: the framework appends it when a `Reducer` plugin does not declare
+it, because it is `snaps.valid.sum(axis=0)` and every consumer may rely on it. A plugin that
+declares its own `n_epochs` keeps it. A plugin's categorical output shares the product's class
+table (§3 rule 3, one product one table); it cannot introduce an enumeration of its own.
 Every continuous layer also delivers `<layer>_n`, the count it actually aggregated over, because an
 estimate from two epochs and one from twelve must be distinguishable downstream.
 

@@ -17,7 +17,7 @@ from stratum.publish.legend import write_classes, write_legend
 from stratum.publish.mappers import build_mappers, write_images
 from stratum.publish.stac import stamp, write_stac_item
 from stratum.publish.stitch import stitch
-from stratum.reduce import delivered_bands
+from stratum.reduce import product_bands
 from stratum.types import BlockRef, ClassTable, Epoch, SnapshotSchema, TileRef
 
 
@@ -73,16 +73,20 @@ def render_colors(outputs: Mapping[str, Any], layer: str) -> Mapping[str, Sequen
 def publish_period(out_dir: Path, product_dirs: Sequence[tuple[BlockRef, Path]], tile: TileRef,
                    period: Epoch, schema: SnapshotSchema, outputs: Mapping[str, Any], *,
                    run_id: str, manifest_hash: str, band_counts: Mapping[str, int] | None = None,
-                   run_dir: Path | None = None, tags: Mapping[str, Any] | None = None) -> Published:
+                   run_dir: Path | None = None, tags: Mapping[str, Any] | None = None,
+                   reducer: Any | None = None) -> Published:
     """Stitch, write data COGs, render, write legends, classes and the STAC item for one
     (tile, period). `band_counts` is `stratum.reduce.band_counts(snaps)` for a schema whose
-    multi-band widths it alone cannot state. `outputs` is the manifest block: `formats`
+    multi-band widths it alone cannot state; it is ignored when `reducer` is given, because a
+    plugin declares its own widths. `reducer` is the Reducer INSTANCE when the manifest names one,
+    so publish stitches the bands the plugin declared rather than the ones the schema implies -
+    the two must not disagree. `outputs` is the manifest block: `formats`
     (default `[cog]`), `stac` (default true), `render`."""
     out_dir = Path(out_dir)
     formats = outputs.get("formats") or ["cog"]
     check_formats(formats)
     fmt = raster_format(formats)
-    bands = delivered_bands(schema, band_counts=band_counts)
+    bands = product_bands(schema, reducer, band_counts=band_counts)
     mappers = build_mappers(outputs, schema)              # validate before any IO
     stack = stitch(product_dirs, tile, bands)
     class_table = product_class_table(schema)

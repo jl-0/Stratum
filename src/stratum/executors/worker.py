@@ -8,7 +8,7 @@ clear error and a present one is a hit whoever wrote it.
 from __future__ import annotations
 
 import time
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
@@ -22,10 +22,10 @@ from stratum.plan.document import (
     read_work,
 )
 from stratum.publish import product_dir, publish_period, write_product_block
-from stratum.reduce import band_counts, delivered_bands, reduce_stack
+from stratum.reduce import band_counts, product_bands, reduce_stack
 from stratum.regrid import REGRID_ALGO_VERSION, regrid_granule_tile
-from stratum.resolve import resolve_block, snapshot_key, stack_snapshots
-from stratum.types import BlockRef, EmbeddedGLT, Epoch, LocArray, TileRef
+from stratum.resolve import NullAux, resolve_block, snapshot_key, stack_snapshots
+from stratum.types import BandSpec, BlockRef, EmbeddedGLT, Epoch, LocArray, TileRef
 
 _RUNS: dict[Path, RunPlan] = {}
 
@@ -120,8 +120,34 @@ def product_key(item: Mapping[str, Any], run: RunPlan
     epochs = [epoch_from_doc(e) for e in item["epochs"]]
     snaps = [snapshot_key({"tile": item["tile"], "epoch": list(e.bounds), "block": item["block"]},
                           ctx) for e in epochs]
-    inputs = product_inputs([k.hash for k in snaps], [], ctx.schema.aggregate_hash, None)
+    # `aggregate_hash` stays even under a plugin: the schema still governs what the snapshots
+    # CONTAIN, so both it and the plugin determine the product. None for the built-in reducer,
+    # which keeps a run without one byte-identical to before reducers existed (06 section 2).
+    inputs = product_inputs([k.hash for k in snaps], [], ctx.schema.aggregate_hash,
+                            ctx.reducer.identity() if ctx.reducer is not None else None)
     return ctx.cache.key("product", ctx.grid.id, tile, inputs), snaps, epochs
+
+
+def _check_plugin_output(ref: str, arrays: Mapping[str, Any],
+                         bands: Sequence[BandSpec]) -> None:
+    """A plugin must deliver exactly what it declared.
+
+    The built-in reducer self-checks against the schema (`reduce_stack`); a plugin has no schema
+    to check against, so its declaration is the contract. Caught here rather than in
+    `write_product_block`, which would report a missing band as a KeyError with no idea whose
+    fault it was.
+    """
+    want = {b.name for b in bands}
+    got = set(arrays)
+    if want != got:
+        missing, extra = sorted(want - got), sorted(got - want)
+        detail = []
+        if missing:
+            detail.append(f"did not deliver {missing}")
+        if extra:
+            detail.append(f"delivered undeclared {extra}")
+        raise ValueError(f"reducer {ref!r} {' and '.join(detail)}; a plugin delivers exactly its "
+                         "declared `outputs` (04 section 5)")
 
 
 def reduce_item(item: Mapping[str, Any], run: RunPlan) -> tuple[CacheKey, bool]:
@@ -139,8 +165,13 @@ def reduce_item(item: Mapping[str, Any], run: RunPlan) -> tuple[CacheKey, bool]:
                                 f"{item['tile']}: {len(missing)} snapshot(s) missing ({shown}); "
                                 "run the resolve stage first")
     stack = stack_snapshots([k.path for k in snaps], epochs, ctx.schema)
-    arrays = reduce_stack(stack)
-    bands = delivered_bands(ctx.schema, band_counts=band_counts(stack))
+    reducer = ctx.reducer.instance if ctx.reducer is not None else None
+    # A plugin replaces the vocabulary, not the stage: it still receives the same stack the
+    # built-in reducer would, and still writes one array per declared band (04 section 5).
+    arrays = reducer.reduce(stack, NullAux()) if reducer is not None else reduce_stack(stack)
+    bands = product_bands(ctx.schema, reducer, band_counts=band_counts(stack))
+    if reducer is not None:
+        _check_plugin_output(ctx.reducer.ref, arrays, bands)
     tile = _tile(run, item)
     bx, by = (int(v) for v in item["block"])
     block = BlockRef(tile, bx, by)
@@ -172,7 +203,8 @@ def publish_item(item: Mapping[str, Any], run: RunPlan) -> tuple[Path, bool]:
     out_dir = product_dir(run.products_dir, tile, period)
     publish_period(out_dir, product_dirs, tile, period, ctx.schema, run.outputs,
                    run_id=run.run_id, manifest_hash=run.manifest_hash,
-                   band_counts=run.band_counts or None, run_dir=run.run_dir)
+                   band_counts=run.band_counts or None, run_dir=run.run_dir,
+                   reducer=ctx.reducer.instance if ctx.reducer is not None else None)
     # products are run-prefixed and never a cache hit, so publish is the one stage that always
     # rewrites - and the one that has to push what it wrote (08 section 1)
     run.workspace.push_tree(out_dir)

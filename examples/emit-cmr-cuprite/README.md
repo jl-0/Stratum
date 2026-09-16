@@ -368,7 +368,86 @@ staged granules, the mineral product writes **no fill at all**, and even at 60-8
 returns a mineral identification for 39 % of pixels. Unmasked cloud does not produce absence, it
 produces plausible-looking identifications.
 
-## 9. The same run in the cloud
+## 9. The third manifest: one answer from two mineral groups
+
+`manifest-joint.yaml` is the only manifest here that names a **`reducer`**, and it exists because
+of something the aggregation vocabulary cannot express.
+
+EMIT identifies minerals in two spectral regions and reports them as separate variables. **Group 1**
+is the ~1 µm region — iron oxides. **Group 2** is 2–2.5 µm — clays, micas, carbonates, sulfates —
+and carries the features that name a hydrothermal system. At Cuprite, **alunite, kaolinite and
+buddingtonite are all group 2**, and until now no product in this repository contained them,
+because every manifest read only `group_1_mineral_id`.
+
+The vocabulary votes each layer independently and stops. There is no `aggregate` entry that says
+*"prefer this layer's answer where it has one"* — `conditional_on` conditions a **continuous** layer
+on a categorical one, not one categorical on another. So: a plugin.
+
+```yaml
+reducer:
+  ref: joint_mineral_vote
+  params: {prefer: mineral_2, fallback: mineral_1, min_count: 2}
+```
+
+It votes each group through the framework's own `vote()` kernel — so a cell where only one group
+spoke gets exactly what the vocabulary would have delivered for that layer alone — and only the
+*combination* is the plugin's own.
+
+### What it produced
+
+Same 18 tiles, same year, same `min_view_zenith` scorer, same layers. The only difference is the
+reducer, so this comparison is exact:
+
+| | answered | classes |
+|---|---|---|
+| group 1 alone, by `aggregate: vote` | 53.4 % | 63 |
+| group 2 alone, by `aggregate: vote` | 64.3 % | 131 |
+| **`JointMineralVote`** | **75.0 %** | **181** |
+
+The joint answer beats **either group alone**, which is the whole point: 64.3 % of cells were
+answered by group 2, a further 10.8 % by group 1 where group 2 was silent. `mineral_joint_from`
+records which, per cell, because a combined band that does not say where its answer came from is a
+band nobody can check.
+
+And the minerals Cuprite is known for finally appear:
+
+```
+alunite         54,002 cells   across 12 class ids
+kaolinite      149,042 cells
+buddingtonite       47 cells
+```
+
+### What it cost
+
+```
+stage    items  hits  seconds
+regrid    482    482   3.50     <- the grid did not move
+resolve  1803      0  25.33     <- a new role changes every observation key
+reduce    288      0  18.62
+publish    18      0   5.38
+total    2591    482  52.82
+```
+
+**No new downloads.** Group 2 lives in the MIN files already staged — it is a second variable in
+the same asset.
+
+Running the same manifest with the `reducer:` block removed is a 108-second job in which **1,803
+of 1,803 snapshots are cache hits**: a reducer determines the *product* and nothing upstream of it.
+That is the cheapest experiment in the pipeline.
+
+### Two things it does not do
+
+**The joint band has no `render:` entry, and cannot have one.** A render names a *schema layer*, and
+`mineral_joint` is a plugin output. The data COG and the STAC asset are written, and `stratum
+preview` draws from STAC — so the band is viewable — but there is no baked RGBA image for it.
+
+**It replaces the schema's bands rather than adding to them.** The control run writes
+`mineral_1`, `mineral_1_agreement`, `depth_1`, `depth_1_spread` and the rest; the joint run writes
+`mineral_joint`, `mineral_joint_agreement`, `mineral_joint_from` and `n_epochs`, and nothing else.
+The schema still governs what a *snapshot* holds — which is how the plugin can see both groups —
+but what the *product* delivers is the plugin's declaration.
+
+## 10. The same run in the cloud
 
 Identical to [`../emit-cmr-nevada/README.md` §6](../emit-cmr-nevada/README.md#6-the-same-run-in-the-cloud):
 point `outputs.bucket` at the deployment's S3 root, set `$STRATUM_LAMBDA_FUNCTION`, and run with
@@ -378,7 +457,7 @@ manifest or the code changes. It is also the first case where fan-out concurrenc
 items at the default `--workers 32` is the scale at which the open question about exhausting
 account Lambda concurrency starts to bite. [Deploying to AWS](../../docs/guide/deploying.html) is the runbook.
 
-## 10. Where things are
+## 11. Where things are
 
 ```
 examples/emit-cmr-cuprite/

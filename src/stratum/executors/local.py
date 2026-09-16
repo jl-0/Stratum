@@ -197,7 +197,10 @@ def provenance_record(run: RunPlan, started: datetime, finished: datetime,
               "warp_algo_version": WARP_ALGO_VERSION},
         plugins={"scorer": ctx.scorer.identity(),
                  "masks": [m.identity() for m in ctx.masks],
-                 "reducer": {"ref": "schema", "version": __version__},
+                 # the plugin's identity when one is named; "schema" means the built-in
+                 # vocabulary ran, which `schema.aggregate_hash` beside it describes in full
+                 "reducer": (ctx.reducer.identity() if ctx.reducer is not None
+                             else {"ref": "schema", "version": __version__}),
                  "mappers": mappers},
         schema={"name": ctx.schema.name, "layers_hash": ctx.schema.layers_hash,
                 "aggregate_hash": ctx.schema.aggregate_hash,

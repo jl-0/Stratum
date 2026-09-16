@@ -69,6 +69,35 @@ class ContinuousParams:
 LayerParams = VoteParams | BestParams | ContinuousParams
 
 
+#: The one band every product block carries, whatever produced it (13 section 4: "delivered once
+#: per product block regardless of schema"). It is framework-knowable - `snaps.valid.sum(axis=0)` -
+#: so a plugin is not asked to remember it, and a plugin that declares its own wins.
+N_EPOCHS = BandSpec("n_epochs", COUNT_DTYPE, "epochs with valid true", units="count")
+
+
+def product_bands(schema: SnapshotSchema, reducer: Any | None = None, *,
+                  band_counts: Mapping[str, int] | None = None) -> tuple[BandSpec, ...]:
+    """What a product block delivers: the plugin's declared outputs, else the schema's.
+
+    The single answer the reduce stage, publish and `validate_static` all consult, so they cannot
+    disagree about what a run produces - which they would, silently, if each asked the schema
+    while the reduce stage asked a plugin.
+
+    `reducer` is a `Reducer` INSTANCE (or anything with `.outputs`), not a binding. `band_counts`
+    is ignored for a plugin: declaring its own widths is the point of declaring outputs, whereas
+    the schema alone cannot know a `bands: None` source's width (13 section 4).
+
+    `n_epochs` is appended when a plugin does not declare it. Every consumer may rely on it being
+    there, and it costs the plugin nothing to omit.
+    """
+    if reducer is None:
+        return delivered_bands(schema, band_counts=band_counts)
+    declared = tuple(getattr(reducer, "outputs", ()) or ())
+    if any(b.name == N_EPOCHS.name for b in declared):
+        return declared
+    return (*declared, N_EPOCHS)
+
+
 def _parse_categorical(layer: LayerSpec) -> LayerParams | None:
     agg = layer.aggregate
     params = dict(agg.params)
@@ -234,7 +263,7 @@ def delivered_bands(schema: SnapshotSchema, *,
             out.append(BandSpec(f"{layer.name}_spread", CONTINUOUS_DTYPE,
                                 f"{layer.name}: {params.spread} over the same epochs",
                                 nodata=float("nan"), bands=nb))
-    out.append(BandSpec("n_epochs", COUNT_DTYPE, "epochs with valid true", units="count"))
+    out.append(N_EPOCHS)
     return tuple(out)
 
 

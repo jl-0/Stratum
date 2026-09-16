@@ -221,6 +221,8 @@ def context_to_doc(ctx: PlanContext) -> dict[str, Any]:
         "schema": schema_to_doc(ctx.schema),
         "scorer": plugin_to_doc(ctx.scorer),
         "masks": [plugin_to_doc(m) for m in ctx.masks],
+        # absent for the built-in reducer, which `aggregate_hash` already describes in full
+        "reducer": plugin_to_doc(ctx.reducer) if ctx.reducer is not None else None,
         "remaps": remaps_to_doc(ctx.remaps),
         "max_distance": float(ctx.max_distance),
         "regrid_method": ctx.regrid_method,
@@ -254,6 +256,10 @@ def context_from_doc(doc: Mapping[str, Any], root: Path | Workspace) -> PlanCont
         schema=schema_from_doc(doc["schema"]),
         scorer=plugin_from_doc("scorer", doc["scorer"]),
         masks=[plugin_from_doc("mask", m) for m in doc["masks"]],
+        # `.get`, and PLAN_SCHEMA_VERSION deliberately NOT bumped, for the reason the aux block
+        # below gives: `load_run` compares it with strict equality.
+        reducer=(plugin_from_doc("reducer", doc["reducer"])
+                 if doc.get("reducer") is not None else None),
         remaps=remaps_from_doc(doc["remaps"]),
         max_distance=float(doc["max_distance"]),
         regrid_method=doc["regrid_method"],

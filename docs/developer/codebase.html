@@ -225,7 +225,7 @@ pixels.</td><td><a class="src" data-sym="def apply_filters" href="https://github
 silent default.</td><td><a class="src" data-sym="class Manifest(Strict)" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/manifest/models.py#L566">Manifest</a></td></tr>
 <tr><td><code>manifest/validate.py</code></td><td>Every static check that needs no data:
 instantiating each named plugin, resolving each role, confirming the reducer can deliver the
-band names promised.</td><td><a class="src" data-sym="def validate_static" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/manifest/validate.py#L127">validate_static</a></td></tr>
+band names promised.</td><td><a class="src" data-sym="def validate_static" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/manifest/validate.py#L164">validate_static</a></td></tr>
 <tr><td><code>index/</code></td><td>The GeoParquet granule index: schema, build, merge, query,
 freeze, and the resolution from an index row to the <code>GranuleRef</code> a worker
 carries.</td><td><a class="src" data-sym="def build_index" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/index/build.py#L112">build_index</a></td></tr>
@@ -278,10 +278,10 @@ freeze, budget-gate, inspect real granules, build the work lists. About a thousa
 largest module in the tree.</td><td><a class="src" data-sym="def plan_run" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/plan/run.py#L774">plan_run</a></td></tr>
 <tr><td><code>plan/document.py</code></td><td>The serialisation seam: <code>plan.json</code>, the
 work lists, and the paired <code>*_to_doc</code> / <code>*_from_doc</code> functions that let a
-worker rebuild a planner's context from plain JSON.</td><td><a class="src" data-sym="class RunPlan" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/plan/document.py#L273">RunPlan</a></td></tr>
+worker rebuild a planner's context from plain JSON.</td><td><a class="src" data-sym="class RunPlan" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/plan/document.py#L279">RunPlan</a></td></tr>
 <tr><td><code>executors/worker.py</code></td><td>The portability seam: one handler per stage, and
 the single <code>exec_item</code> entry point every executor
-reduces to.</td><td><a class="src" data-sym="def exec_item" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/executors/worker.py#L189">exec_item</a></td></tr>
+reduces to.</td><td><a class="src" data-sym="def exec_item" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/executors/worker.py#L221">exec_item</a></td></tr>
 <tr><td><code>executors/local.py</code></td><td>A spawn-context process pool over the work lists,
 the budget gate, and Finalize. <code>run_all</code> lives here and takes the stage runner as a
 parameter, so the stage order and Finalize are shared with every other

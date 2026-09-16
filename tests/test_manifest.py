@@ -24,7 +24,7 @@ from stratum.filters import (
     granule_level,
 )
 from stratum.manifest import Manifest, load_manifest, manifest_hash, validate_static
-from stratum.types import GridDef
+from stratum.types import BandSpec, GridDef
 
 ROOT = Path(__file__).resolve().parents[1]
 EXAMPLE = ROOT / "examples/emit-critical-minerals/manifest.yaml"
@@ -307,12 +307,48 @@ def test_aux_kind_and_resampling_must_agree(tmp_path):
     assert m.aux["claims"].resampling is None
 
 
+class GoodReducer:
+    """The smallest declaration a Reducer plugin can make."""
+
+    outputs = (BandSpec("joint", "uint16", "a joint answer", nodata=65535),)
+    halo = 0
+
+    def reduce(self, snaps, aux):
+        raise NotImplementedError
+
+
+class NoOutputs(GoodReducer):
+    outputs = ()
+
+
+class DuplicateNames(GoodReducer):
+    outputs = (BandSpec("joint", "uint16", "one"), BandSpec("joint", "uint16", "two"))
+
+
+class HaloReducer(GoodReducer):
+    halo = 1
+
+
 def test_later_slice_items_are_refused_by_name(tmp_path):
     with pytest.raises(NotImplementedError, match="07 section 3"):
         loaded(tmp_path, lambda d: d["outputs"]["render"].update(
             rgb={"mapper": "composite"}))
+    # A Reducer plugin is no longer "a later slice" - it is resolved and checked like any other
+    # plugin, so an unresolvable ref is refused for BEING unresolvable.
     m = loaded(tmp_path, lambda d: d.update(reducer={"ref": "my.pkg:ClassifyLast"}))
-    assert any("later slice" in p for p in validate_static(m))
+    assert any("does not resolve" in p for p in validate_static(m)), validate_static(m)
+
+
+def test_a_reducer_plugin_must_declare_what_it_delivers(tmp_path):
+    """04 section 5: a plugin names its bands up front so a bad declaration fails at plan time.
+    There is no schema to fall back on - publish stitches exactly what `outputs` names."""
+    def check(cls_path):
+        return validate_static(loaded(tmp_path, lambda d: d.update(reducer={"ref": cls_path})))
+
+    assert any("declares no `outputs`" in p for p in check("test_manifest:NoOutputs"))
+    assert any("more than once" in p for p in check("test_manifest:DuplicateNames"))
+    assert any("halo 1 is not built" in p for p in check("test_manifest:HaloReducer"))
+    assert not check("test_manifest:GoodReducer"), check("test_manifest:GoodReducer")
     with pytest.raises(ValidationError, match="documented"):
         loaded(tmp_path, lambda d: d.update(allow_mixed_vintage=True))
 

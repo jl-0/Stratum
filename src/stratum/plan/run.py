@@ -864,6 +864,7 @@ def plan_run(manifest_path: Path | str, out_dir: Path | str | None = None,
     # -- plugins and the roles a granule must provide (12 section 7)
     scorer = instantiate("scorer", m.scorer.ref, m.scorer.params)
     masks = [instantiate("mask", mk.ref, mk.params) for mk in m.pixel_mask]
+    reducer = instantiate("reducer", m.reducer.ref, m.reducer.params) if m.reducer else None
     needed = roles_needed(m, scorer, masks, geolocation_role)
     # the reader decides a role's SPACE (12 section 3 rule 1), and the planner records it so no
     # worker has to instantiate a reader to find out how to read a role
@@ -974,7 +975,7 @@ def plan_run(manifest_path: Path | str, out_dir: Path | str | None = None,
         aliases=inspection.aliases, geolocation_role=geolocation_role, schema=inspection.schema,
         scorer=scorer, masks=masks, remaps=inspection.remaps, max_distance=max_distance,
         regrid_method=m.grid.regrid_method, regrid_algo_version=REGRID_ALGO_VERSION,
-        reader_overrides=overrides, aux_sources=aux_sources)
+        reader_overrides=overrides, aux_sources=aux_sources, reducer=reducer)
 
     # -- work lists (plan section 4)
     work = build_work_lists(ctx, refs, tiles, epochs, periods, aoi_boxes, geolocation_role)

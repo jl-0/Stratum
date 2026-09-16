@@ -31,6 +31,11 @@ MANIFESTS: dict[str, tuple[str, str, str]] = {
         "Cuprite, bare earth",
         "Every input path at once: an ortho-native role, an aux source, a full year of epochs.",
     ),
+    "joint": (
+        "examples/emit-cmr-cuprite/manifest-joint.yaml",
+        "Cuprite, joint minerals",
+        "The only manifest that names a `reducer`: two mineral groups combined by a plugin.",
+    ),
     "nevada": (
         "examples/emit-cmr-nevada/manifest.yaml",
         "Nevada, one tile",

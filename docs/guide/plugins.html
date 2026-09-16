@@ -414,6 +414,45 @@ candidate layers, classify-last over per-candidate evidence:</p>
 declaration fails at plan time. The built-in reducer derives its outputs from the schema the same
 way.</p>
 
+<div class="key">
+  <span class="label">Your outputs replace the schema's, they do not add to them</span>
+  <p>With a plugin named, the product delivers exactly what you declared &mdash; the schema's
+  <code>mineral_1</code>, <code>depth_1_spread</code> and the rest are <em>not</em> written. The
+  schema still governs what a <strong>snapshot</strong> holds, which is how you can see those
+  layers as input; what the <strong>product</strong> delivers is yours. <code>n_epochs</code> is
+  appended for you if you do not declare it.</p>
+</div>
+
+<h3 id="reducer-reuse">Reuse the built-in kernel</h3>
+
+<p>If part of what you want is an ordinary vote, do not reimplement it &mdash; the decision order,
+the tie-breaks, <code>min_count</code> and the agreement denominator are all easy to get subtly
+wrong:</p>
+
+<pre><code><span class="k">from</span> stratum.reduce <span class="k">import</span> vote, VoteParams
+
+result = vote(snaps.schema[<span class="k">"mineral_2"</span>], snaps[<span class="k">"mineral_2"</span>], snaps.valid, snaps.score,
+              snaps.valid.sum(axis=0),
+              VoteParams(min_count=2, ignore=(<span class="k">"none"</span>,), tie_break=<span class="k">"highest_score"</span>))</code></pre>
+
+<p>That is what the shipped <code>joint_mineral_vote</code> does: it votes each of EMIT's two
+mineral groups through this kernel and only the <em>combination</em> &mdash; prefer group 2 where it
+voted, fall back to group 1 &mdash; is its own. A cell where one group spoke therefore gets exactly
+what <code>aggregate: vote</code> would have delivered for that layer alone.</p>
+
+<div class="warn">
+  <span class="label">Three limits worth knowing before you start</span>
+  <p><strong><code>halo</code> must be 0.</strong> Snapshots are written at their block's core
+  extent and their cache key excludes the halo, so a reducer that needs neighbouring cells would
+  have to read and stitch the surrounding blocks. Refused at validation.</p>
+  <p><strong>No aux.</strong> <code>reduce()</code> receives <code>NullAux</code>. Unlike a
+  <code>Scorer</code> the protocol declares no <code>required_aux</code>, so there is not even a
+  channel to ask.</p>
+  <p><strong>Your bands cannot be rendered.</strong> <code>outputs.render</code> names a schema
+  layer, and a plugin output is not one. The data COG and the STAC asset are written, so the band
+  is viewable in the product viewer &mdash; there is just no baked RGBA image.</p>
+</div>
+
 <h3 id="reducer-inputs">What you get</h3>
 
 <pre><code>snaps[<span class="k">"mineral_1"</span>]      <span class="c"># (n_epochs, H, W) — the winning value per epoch, as product classes</span>

@@ -198,6 +198,9 @@ class PlanContext:
                     `inputs.readers`: collection -> plugin ref (12 section 3 rule 1).
     reader_lookup   Optional: collection -> GranuleReader; defaults to stratum.access.reader_for
                     with `reader_overrides`. A test injects a fake reader here.
+    reducer         The Reducer plugin and its key identity, or None for the built-in reducer
+                    (04 section 5, 06 section 2). None is the usual case: the schema's
+                    `aggregate` vocabulary covers everything named so far.
     aux_sources     alias -> AuxSource for every source the manifest declared (05 section 5),
                     already staged and digested by the planner. Empty for a run with no aux,
                     which is what keeps such a run's keys bit-identical to a run before aux
@@ -221,6 +224,7 @@ class PlanContext:
     reader_overrides: Mapping[str, str] = field(default_factory=dict)
     reader_lookup: Callable[[str], GranuleReader] | None = None
     aux_sources: Mapping[str, AuxSource] = field(default_factory=dict)
+    reducer: PluginBinding | None = None
 
     def __post_init__(self) -> None:
         for name in self.aliases:

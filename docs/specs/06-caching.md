@@ -30,7 +30,7 @@ a full rebuild into a re-read.
 | **Aux warp**<br>source × tile | `alias`, `source_digest`, `grid_def`, `resampling`, `warp_algo_version` | No |
 | **Ortho role warp**<br>granule × role × tile | `granule_id`, `role`, `asset_checksum`, `var`, `grid_def`, `resampling`, `warp_algo_version` | No |
 | **Epoch snapshot**<br>tile × epoch × block | `obs_keys[]` (sorted), `aux_keys[]`, `scorer_ref`, `scorer_version`, `scorer_params`, `schema.layers_hash`, `epoch_bounds`, `window` | **Yes** |
-| **Product block**<br>tile × block | `snapshot_keys[]`, `aux_keys[]`, `schema.aggregate_hash`; plus `reducer_ref`, `reducer_version`, `reducer_params` when a plugin is named | Yes |
+| **Product block**<br>tile × block | `snapshot_keys[]`, `aux_keys[]`, `schema.aggregate_hash`; plus `reducer` — `{ref, version, params}`, one nested key rather than three flat ones — when a plugin is named, else `null` | Yes |
 | **Rendered image**<br>tile | `product_keys[]`, `aux_keys[]`, `mapper_ref`, `mapper_version`, `mapper_params` | No — see [07](07-output-mapping.md) |
 
 Read down the "invalidates" column: that is the iteration story. Changing a **scorer** re-runs
