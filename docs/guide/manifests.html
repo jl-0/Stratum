@@ -24,6 +24,286 @@
 Everything else &mdash; which files are downloaded, what a scorer sees, what gets rebuilt when you
 change your mind &mdash; follows from it.</p>
 
+<h2 id="shape">The shape of a manifest</h2>
+
+<p>Eighteen top-level blocks, eight of them required. Every one is below; the rest of this page is
+what the interesting ones mean.</p>
+
+<pre><code>run_id: cuprite-bare-earth        <span class="c"># REQUIRED. A label. The run id is this plus a date and a hash</span>
+description: ...                  <span class="c"># free text, carried into provenance</span>
+schema_version: "1.0"             <span class="c"># defaulted; you will not normally write it</span>
+
+grid:                             <span class="c"># REQUIRED. The lattice everything lands on</span>
+  crs / resolution / origin / tile_size / block_size
+
+aoi:                              <span class="c"># REQUIRED. Which tiles. Exactly one of:</span>
+  bbox: [w, s, e, n]              <span class="c">#   a box, and the tiles follow</span>
+  tiles: [[tx, ty], ...]          <span class="c">#   named outright</span>
+  zones: [...] + registry: ...    <span class="c">#   names from a shared YAML, so runs are comparable</span>
+
+time:                             <span class="c"># REQUIRED. start, end, epoch, deliver</span>
+
+inputs:                           <span class="c"># REQUIRED. Where data comes from and what it is called</span>
+  index_location / source         <span class="c">#   the catalogue, and what to index from it</span>
+  roles                           <span class="c">#   collection + asset + variable -> a name</span>
+  band_aliases                    <span class="c">#   one band of a role -> a name</span>
+  geolocation / readers
+
+aux:                              <span class="c"># optional. Data that is not an observation</span>
+
+granule_filter: [...]             <span class="c"># optional. Drop whole granules, before any byte is read</span>
+pixel_mask:     [...]             <span class="c"># optional. Drop cells. Boolean - never a preference</span>
+scorer:         {ref, params}     <span class="c"># REQUIRED. Which observation wins a cell</span>
+
+snapshot:                         <span class="c"># REQUIRED. What is recorded, and how epochs collapse</span>
+  name / layers
+
+reducer: {ref, params}            <span class="c"># optional, and not built - the schema does this</span>
+outputs:                          <span class="c"># REQUIRED. bucket, formats, stac, render</span>
+plugins: {...}                    <span class="c"># optional. Where plugin code comes from</span>
+budget:                           <span class="c"># REQUIRED. Checked before anything is opened</span>
+  max_tiles / max_granules / max_vcpu_hours / on_exceed
+
+allow_mixed_vintage: false        <span class="c"># optional, and needs mixed_vintage_reason if true</span></code></pre>
+
+<div class="key">
+  <span class="label">Three things the shape tells you</span>
+  <p><strong>`budget` is required.</strong> Not a safety net you opt into &mdash; a run states what
+  it expects to cost and refuses to exceed it.</p>
+  <p><strong>`scorer` is required and `reducer` is not.</strong> Choosing a winner always needs a
+  decision; collapsing epochs usually does not, because the schema's aggregation vocabulary covers
+  it.</p>
+  <p><strong>Masks and filters are both optional and do different jobs.</strong> A filter drops a
+  whole granule before a byte is read; a mask drops cells after it is. Rejecting early is free.</p>
+</div>
+
+<h2 id="tour">A tour of the blocks</h2>
+
+<p>Open any of these for what the block decides, the shortest thing that works, and the mistake
+worth knowing about.</p>
+
+<details class="explainer">
+<summary><code>grid</code> &mdash; the lattice everything lands on</summary>
+<div class="body">
+
+<p>Every tile, block and output cell is derived from this. It is also the most expensive thing to
+change: the grid's identity is hashed into every lookup table, warp and snapshot, so editing
+<code>crs</code>, <code>resolution</code>, <code>origin</code> or <code>tile_size</code> rebuilds
+the run from geometry up.</p>
+
+<pre><code>grid:
+  crs: EPSG:4326
+  resolution: [0.000277777777777778, -0.000277777777777778]   <span class="c"># y is NEGATIVE: rows go south</span>
+  origin: [-180, -90]
+  tile_size: 0.5
+  block_size: 450</code></pre>
+
+<p><strong>The gotcha.</strong> A tile index is a count of <code>tile_size</code> steps, not
+degrees. At <code>tile_size: 0.5</code>, tile <code>-236</code> is longitude
+<code>[-118.0, -117.5)</code>. They coincide only at <code>tile_size: 1.0</code>.</p>
+
+<p><code>block_size</code> is the exception to the expense: it is a compute knob, excluded from the
+grid's identity, so changing it keeps every lookup table. It does rebuild snapshots, because a
+snapshot is keyed on its block's window.</p>
+
+<p><a href="../reference/manifest.html#grid">Full field reference</a> &middot;
+<a href="concepts.html#grid">Grid, tile and block explained</a></p>
+
+</div>
+</details>
+
+<details class="explainer">
+<summary><code>aoi</code> &mdash; which tiles, three ways</summary>
+<div class="body">
+
+<p>Exactly one of <code>bbox</code>, <code>tiles</code> or <code>zones</code>. Tiles are
+<em>derived</em> from a box: every tile whose nominal bounds intersect it. A box that lands exactly
+on tile edges pulls in no extra row.</p>
+
+<pre><code>aoi:
+  bbox: [-118.0, 37.0, -116.5, 40.0]     <span class="c"># 3 wide x 6 tall at tile_size 0.5</span></code></pre>
+
+<p><strong>Use <code>zones</code> for anything delivered.</strong> A name looked up in a shared
+registry means two runs a year apart cover the same ground, and the report says
+<em>cuprite-nv</em> rather than four floats nobody can check.</p>
+
+<p><strong>The gotcha.</strong> Widening the box does not invalidate anything &mdash; lookup tables
+are keyed on granule and grid, snapshots on their own block's window, and neither mentions the AOI.
+Tripling the area rebuilds only the new tiles.</p>
+
+<p><a href="../reference/manifest.html#aoi">Full field reference</a></p>
+
+</div>
+</details>
+
+<details class="explainer">
+<summary><code>time</code> &mdash; epoch and delivery are different questions</summary>
+<div class="body">
+
+<p>The <strong>epoch</strong> is how finely observations are bucketed before anything is combined.
+<strong>Delivery</strong> is how those buckets collapse into a product.</p>
+
+<pre><code>time:
+  start: 2025-01-01               <span class="c"># inclusive, UTC</span>
+  end:   2026-01-01               <span class="c"># exclusive</span>
+  epoch: P1M                      <span class="c"># 12 monthly votes</span>
+  deliver: P1Y                    <span class="c"># collapsed into one annual product per tile</span></code></pre>
+
+<p>A cell seen three times in March still casts one March vote. Twelve monthly votes reduced to one
+annual answer is the shape a mineral product wants.</p>
+
+<p><strong>The gotcha, and it catches everyone.</strong> More epochs cost <em>no extra
+bandwidth</em> &mdash; the same granules are partitioned more finely. What costs bandwidth is
+widening <code>start</code> and <code>end</code>. And more epochs can matter more than more area:
+with <code>min_count: 2</code>, adding months adds <em>pairs</em> of qualifying months, not
+evidence linearly. Measured on the worked example, going from 8 months to 12 tripled the vote
+rate, while tripling the area lowered it.</p>
+
+<p><a href="../reference/manifest.html#time">Full field reference</a> &middot;
+<a href="concepts.html#epochs">Epochs and delivery explained</a></p>
+
+</div>
+</details>
+
+<details class="explainer">
+<summary><code>inputs</code> &mdash; the chain from a catalogue to <code>obs["name"]</code></summary>
+<div class="body">
+
+<p>Four sub-blocks doing different jobs at different times. This is the heart of a manifest and
+gets its own section below.</p>
+
+<pre><code>inputs:
+  source.patterns   <span class="c"># which FILES exist, per granule       -> index build</span>
+  roles             <span class="c"># which of those this run reads        -> plan + resolve</span>
+  band_aliases      <span class="c"># one band of a role, under a name     -> plan + resolve</span>
+  geolocation       <span class="c"># which role builds the lookup table</span></code></pre>
+
+<p><strong>The gotcha.</strong> You may index more than you read &mdash; that costs only metadata.
+You may not read what you did not index, and the planner refuses rather than letting a worker
+discover it.</p>
+
+<p><a href="#chain">The chain, in full</a> &middot;
+<a href="../reference/manifest.html#inputs">Full field reference</a></p>
+
+</div>
+</details>
+
+<details class="explainer">
+<summary><code>aux</code> &mdash; data that is not an observation</summary>
+<div class="body">
+
+<p>A DEM, a landcover map, claim polygons. Declared by URI, addressed by <em>alias</em>, staged and
+warped onto every tile at plan time.</p>
+
+<pre><code>aux:
+  landcover:
+    uri:                          <span class="c"># one URI, or a list when a tiled product needs mosaicking</span>
+      - https://.../N36W120_Map.tif
+      - https://.../N36W117_Map.tif
+    kind: categorical
+    resampling: mode              <span class="c"># REQUIRED, never guessed</span></code></pre>
+
+<p><strong>The test for whether something belongs here:</strong> would it be a different file for a
+different granule? If yes it is a role, not aux.</p>
+
+<p><strong>The gotcha.</strong> <code>resampling</code> is mandatory because interpolating a class
+label produces a number that is not a class, and nothing downstream can detect it.</p>
+
+<p><a href="#aux-vs-roles">Roles or aux?</a> &middot;
+<a href="../reference/manifest.html#aux">Full field reference</a></p>
+
+</div>
+</details>
+
+<details class="explainer">
+<summary><code>granule_filter</code> and <code>pixel_mask</code> &mdash; dropping things, at two scales</summary>
+<div class="body">
+
+<p>A <strong>filter</strong> drops a whole granule at plan time, against the index, before a byte is
+read. A <strong>mask</strong> drops cells in the read path, after the bytes are there.</p>
+
+<pre><code>granule_filter:
+  - {max_cloud_fraction: 0.8, on_missing: fail}
+pixel_mask:
+  - {ref: edge_trim, columns: 7}                      <span class="c"># sensor space</span>
+  - {ref: landcover, exclude: [water, built-up]}      <span class="c"># map space, reads aux</span></code></pre>
+
+<p>Rejecting early is free; the same predicate at pixel level costs a download, a regrid and a
+scoring pass. So filter coarsely for cost, mask precisely for correctness.</p>
+
+<p><strong>The gotcha.</strong> A mask is boolean and never a preference. "This pixel is unusable"
+and "this pixel is merely worse" are different statements, and the second belongs in the scorer.
+Also: <code>on_missing</code> defaults to <code>fail</code>, deliberately &mdash; a granule whose
+record lacks the key is an error while it is cheap to fix, not a silent drop.</p>
+
+<p><a href="../reference/manifest.html#granule_filter">Filters</a> &middot;
+<a href="../reference/manifest.html#pixel_mask">Masks</a> &middot;
+<a href="plugins.html">Writing your own</a></p>
+
+</div>
+</details>
+
+<details class="explainer">
+<summary><code>scorer</code> and <code>snapshot</code> &mdash; who wins, and what is recorded</summary>
+<div class="body">
+
+<p>These are deliberately separate. The scorer decides <em>which observation wins a cell</em>; the
+schema decides <em>what is recorded about the winner</em>. So any scorer works with any schema.</p>
+
+<pre><code>scorer:
+  ref: prefer_bare_earth
+  params: {hard_floor: 0.65, sun_weight: 0.25}
+
+snapshot:
+  name: cuprite-v1
+  layers:
+    mineral_1:
+      kind: categorical
+      source: mineral            <span class="c"># a role or alias name</span>
+      classes: source            <span class="c"># the granules' own table</span>
+      aggregate: {method: vote, min_count: 2, ignore: [none]}</code></pre>
+
+<p><strong>The gotcha.</strong> <code>layers</code> and <code>aggregate</code> live in the same
+block but invalidate differently. Changing <em>what a layer holds</em> rebuilds every snapshot;
+changing <em>how epochs collapse</em> rebuilds only the products. Cheap experiments live in
+<code>aggregate</code>.</p>
+
+<p><a href="../reference/manifest.html#snapshot">Full field reference</a> &middot;
+<a href="plugins.html#worked">Writing a scorer</a></p>
+
+</div>
+</details>
+
+<details class="explainer">
+<summary><code>outputs</code> and <code>budget</code> &mdash; what comes out, and what it may cost</summary>
+<div class="body">
+
+<pre><code>outputs:
+  bucket: ./out                   <span class="c"># or s3://... - the executor is never a manifest field</span>
+  formats: [gtiff]                <span class="c"># cog for delivery; gtiff to look at locally</span>
+  stac: true
+  render: {mineral_1: {mapper: categorical, on_unmapped: grey}}
+
+budget:
+  max_tiles: 18
+  max_granules: 100
+  max_vcpu_hours: 4
+  on_exceed: fail                 <span class="c"># require_approval | fail | warn</span></code></pre>
+
+<p>The budget is checked <em>before</em> the planner opens or downloads anything, so an
+over-budget run costs nothing to discover.</p>
+
+<p><strong>The gotcha.</strong> <code>outputs.bucket</code> is the only thing that changes between a
+laptop run and a cloud one. Where work runs is a command-line choice, never a manifest field
+&mdash; which is what lets the same file be the record of both.</p>
+
+<p><a href="../reference/manifest.html#outputs">Outputs</a> &middot;
+<a href="../reference/manifest.html#budget">Budget</a> &middot;
+<a href="running.html#budgets">Budgets in practice</a></p>
+
+</div>
+</details>
+
 <h2 id="chain">How data reaches a scorer</h2>
 
 <p>The single most useful thing to hold in your head is that <strong>four manifest blocks form one
@@ -41,9 +321,31 @@ chain</strong>, each answering a different question at a different time.</p>
 </table>
 </div>
 
-<pre><code>patterns  &rarr;  the INDEX  &rarr;  roles  &rarr;  obs["name"]
-"what files          "granule id     "what this      "...as an array
- exist"               &rarr; its assets"  run reads"      on this block"</code></pre>
+<pre class="mermaid">
+flowchart LR
+  P["inputs.source.patterns&lt;br/&gt;&lt;i&gt;which files exist&lt;/i&gt;"]
+  I[("the index&lt;br/&gt;granule id &amp;rarr; its assets&lt;br/&gt;&lt;i&gt;frozen, metadata only&lt;/i&gt;")]
+  R["inputs.roles&lt;br/&gt;collection &middot; asset &middot; var&lt;br/&gt;&lt;i&gt;what this run reads&lt;/i&gt;"]
+  B["inputs.band_aliases&lt;br/&gt;one band of a role&lt;br/&gt;&lt;i&gt;optional&lt;/i&gt;"]
+  O["what a scorer sees&lt;br/&gt;&lt;b&gt;obs, by name&lt;/b&gt;&lt;br/&gt;an array on this block"]
+  X["aux&lt;br/&gt;declared by URI&lt;br/&gt;&lt;i&gt;not an observation&lt;/i&gt;"]
+  A["what a scorer sees&lt;br/&gt;&lt;b&gt;aux.raster, by alias&lt;/b&gt;&lt;br/&gt;an array on this block"]
+
+  P -->|index build| I
+  I -->|plan| R
+  R -->|resolve| O
+  R -.->|names a band of| B
+  B -->|resolve| O
+  X -->|staged and warped at plan time| A
+
+  classDef seen stroke-width:2px
+  class O,A seen
+</pre>
+
+<p>Read it left to right: <code>patterns</code> decides what the index may ever contain,
+<code>roles</code> decides which of that this run reads, and only then does
+<code>obs["name"]</code> exist. <code>aux</code> is the separate track &mdash; it never touches the
+index, because it is not an observation.</p>
 
 <p><code>obs</code> is <strong>not a file.</strong> It is assembled per granule per block, and its
 keys are exactly the names you wrote under <code>roles</code> and <code>band_aliases</code>
@@ -135,9 +437,45 @@ band matches:</p>
 <pre><code>band_aliases:
   swir_2200: {role: reflectance, match: {wavelength: 2200}, tolerance: 10}</code></pre>
 
-<p><strong>A single-band variable needs no alias.</strong> <code>frcov</code> is one band, so
-<code>obs["frcov"]</code> works directly. Reach for an alias only when the variable has a band
-axis.</p>
+<h3 id="no-alias">What happens if you declare no alias</h3>
+
+<p>Neither of the two things you might expect. <strong>The role is still there, and nothing is
+auto-named.</strong></p>
+
+<div class="tw">
+<table>
+<thead><tr><th>You declare</th><th><code>obs</code> gets</th><th>Shape</th></tr></thead>
+<tbody>
+<tr><td>role <code>geometry</code>, no alias</td><td><code>obs["geometry"]</code></td><td><code>(H, W, 11)</code> &mdash; the whole variable, band axis and all</td></tr>
+<tr><td>role <code>geometry</code> + alias <code>solar_zenith</code></td><td><code>obs["geometry"]</code> <em>and</em> <code>obs["solar_zenith"]</code></td><td><code>(H, W, 11)</code> and <code>(H, W)</code></td></tr>
+<tr><td>role <code>frcov</code> (single-band), no alias</td><td><code>obs["frcov"]</code></td><td><code>(H, W)</code></td></tr>
+</tbody>
+</table>
+</div>
+
+<p>An alias <strong>adds</strong> an entry; it never replaces the role. And there is no inference
+anywhere: Stratum will not read a product's band names and invent
+<code>obs["to-sensor zenith"]</code> for you. A band gets a name because a manifest gave it one.</p>
+
+<p>So a scorer with no alias declared <em>can</em> still reach a band:</p>
+
+<pre><code>obs[<span class="k">"geometry"</span>][..., 2]        <span class="c"># works - and is exactly what the alias exists to avoid</span>
+obs[<span class="k">"solar_zenith"</span>]           <span class="c"># the same numbers, under a name that survives a change of sensor</span></code></pre>
+
+<p>Nothing breaks without the alias. What you lose is portability &mdash; the band index is now
+baked into the plugin instead of the manifest &mdash; and legibility, since <code>[..., 2]</code>
+says nothing about what band 2 is. Both cost you the first time the product adds a band.</p>
+
+<div class="note">
+  <span class="label">A snapshot layer can also pick bands</span>
+  <p>If you want a band <em>recorded</em> rather than read by a plugin, a layer takes
+  <code>bands: [i, j]</code> directly, and does not need an alias either. Selecting bands of a
+  single-band source is an error rather than a silent no-op.</p>
+</div>
+
+<p><strong>The short rule.</strong> A single-band variable never needs an alias. A multi-band one
+needs an alias for every band a <em>plugin</em> names &mdash; and none for bands nothing names,
+which are read and then ignored.</p>
 
 <h2 id="aux-vs-roles">Roles or aux?</h2>
 
@@ -432,5 +770,7 @@ half minutes.</p>
 </main>
 </div>
 <script src="../assets/stratum.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11.17.2/dist/mermaid.min.js"></script>
+<script src="../assets/diagrams.js"></script>
 </body>
 </html>

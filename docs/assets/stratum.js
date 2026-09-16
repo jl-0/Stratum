@@ -43,11 +43,6 @@
     ]}
   ];
 
-  var SOURCES = [
-    { href: 'specs/00-overview.md', label: 'Component specs' },
-    { href: 'notes/heritage.md', label: 'Prior art & heritage' }
-  ];
-
   var body = document.body;
   var here = body.getAttribute('data-page') || '';
   var root = body.getAttribute('data-root') || '';
@@ -77,15 +72,6 @@
       });
       side.appendChild(ul);
     });
-
-    side.appendChild(el('h2', null, 'Sources'));
-    var su = el('ul');
-    SOURCES.forEach(function (s) {
-      var li = el('li');
-      li.appendChild(el('a', { href: root + s.href }, s.label));
-      su.appendChild(li);
-    });
-    side.appendChild(su);
 
     /* ---- prev / next ---- */
 
