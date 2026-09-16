@@ -281,6 +281,10 @@
     'range': { cat: 'output', short: 'The output range of an alpha map.',
       body: '<p>Two alpha values, 0 to 255.</p>' },
 
+    'plugins': { cat: 'plugin', short: 'Where plugin code comes from. Not built.',
+      body: '<p>Points a run at a wheel rather than at whatever the image happens to contain, so an experiment can change a scorer without rebuilding and redeploying.</p>',
+      gotcha: 'Not built. Today a plugin reaches a deployment by being installed into the image, which means the image digest identifies the code that ran - a property a wheel URI would have to earn back with a content hash.' },
+
     /* ---------------- plugin refs ---------------- */
     'ref': { cat: 'plugin', short: 'Which plugin. An entry-point name or module:Class.',
       body: '<p>Resolved from installed metadata, so a plugin is a distribution rather than a file path. <code>stratum plugins list</code> shows what an environment provides.</p>' },
@@ -330,7 +334,9 @@
       });
 
       if (comment) { body += '<span class="cmt">' + esc(comment) + '</span>'; }
-      html += '<span class="ln" data-n="' + num + '">' + (body || '&nbsp;') + '</span>\n';
+      /* No trailing newline: .ln is display:block, and inside a <pre> a newline after a block
+         renders as a SECOND line break. One or the other, never both. */
+      html += '<span class="ln" data-n="' + num + '">' + (body || '&nbsp;') + '</span>';
     });
 
     document.getElementById('dec-code').innerHTML = html;
@@ -348,9 +354,46 @@
 
     var h = '<p class="dec-short">' + e.short + '</p>' + e.body;
     if (e.ex) { h += '<pre class="dec-ex"><code>' + esc(e.ex) + '</code></pre>'; }
-    if (e.gotcha) { h += '<div class="dec-flag dec-gotcha"><span>The gotcha</span><p>' + e.gotcha + '</p></div>'; }
-    if (e.invalidates) { h += '<div class="dec-flag dec-inval"><span>Changing it rebuilds</span><p>' + e.invalidates + '</p></div>'; }
+    var flags = '';
+    if (e.gotcha) { flags += '<div class="dec-flag dec-gotcha"><span>The gotcha</span><p>' + e.gotcha + '</p></div>'; }
+    if (e.invalidates) { flags += '<div class="dec-flag dec-inval"><span>Changing it rebuilds</span><p>' + e.invalidates + '</p></div>'; }
+    if (flags) { h += '<div class="dec-flags">' + flags + '</div>'; }
     document.getElementById('dec-body').innerHTML = h;
+  }
+
+  /* ---- the schema skeleton above the decoder -------------------------
+   * Same categories, same colours, so the overview and the real file read as one
+   * thing. Colour only, not clickable: the panel lives below the decoder, and a
+   * token up here that scrolled you away from what you were reading would be a
+   * worse affordance than none.
+   */
+  /* The skeleton is flat text with no section to scope a lookup, so `crs` has to find
+     `grid.crs`. Built once, first entry wins - the qualified keys are unique by last segment. */
+  var BARE = {};
+  Object.keys(DICT).forEach(function (k) {
+    var last = k.indexOf('.') === -1 ? k : k.split('.')[1];
+    if (!BARE[last]) { BARE[last] = k; }
+  });
+
+  function colourise(block) {
+    if (!block) { return; }
+    var walker = document.createTreeWalker(block, NodeFilter.SHOW_TEXT, null);
+    var texts = [];
+    while (walker.nextNode()) {
+      /* skip anything already marked up - the comment spans */
+      if (!walker.currentNode.parentElement.closest('.c')) { texts.push(walker.currentNode); }
+    }
+    texts.forEach(function (node) {
+      var out = esc(node.nodeValue).replace(/\b([a-z_][a-z0-9_]*)\b/g, function (m, word) {
+        var k = BARE[word];
+        if (!k) { return m; }
+        return '<span class="tok-static ' + CAT[DICT[k].cat][1] + '">' + word + '</span>';
+      });
+      if (out === esc(node.nodeValue)) { return; }
+      var span = document.createElement('span');
+      span.innerHTML = out;
+      node.parentNode.replaceChild(span, node);
+    });
   }
 
   /* ---- wiring -------------------------------------------------------- */
@@ -390,5 +433,6 @@
   });
 
   render(Object.keys(MANIFESTS)[0]);
+  colourise(document.getElementById('schema-skeleton'));
   root.classList.add('ready');
 }());

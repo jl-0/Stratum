@@ -461,6 +461,8 @@ html.no-mermaid .fig pre.mermaid::before {
 }
 
 .decoder { margin: 20px 0 8px; }
+/* The skeleton is a plain <pre> with long trailing comments; let it scroll rather than clip. */
+#schema-skeleton { overflow-x: auto; }
 .dec-controls { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 10px; }
 .dec-controls .label { font: 600 11px/1 var(--sans); letter-spacing: .08em;
   text-transform: uppercase; color: var(--muted); margin-right: 2px; }
@@ -472,24 +474,27 @@ html.no-mermaid .fig pre.mermaid::before {
 #dec-picker button.active { background: var(--accent-soft); border-color: var(--accent);
   color: var(--accent); font-weight: 600; }
 
-.dec-grid { display: grid; grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr); gap: 14px;
-  align-items: start; }
-@media (max-width: 900px) { .dec-grid { grid-template-columns: 1fr; } }
+/* One column: the listing gets the full width it needs - a manifest line with an inline comment
+   is long - and the panel sits under it rather than being squeezed into a gutter. */
+.dec-grid { display: flex; flex-direction: column; gap: 12px; }
 
 .dec-viewer { border: 1px solid var(--border); border-radius: 8px; background: var(--code-bg);
   overflow: hidden; }
 .dec-head { display: flex; gap: 10px; align-items: baseline; flex-wrap: wrap;
   padding: 8px 12px; border-bottom: 1px solid var(--border); background: var(--surface-2); }
 .dec-head .fname { font: 600 12px/1.4 var(--mono); color: var(--text); }
-.dec-head .note { font: 400 11.5px/1.4 var(--sans); color: var(--muted); }
-#dec-code { margin: 0; padding: 10px 0; max-height: 30em; overflow: auto;
-  font: 400 12.5px/1.65 var(--mono); tab-size: 2; }
+/* NOT .note - that is the site's callout block, and reusing the name turned a one-line
+   subtitle into a bordered box. */
+.dec-sub { font: 400 11.5px/1.4 var(--sans); color: var(--muted); }
+#dec-code { margin: 0; padding: 10px 0; max-height: 34em; overflow: auto;
+  font: 400 12.5px/1.5 var(--mono); tab-size: 2; }
 #dec-code .ln { display: block; padding: 0 12px 0 3.6em; text-indent: -0.2em;
   white-space: pre; position: relative; }
 #dec-code .ln::before { content: attr(data-n); position: absolute; left: 0; width: 3em;
   text-align: right; color: var(--muted); opacity: .55; user-select: none; }
 #dec-code .cmt { color: var(--muted); opacity: .8; }
 
+.tok-static { font-weight: 600; }
 .tok { cursor: pointer; border-radius: 3px; padding: 0 1px; font-weight: 600;
   border-bottom: 1px dotted currentColor; }
 .tok:hover { background: var(--accent-soft); }
@@ -505,18 +510,19 @@ html.no-mermaid .fig pre.mermaid::before {
 .c-output    { color: var(--t-output); }
 .c-budget    { color: var(--t-budget); }
 
-.dec-panel { border: 1px solid var(--border); border-radius: 8px; background: var(--surface);
-  position: sticky; top: 16px; }
+.dec-panel { border: 1px solid var(--border); border-radius: 8px; background: var(--surface); }
 .dec-panel-head { padding: 10px 14px; border-bottom: 1px solid var(--border);
   background: var(--surface-2); border-radius: 7px 7px 0 0; }
 .dec-cat { font: 600 10.5px/1.4 var(--sans); letter-spacing: .08em; text-transform: uppercase; }
 #dec-tok { font: 600 15px/1.4 var(--mono); color: var(--text); margin-top: 2px; }
-#dec-body { padding: 12px 14px; font-size: 13.5px; max-height: 26em; overflow: auto; }
+#dec-body { padding: 12px 16px; font-size: 13.5px; }
 #dec-body p { margin: 0 0 9px; }
 .dec-short { color: var(--muted); font-style: italic; }
 .dec-ex { margin: 9px 0; padding: 8px 10px; background: var(--code-bg);
   border: 1px solid var(--border); border-radius: 5px; font-size: 12px; overflow-x: auto; }
-.dec-flag { margin: 10px 0 0; padding: 8px 10px; border-radius: 5px; border: 1px solid; }
+.dec-flags { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 10px; }
+@media (max-width: 720px) { .dec-flags { grid-template-columns: 1fr; } }
+.dec-flag { padding: 8px 10px; border-radius: 5px; border: 1px solid; }
 .dec-flag span { display: block; font: 600 10.5px/1.4 var(--sans); letter-spacing: .07em;
   text-transform: uppercase; margin-bottom: 3px; }
 .dec-flag p { margin: 0; font-size: 12.5px; }

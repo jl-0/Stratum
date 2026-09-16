@@ -26,10 +26,11 @@ change your mind &mdash; follows from it.</p>
 
 <h2 id="shape">The shape of a manifest</h2>
 
-<p>Eighteen top-level blocks, eight of them required. Every one is below; the rest of this page is
-what the interesting ones mean.</p>
+<p>Eighteen top-level blocks, eight of them required. Every one is below, coloured by what it
+governs &mdash; the same colours the decoder uses, so the overview and the real file read as one
+thing.</p>
 
-<pre><code>run_id: cuprite-bare-earth        <span class="c"># REQUIRED. A label. The run id is this plus a date and a hash</span>
+<pre id="schema-skeleton"><code>run_id: cuprite-bare-earth        <span class="c"># REQUIRED. A label. The run id is this plus a date and a hash</span>
 description: ...                  <span class="c"># free text, carried into provenance</span>
 schema_version: "1.0"             <span class="c"># defaulted; you will not normally write it</span>
 
@@ -66,6 +67,18 @@ budget:                           <span class="c"># REQUIRED. Checked before any
 
 allow_mixed_vintage: false        <span class="c"># optional, and needs mixed_vintage_reason if true</span></code></pre>
 
+<div class="dec-legend">
+  <span class="c-structure"><b>&#9632;</b>structure</span>
+  <span class="c-geometry"><b>&#9632;</b>geometry</span>
+  <span class="c-time"><b>&#9632;</b>time</span>
+  <span class="c-binding"><b>&#9632;</b>input binding</span>
+  <span class="c-aux"><b>&#9632;</b>ancillary</span>
+  <span class="c-plugin"><b>&#9632;</b>plugin</span>
+  <span class="c-schema"><b>&#9632;</b>schema</span>
+  <span class="c-output"><b>&#9632;</b>output</span>
+  <span class="c-budget"><b>&#9632;</b>budget</span>
+</div>
+
 <div class="key">
   <span class="label">Three things the shape tells you</span>
   <p><strong>`budget` is required.</strong> Not a safety net you opt into &mdash; a run states what
@@ -94,7 +107,7 @@ different manifest to see the same keys in another setting.</p>
     <div class="dec-viewer">
       <div class="dec-head">
         <span class="fname" id="dec-file"></span>
-        <span class="note" id="dec-note"></span>
+        <span class="dec-sub" id="dec-note"></span>
       </div>
       <pre id="dec-code">Loading the manifest&hellip; if this does not change, JavaScript is
 blocked. Every key below is documented in the manifest reference instead.</pre>
@@ -110,17 +123,6 @@ blocked. Every key below is documented in the manifest reference instead.</pre>
         <p>Two things each entry carries that a field reference does not: <strong>the
         gotcha</strong>, and <strong>what changing it rebuilds</strong> &mdash; because the second
         is what decides whether an idea is a five-second experiment or a five-hour one.</p>
-        <div class="dec-legend">
-          <span class="c-structure"><b>&#9632;</b>structure</span>
-          <span class="c-geometry"><b>&#9632;</b>geometry</span>
-          <span class="c-time"><b>&#9632;</b>time</span>
-          <span class="c-binding"><b>&#9632;</b>input binding</span>
-          <span class="c-aux"><b>&#9632;</b>ancillary</span>
-          <span class="c-plugin"><b>&#9632;</b>plugin</span>
-          <span class="c-schema"><b>&#9632;</b>schema</span>
-          <span class="c-output"><b>&#9632;</b>output</span>
-          <span class="c-budget"><b>&#9632;</b>budget</span>
-        </div>
       </div>
     </div>
   </div>
