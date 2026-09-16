@@ -48,9 +48,16 @@ decisions/index.html      ADR digest
 status.html               what is implemented, what is open
 assets/                   stratum.css, stratum.js — the shared chrome
                           diagrams.js — Mermaid theming; loaded only by diagram pages
+                          manifest-decoder.js — the clickable manifest on guide/manifests.html
 ```
 
 ### Adding a page
+
+**One block on the site is generated.** The manifest listings inside
+[`guide/manifests.html`](guide/manifests.html) are written by
+`scripts/sync-manifest-decoder.py` from the real example manifests, so the decoder cannot drift
+into describing a file nobody runs. Edit an example, re-run the script; `tests/test_docs_manifests.py`
+fails if you forget. Nothing else on the site is generated, and nothing else should become so.
 
 1. Add one entry to `PAGES` in [`assets/stratum.js`](assets/stratum.js) — the single copy of the
    nav model; the sidebar and prev/next pager both derive from it.

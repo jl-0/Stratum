@@ -430,3 +430,105 @@ html.no-mermaid .fig pre.mermaid::before {
 /* sticky masthead offset for in-page anchors */
 :target, h2[id], h3[id], section[id] { scroll-margin-top: 64px; }
 @media (max-width: 900px) { :target, h2[id], h3[id], section[id] { scroll-margin-top: 12px; } }
+
+/* ---- the manifest decoder (guide/manifests.html) -------------------------------------------
+   Token colours are declared here rather than in the page, so the decoder follows light/dark
+   with everything else. Each is a hue that survives both grounds; the dark block below lifts
+   them rather than restating the palette. */
+:root {
+  --t-structure: #8a5a12;
+  --t-geometry:  #2b5788;
+  --t-time:      #2f6b3d;
+  --t-binding:   #a8481f;
+  --t-aux:       #6b3f8a;
+  --t-plugin:    #0f6b6b;
+  --t-schema:    #8a2f5a;
+  --t-output:    #4a6b12;
+  --t-budget:    #7a3b1f;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --t-structure: #d9a44a;
+    --t-geometry:  #7aa9dd;
+    --t-time:      #77c188;
+    --t-binding:   #e08a5f;
+    --t-aux:       #b795d9;
+    --t-plugin:    #5cc0c0;
+    --t-schema:    #dd84ad;
+    --t-output:    #a9c463;
+    --t-budget:    #d69a7a;
+  }
+}
+
+.decoder { margin: 20px 0 8px; }
+.dec-controls { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 10px; }
+.dec-controls .label { font: 600 11px/1 var(--sans); letter-spacing: .08em;
+  text-transform: uppercase; color: var(--muted); margin-right: 2px; }
+#dec-picker { display: flex; flex-wrap: wrap; gap: 6px; }
+#dec-picker button { font: 500 12.5px/1 var(--sans); padding: 6px 11px; cursor: pointer;
+  background: var(--surface); color: var(--muted);
+  border: 1px solid var(--border); border-radius: 999px; }
+#dec-picker button:hover { border-color: var(--border-strong); color: var(--text); }
+#dec-picker button.active { background: var(--accent-soft); border-color: var(--accent);
+  color: var(--accent); font-weight: 600; }
+
+.dec-grid { display: grid; grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr); gap: 14px;
+  align-items: start; }
+@media (max-width: 900px) { .dec-grid { grid-template-columns: 1fr; } }
+
+.dec-viewer { border: 1px solid var(--border); border-radius: 8px; background: var(--code-bg);
+  overflow: hidden; }
+.dec-head { display: flex; gap: 10px; align-items: baseline; flex-wrap: wrap;
+  padding: 8px 12px; border-bottom: 1px solid var(--border); background: var(--surface-2); }
+.dec-head .fname { font: 600 12px/1.4 var(--mono); color: var(--text); }
+.dec-head .note { font: 400 11.5px/1.4 var(--sans); color: var(--muted); }
+#dec-code { margin: 0; padding: 10px 0; max-height: 30em; overflow: auto;
+  font: 400 12.5px/1.65 var(--mono); tab-size: 2; }
+#dec-code .ln { display: block; padding: 0 12px 0 3.6em; text-indent: -0.2em;
+  white-space: pre; position: relative; }
+#dec-code .ln::before { content: attr(data-n); position: absolute; left: 0; width: 3em;
+  text-align: right; color: var(--muted); opacity: .55; user-select: none; }
+#dec-code .cmt { color: var(--muted); opacity: .8; }
+
+.tok { cursor: pointer; border-radius: 3px; padding: 0 1px; font-weight: 600;
+  border-bottom: 1px dotted currentColor; }
+.tok:hover { background: var(--accent-soft); }
+.tok:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.tok.on { background: var(--accent); color: var(--surface); border-bottom-color: transparent; }
+.c-structure { color: var(--t-structure); }
+.c-geometry  { color: var(--t-geometry); }
+.c-time      { color: var(--t-time); }
+.c-binding   { color: var(--t-binding); }
+.c-aux       { color: var(--t-aux); }
+.c-plugin    { color: var(--t-plugin); }
+.c-schema    { color: var(--t-schema); }
+.c-output    { color: var(--t-output); }
+.c-budget    { color: var(--t-budget); }
+
+.dec-panel { border: 1px solid var(--border); border-radius: 8px; background: var(--surface);
+  position: sticky; top: 16px; }
+.dec-panel-head { padding: 10px 14px; border-bottom: 1px solid var(--border);
+  background: var(--surface-2); border-radius: 7px 7px 0 0; }
+.dec-cat { font: 600 10.5px/1.4 var(--sans); letter-spacing: .08em; text-transform: uppercase; }
+#dec-tok { font: 600 15px/1.4 var(--mono); color: var(--text); margin-top: 2px; }
+#dec-body { padding: 12px 14px; font-size: 13.5px; max-height: 26em; overflow: auto; }
+#dec-body p { margin: 0 0 9px; }
+.dec-short { color: var(--muted); font-style: italic; }
+.dec-ex { margin: 9px 0; padding: 8px 10px; background: var(--code-bg);
+  border: 1px solid var(--border); border-radius: 5px; font-size: 12px; overflow-x: auto; }
+.dec-flag { margin: 10px 0 0; padding: 8px 10px; border-radius: 5px; border: 1px solid; }
+.dec-flag span { display: block; font: 600 10.5px/1.4 var(--sans); letter-spacing: .07em;
+  text-transform: uppercase; margin-bottom: 3px; }
+.dec-flag p { margin: 0; font-size: 12.5px; }
+.dec-gotcha { background: var(--warn-soft); border-color: var(--warn); color: var(--warn); }
+.dec-gotcha p { color: var(--text); }
+.dec-inval { background: var(--info-soft); border-color: var(--info); color: var(--info); }
+.dec-inval p { color: var(--text); }
+
+.dec-legend { display: flex; flex-wrap: wrap; gap: 4px 14px; margin: 10px 0 0;
+  font: 500 11.5px/1.5 var(--sans); }
+.dec-legend span b { margin-right: 3px; }
+
+/* Without JavaScript the listing never renders; the fallback stays readable. */
+.decoder:not(.ready) .dec-panel { display: none; }
+.decoder:not(.ready) .dec-grid { grid-template-columns: 1fr; }
