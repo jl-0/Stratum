@@ -136,3 +136,29 @@ def test_the_decoder_hard_codes_no_colour() -> None:
     would look wrong in one theme and nobody would notice until a screenshot."""
     hits = re.findall(r"#[0-9a-fA-F]{3,8}\b", DECODER.read_text())
     assert not hits, f"literal colour(s) in the decoder: {hits}; use a CSS custom property"
+
+
+# ------------------------------------------------- the aggregate vocabulary, in the reference
+AGG_SYNC = ROOT / "scripts" / "sync-aggregate-table.py"
+REFERENCE = ROOT / "docs" / "reference" / "manifest.html"
+
+
+def test_the_aggregate_table_is_current() -> None:
+    """A manifest author cannot know what to type into `aggregate` without this table, and a
+    stale one is worse than none. The generator probes the models, so it tracks them."""
+    out = subprocess.run([sys.executable, str(AGG_SYNC)], capture_output=True,
+                         text=True, cwd=ROOT, check=False)
+    assert out.returncode == 0, (
+        f"the aggregate table is out of date - the sync script rewrote it: {out.stdout.strip()}")
+
+
+def test_the_aggregate_table_lists_every_method() -> None:
+    """The table is generated, so this is really asking whether the generator still sees every
+    method: a new one added to the models must not slip out of the reference silently."""
+    from stratum.manifest.models import CATEGORICAL_METHODS, CONTINUOUS_METHODS
+
+    page = REFERENCE.read_text()
+    block = page[page.index("BEGIN generated: aggregate"):page.index("END generated: aggregate")]
+    for method in sorted(set(CATEGORICAL_METHODS) | set(CONTINUOUS_METHODS)):
+        assert f"<code>{method}</code>" in block, (
+            f"aggregate method {method!r} is in the models but not in the reference table")

@@ -406,17 +406,31 @@ reads. See <a href="../guide/plugins.html#snapshot-schema">what the snapshot car
 
 <h3 id="aggregate">aggregate</h3>
 
+<p>How a layer collapses through time. This is the built-in reducer's whole vocabulary &mdash; a
+manifest that omits <code>reducer</code> (as every shipped example does) gets exactly this, so
+these are the options. Reduction is declared <strong>per layer</strong>, so one manifest can vote
+on a mineral and take a median of its depth in the same breath.</p>
+
+<!-- BEGIN generated: aggregate vocabulary -->
 <div class="tw">
 <table>
-<thead><tr><th>Kind</th><th><code>method</code></th><th>Parameters</th></tr></thead>
+<thead><tr><th>method</th><th>layer kind</th><th>what it does</th><th>requires</th><th>also takes</th></tr></thead>
 <tbody>
-<tr><td>categorical</td><td><code>vote</code></td><td><code>min_count</code> (int), <code>ignore</code> (class names), <code>tie_break</code>: <code>earliest</code> | <code>latest</code> | <code>highest_score</code> | <code>nodata</code></td></tr>
-<tr><td>categorical</td><td><code>best</code></td><td>—</td></tr>
-<tr><td>continuous</td><td><code>median</code> | <code>mean</code> | <code>min</code> | <code>max</code> | <code>percentile</code> | <code>score_weighted</code> | <code>inverse_variance</code> | <code>best</code></td><td><code>p</code> for percentile; <code>unc: &lt;layer&gt;</code> for inverse_variance; any may add <code>conditional_on: &lt;categorical layer&gt;</code> and <code>spread: std | iqr</code></td></tr>
-<tr><td>either</td><td><code>none</code></td><td>Carried, not delivered</td></tr>
+<tr><td><code>vote</code></td><td>categorical</td><td>The modal class across epochs. The mineral-map default.</td><td>&mdash;</td><td><code>ignore</code> <code>min_count</code> <code>tie_break</code></td></tr>
+<tr><td><code>best</code></td><td>categorical / continuous</td><td>The value from the single highest-scoring epoch.</td><td>&mdash;</td><td><code>conditional_on</code> <code>spread</code></td></tr>
+<tr><td><code>none</code></td><td>categorical / continuous</td><td>Carried in the snapshot, never delivered as a product band.</td><td>&mdash;</td><td>&mdash;</td></tr>
+<tr><td><code>inverse_variance</code></td><td>continuous</td><td>A mean weighted by 1/uncertainty&sup2;, from the layer <code>unc</code> names.</td><td><code>unc</code></td><td><code>conditional_on</code> <code>spread</code></td></tr>
+<tr><td><code>max</code></td><td>continuous</td><td>The largest value.</td><td>&mdash;</td><td><code>conditional_on</code> <code>spread</code></td></tr>
+<tr><td><code>mean</code></td><td>continuous</td><td>The arithmetic mean.</td><td>&mdash;</td><td><code>conditional_on</code> <code>spread</code></td></tr>
+<tr><td><code>median</code></td><td>continuous</td><td>The middle value. Robust to one bad epoch.</td><td>&mdash;</td><td><code>conditional_on</code> <code>spread</code></td></tr>
+<tr><td><code>min</code></td><td>continuous</td><td>The smallest value.</td><td>&mdash;</td><td><code>conditional_on</code> <code>spread</code></td></tr>
+<tr><td><code>percentile</code></td><td>continuous</td><td>The p-th percentile.</td><td><code>p</code></td><td><code>conditional_on</code> <code>spread</code></td></tr>
+<tr><td><code>score_weighted</code></td><td>continuous</td><td>A mean weighted by each epoch's winning score.</td><td>&mdash;</td><td><code>conditional_on</code> <code>spread</code></td></tr>
 </tbody>
 </table>
 </div>
+<p class="gen">Derived from <code>stratum.manifest.models</code> by <code>scripts/sync-aggregate-table.py</code>: every cell is what the validator actually accepted, not a transcription of it. A parameter a method does not take is a load-time error naming the method.</p>
+<!-- END generated: aggregate vocabulary -->
 
 <p>Changing an <code>aggregate</code> re-runs reduce and publish only. Changing any other layer
 field re-runs resolve from cached geometry.</p>

@@ -53,11 +53,16 @@ assets/                   stratum.css, stratum.js — the shared chrome
 
 ### Adding a page
 
-**One block on the site is generated.** The manifest listings inside
-[`guide/manifests.html`](guide/manifests.html) are written by
-`scripts/sync-manifest-decoder.py` from the real example manifests, so the decoder cannot drift
-into describing a file nobody runs. Edit an example, re-run the script; `tests/test_docs_manifests.py`
-fails if you forget. Nothing else on the site is generated, and nothing else should become so.
+**Two blocks on the site are generated**, both because a hand-written copy of something the code
+owns will drift, and a confidently wrong reference is worse than none:
+
+| Block | Written by | From |
+|---|---|---|
+| The manifest listings in [`guide/manifests.html`](guide/manifests.html) | `scripts/sync-manifest-decoder.py` | the real example manifests |
+| The `aggregate` table in [`reference/manifest.html`](reference/manifest.html) | `scripts/sync-aggregate-table.py` | `stratum.manifest.models`, **probed** &mdash; it builds a layer per (kind, method, parameter) and records what the validator accepted |
+
+Edit an example or the models, re-run the script; `tests/test_docs_manifests.py` fails if you
+forget. Nothing else on the site is generated, and nothing else should become so.
 
 1. Add one entry to `PAGES` in [`assets/stratum.js`](assets/stratum.js) — the single copy of the
    nav model; the sidebar and prev/next pager both derive from it.

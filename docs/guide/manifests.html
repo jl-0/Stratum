@@ -154,15 +154,16 @@ chain</strong>, each answering a different question at a different time.</p>
 </table>
 </div>
 
+<figure class="fig">
 <pre class="mermaid">
-flowchart LR
-  P["inputs.source.patterns&lt;br/&gt;&lt;i&gt;which files exist&lt;/i&gt;"]
-  I[("the index&lt;br/&gt;granule id &amp;rarr; its assets&lt;br/&gt;&lt;i&gt;frozen, metadata only&lt;/i&gt;")]
-  R["inputs.roles&lt;br/&gt;collection &middot; asset &middot; var&lt;br/&gt;&lt;i&gt;what this run reads&lt;/i&gt;"]
-  B["inputs.band_aliases&lt;br/&gt;one band of a role&lt;br/&gt;&lt;i&gt;optional&lt;/i&gt;"]
-  O["what a scorer sees&lt;br/&gt;&lt;b&gt;obs, by name&lt;/b&gt;&lt;br/&gt;an array on this block"]
-  X["aux&lt;br/&gt;declared by URI&lt;br/&gt;&lt;i&gt;not an observation&lt;/i&gt;"]
-  A["what a scorer sees&lt;br/&gt;&lt;b&gt;aux.raster, by alias&lt;/b&gt;&lt;br/&gt;an array on this block"]
+flowchart TB
+  P["<b>inputs.source.patterns</b>&lt;br/&gt;which files exist"]
+  I[("<b>the index</b>&lt;br/&gt;granule id &amp;rarr; its assets")]
+  R["<b>inputs.roles</b>&lt;br/&gt;collection &middot; asset &middot; var"]
+  B["<b>inputs.band_aliases</b>&lt;br/&gt;one band of a role"]
+  O["<b>obs</b>, by name&lt;br/&gt;an array on this block"]
+  X["<b>aux</b>&lt;br/&gt;declared by URI"]
+  A["<b>aux.raster</b>, by alias&lt;br/&gt;an array on this block"]
 
   P -->|index build| I
   I -->|plan| R
@@ -174,11 +175,8 @@ flowchart LR
   classDef seen stroke-width:2px
   class O,A seen
 </pre>
-
-<p>Read it left to right: <code>patterns</code> decides what the index may ever contain,
-<code>roles</code> decides which of that this run reads, and only then does
-<code>obs["name"]</code> exist. <code>aux</code> is the separate track &mdash; it never touches the
-index, because it is not an observation.</p>
+<figcaption><strong>Four blocks, one chain.</strong> <code>patterns</code> decides what the index may ever contain, <code>roles</code> which of that this run reads, and only then does <code>obs</code> exist. <code>aux</code> is the separate track &mdash; it never touches the index, because it is not an observation.</figcaption>
+</figure>
 
 <p><code>obs</code> is <strong>not a file.</strong> It is assembled per granule per block, and its
 keys are exactly the names you wrote under <code>roles</code> and <code>band_aliases</code>
