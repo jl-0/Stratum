@@ -1,18 +1,27 @@
-# Stratum example: the Cuprite / Goldfield district of Nevada as SIX tiles, January-August 2026,
-# granules discovered in NASA's CMR catalogue and downloaded from LP DAAC on first touch.
+# Stratum example: Cuprite / Goldfield, Nevada as EIGHTEEN tiles (3 x 6) over all of 2025.
+# Granules discovered in NASA's CMR catalogue and downloaded from LP DAAC on first touch.
 # Run from the repo root:
 #
-#     pixi run stratum index build -m examples/emit-cmr-cuprite/manifest.yaml   # metadata only
-#     pixi run stratum plan        -m examples/emit-cmr-cuprite/manifest.yaml   # read report.md
-#     pixi run stratum run         -m examples/emit-cmr-cuprite/manifest.yaml
+#     pixi run stratum index build -m examples/emit-cmr-cuprite/manifest-bare-earth.yaml
+#     pixi run stratum plan        -m examples/emit-cmr-cuprite/manifest-bare-earth.yaml
+#     pixi run stratum run         -m examples/emit-cmr-cuprite/manifest-bare-earth.yaml
 #
-# This is emit-cmr-nevada's science over a MULTI-TILE area: the same collections, roles, masks,
-# scorer and monthly vote, changed only in geometry - a half-degree `tile_size`, the `block_size`
-# that follows from it, and a `bbox` instead of an explicit tile list. Everything else being
-# identical is the point: the fan-out over tiles is a property of the grid and the AOI, never of
-# the pipeline. 719 work items against the single-tile example's 205.
+# It shares this directory's index/ and out/ with ../manifest.yaml, and differs from it in two
+# ways that matter and one that does not.
 #
-# Every path below is relative to this file. README.md has the tile map and the measured cost.
+# The two that matter are the INPUT PATHS neither other example uses:
+#
+#   * an ORTHO-NATIVE role. L2B FRCOV ships as GeoTIFFs already on a map grid, so it has no
+#     sensor space and no GLT - the framework warps it onto the block (12 section 2).
+#   * AUX data. ESA WorldCover is not an EMIT product at all: declared by URI, staged and warped
+#     at plan time, reaching a mask through `AuxAccessor` (05). Four of its tiles are mosaicked,
+#     because this AOI is wider than one of them.
+#
+# The one that does not is scale. 18 tiles and 2,591 work items against the single-tile example's
+# 205 - but that fan-out is a property of the grid and the AOI, never of the pipeline.
+#
+# Every path below is relative to this file. README.md section 8 has the tile map and the
+# measured cost, including what a year of monthly epochs buys over eight months.
 
 run_id: emit-cmr-cuprite-bare-earth             # the run label; the run id is this plus a hash of the manifest
 description: Cuprite 3 x 6 tiles, all of 2025 - monthly votes reduced to one annual product
@@ -25,13 +34,13 @@ grid:
                                   #   Tiles are cut on the CELL lattice, not on a lattice of their
                                   #   own, so changing tile_size re-cuts the same cells into
                                   #   different rectangles - no pixel moves, and no tile straddles
-                                  #   a cell. Six half-degree tiles cover 1.0 x 1.5 degrees; the
-                                  #   same 2 x 3 set at the delivered 1.0 would be 2 x 3 degrees
-                                  #   and 89 granules instead of 45 (measured against CMR), which
+                                  #   a cell. Eighteen half-degree tiles cover 1.5 x 3.0 degrees;
+                                  #   the same box at the delivered 1.0 would be a quarter as many
+                                  #   tiles over the same ground and far more granules each, which
                                   #   is more than an example should ask anyone to download.
   block_size: 450                 # cells per block edge: a tile is 4 x 4 blocks, so 96 blocks in all
                                   #   (nevada: 5 x 5 blocks in one tile = 25). Four times the work,
-                                  #   spread over six products instead of one.
+                                  #   spread over eighteen products instead of one.
 
 aoi:
   # [west, south, east, north] in degrees. The tiles are DERIVED: every tile whose nominal bounds
@@ -100,9 +109,10 @@ inputs:
         MINUNCERT: "EMIT_L2B_MINUNCERT_001_*.nc" #   matched on the first asset (e.g. 20260604T180210_2615512_009).
       EMITL2BFRCOV:               #   ortho-native GeoTIFFs, one file per cover fraction. Only BARE
         FRCOVBARE: "EMIT_L2B_FRCOVBARE_001_*.tif"   #   is listed, so the PV/NPV/QC/UNC files are
-                                  #   never indexed or fetched. 41 of the 45 granules have FRCOV -
-                                  #   and they are exactly the 41 that survive the cloud filter,
-                                  #   so requiring it costs nothing (measured 2026-09-15).
+                                  #   never indexed or fetched. 90 of the 105 granules have
+                                  #   FRCOV - and they are exactly the 90 that survive the cloud
+                                  #   filter, so requiring the role costs nothing (measured
+                                  #   2026-09-16; the producer gives up on the same scenes).
       EMITL1BRAD:                 #   OBS is the second file of an L1B RAD record; the 1.85 GB RAD file
         OBS: "EMIT_L1B_OBS_001_*.nc"            #   is deliberately unlisted, so it is never fetched.
   roles:                          # what the run reads: a name -> (collection, file, variable)
@@ -204,9 +214,9 @@ outputs:
   bucket: ./out                   # the storage root: assets/, cache/, runs/, products/ hang off it
   # gtiff, not cog, for the same reason as emit-cmr-nevada: this example exists to be looked at,
   # and a paletted COG is not readable by macOS ImageIO. Six tiles make that matter more, not
-  # less - checking that the seams line up means opening all six. Delivered products use `cog`.
+  # less - checking that the seams line up means opening all eighteen. Delivered runs use `cog`.
   formats: [gtiff]
-  stac: true                      # a STAC item per product - so six items - and one collection per run
+  stac: true                      # a STAC item per product - eighteen - and one collection per run
   render:
     mineral_1:
       mapper: categorical         # colour each class from the legend
