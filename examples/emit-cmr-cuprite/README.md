@@ -231,100 +231,103 @@ grid id, so changing it invalidates every GLT, snapshot and product block. Chang
 
 ## 8. The second manifest: bare, well-lit ground wins
 
-`manifest-bare-earth.yaml` runs the same grid over **three times the ground** &mdash; a 3 x 6 set,
-18 tiles &mdash; and changes how a cell picks its winner. It exists to exercise the two input paths
-the baseline does not use, and it shares this directory's `index/` and `out/`, so every GLT and
-every downloaded granule is reused.
+`manifest-bare-earth.yaml` is the same grid over **three times the ground and a whole calendar
+year** &mdash; 18 tiles, all of 2025 &mdash; and changes how a cell picks its winner. It exists to
+exercise the two input paths the baseline does not use. It shares this directory's `index/` and
+`out/`, though it now covers a different year, so only the cache machinery is common.
 
 | | baseline `manifest.yaml` | `manifest-bare-earth.yaml` |
 |---|---|---|
-| area | 2 x 3 tiles | **3 x 6 tiles** (the baseline is its bottom-left corner) |
-| scorer | `min_view_zenith` &mdash; closest to nadir | `prefer_bare_earth` &mdash; most bare soil, then best lit |
-| extra input | &mdash; | `frcov`, an **ortho-native role** (L2B FRCOV GeoTIFFs) |
-| extra input | &mdash; | `landcover`, an **aux source** (ESA WorldCover, four tiles mosaicked) |
+| area | 2 x 3 tiles | **3 x 6 tiles** |
+| time | Jan&ndash;Aug 2026, 8 monthly epochs | **all of 2025, 12 monthly epochs** |
+| delivery | one product over the 8 months | **`P1Y`** &mdash; one annual product per tile |
+| scorer | `min_view_zenith` | `prefer_bare_earth` &mdash; most bare soil, then best lit |
+| extra input | &mdash; | `frcov`, an **ortho-native role** |
+| extra input | &mdash; | `landcover`, an **aux source**, four tiles mosaicked |
 | masks | `edge_trim` | `edge_trim` + `landcover` |
 
-**The two mechanisms, one sentence each.** An *ortho-native role* is a product already on a map
-grid: no sensor space, no GLT, so the framework warps it straight onto the block
-([12 §2](../../docs/specs/12-data-access.md)). *Aux* is data that is not an observation at all:
-declared by URI, addressed by alias, staged and warped at plan time
-([05](../../docs/specs/05-ancillary-data.md)). See
+**Epoch and delivery are different questions.** The epoch is how finely observations are bucketed
+*before* anything is combined &mdash; a month, so a cell seen three times in March still casts one
+March vote. Delivery is how those buckets collapse into a product. Twelve monthly votes reduced to
+one annual answer is the Critical Minerals shape.
+
+**The two mechanisms.** An *ortho-native role* is a product already on a map grid: no sensor space,
+no GLT, warped straight onto the block ([12 §2](../../docs/specs/12-data-access.md)). *Aux* is data
+that is not an observation at all: declared by URI, addressed by alias, staged and warped at plan
+time ([05](../../docs/specs/05-ancillary-data.md)). See
 [Authoring a manifest](../../docs/guide/manifests.html) for how the pieces connect.
 
 ```bash
-pixi run stratum index build -m examples/emit-cmr-cuprite/manifest-bare-earth.yaml  # rebuild: +FRCOV, wider box
+pixi run stratum index build -m examples/emit-cmr-cuprite/manifest-bare-earth.yaml
 pixi run stratum run         -m examples/emit-cmr-cuprite/manifest-bare-earth.yaml
 ```
 
-The index rebuild is not optional and the planner says so: adding a collection or widening the box
-widens the index's scope, and a run refuses an index built for less.
+The index rebuild is not optional: adding a collection, widening the box or widening the time range
+all widen the index's declared scope, and a run refuses an index built for less.
 
 ```
-wrote index/granules.parquet: 197 row(s), 69 granule(s)
-  EMITL1BRAD     69 row(s)   EMITL2BFRCOV  59 row(s)   EMITL2BMIN  69 row(s)
+wrote index/granules.parquet: 300 row(s), 105 granule(s)
+  EMITL1BRAD  105 row(s)   EMITL2BFRCOV  90 row(s)   EMITL2BMIN  105 row(s)
 ```
 
-**197 rows, 69 granules** &mdash; that gap is the id merge working. The FRCOV records carry the same
-granule ids as the MIN and OBS records, so they fold into one record each rather than becoming
-separate granules.
+**300 rows, 105 granules** &mdash; that gap is the id merge working. The FRCOV records carry the
+same granule ids as the MIN and OBS records, so they fold into one record each. Fifteen granules
+fail the cloud filter; they are exactly the fifteen with no FRCOV.
 
 ### The aux source is four files, not one
 
-ESA WorldCover ships as 3&deg; x 3&deg; tiles. The baseline's 2 x 3 box fitted inside one of them;
-this one does not, so the manifest names four and they are composited later-over-earlier, each
-contributing only where it has data. A tile that does not reach the AOI is skipped without being
-read, so naming a spare costs nothing. **The order is part of the source's identity** &mdash;
-reorder them and it is a different artifact under a different key.
+ESA WorldCover ships as 3&deg; x 3&deg; tiles and this AOI spans the corner of four of them, so the
+manifest names all four. They are composited later-over-earlier, each contributing only where it
+has data; one that does not reach a tile is skipped without being read, so naming a spare costs
+nothing. **The order is part of the source's identity** &mdash; reorder them and it is a different
+artifact under a different key.
 
 ### What it cost
 
-| step | wall clock | notes |
-|---|---|---|
-| `index build` | 6 s | 197 rows, 69 granules |
-| `plan` | ~50 s | stages four WorldCover tiles, digests them, warps all 18 |
-| `run` | **3 min 33 s** | 1,817 work items, **713 of them cache hits** |
+| | |
+|---|---|
+| granules | 90 usable of 105 indexed, over 12 months |
+| fan-out | 18 tiles, 288 blocks, **2,591 work items** |
+| downloads | about 15 GB on top of whatever is already staged &mdash; 2025 shares no granule with 2026 |
+| disk after | `assets` 26 GB, `cache` 5.1 GB, `products` 280 MB |
 
 ```
 stage    items  hits  seconds
-regrid   327    146   117.15     <- the 2x3 run's GLTs, reused
-resolve  1184   471    63.58     <- and its snapshots
-reduce   288     96    26.57
-publish   18      0     5.78
-total   1817    713   213.08
+regrid    482    476   19.69
+resolve  1803      0  216.94
+reduce    288      0   59.93
+publish    18      0    6.28
+total    2591    476  302.85
 ```
 
-Tripling the area cost only the new tiles: **every artifact from the 2 x 3 run was reused**, because
-a GLT is keyed on its granule and grid and a snapshot on its own block's window &mdash; neither
-mentions the AOI. Downloads grew far less than area, 41 to 59 usable granules, because an EMIT
-footprint is about 0.7&deg; and already spans several 0.5&deg; tiles.
+Read that regrid line carefully: 476 of 482 GLTs were hits because an earlier attempt at this same
+run was interrupted after building them. **A genuinely cold run pays the 15 GB download and all 482
+GLT builds too** &mdash; about a quarter of an hour here, most of it network. The five minutes above
+is what a *second* attempt costs, which is the number that matters when you are iterating.
 
-A later run that changed **only the aux source** (one WorldCover tile to four) took 80 s: all 327
-GLTs and every FRCOV warp were hits, and only the snapshots downstream of the landcover raster
-were rebuilt.
+The budget is doing real work at this size: `max_granules: 100` against 90 used.
 
-Disk after both runs: `assets` 10 GB, `cache` 2.4 GB, `products` 194 MB.
+### What a year buys
 
-### What came out &mdash; and a finding worth carrying
+The 8-month and 12-month runs differ in nothing but time &mdash; same 18 tiles, same scorer, same
+thresholds &mdash; so this comparison is exact.
 
-| | observed in &ge;1 month | received a vote | classes |
-|---|---|---|---|
-| baseline `min_view_zenith`, 2 x 3 | 100.0 % | **62.4 %** | 49 |
-| bare earth, the same 2 x 3 tiles | 43.2 % | **19.7 %** | 35 |
-| bare earth, all 3 x 6 | 29.1 % | **8.9 %** | 36 |
+| | observed in &ge;1 month | received a vote | mean months per cell | classes |
+|---|---|---|---|---|
+| Jan&ndash;Aug 2026, 8 epochs | 29.1 % | 8.9 % | 0.50 | 36 |
+| **all of 2025, 12 epochs** | **44.2 %** | **27.6 %** | **1.30** | **49** |
 
-The middle row is measured over the six tiles the two runs share, so it is the like-for-like
-comparison. It is also **bit-identical to the standalone 2 x 3 run** &mdash; widening the AOI and
-switching the aux source to a four-tile mosaic changed nothing on ground both covered, which is
-tile independence and correct compositing in one check.
+Three times the vote rate for 1.5 times the months. The reason is `min_count: 2`: a cell needs two
+*separate months* in which it both was observed and showed enough bare ground. Adding months does
+not just add evidence linearly, it adds pairs &mdash; and for a scorer this selective, most cells
+were failing on having only one qualifying month rather than none.
 
-Coverage falls by three times at the recommended thresholds, and **the loss is at the observation
-level, not the vote**: with `hard_floor: 0.65` only 43 % of cells have *any* admissible
-observation, averaging 0.89 months against the baseline's 3.60. `min_count: 2` then takes what is
-left from 43 % to 30 %. The northern tiles are worse again &mdash; bare-soil fraction falls from a
-median of about 0.55 at Cuprite to 0.22 at 39.5&deg; N &mdash; which is what drags the 18-tile
-figure down to 8.9 %.
+That is the argument for temporal depth over spatial extent when a scorer is strict. Widening the
+box tripled the area and the vote rate fell; widening the year tripled the vote rate.
 
-Measured over the warped FRCOV for the original AOI:
+### The threshold finding still stands
+
+Measured over the warped FRCOV for this AOI:
 
 ```
 bare-soil fraction, 1.5 M covered cells
@@ -333,18 +336,19 @@ bare-soil fraction, 1.5 M covered cells
 ```
 
 **The median bare-soil fraction over Cuprite is 0.53** &mdash; at one of the most exposed, least
-vegetated mineral sites on Earth. That is the caveat from the Mines tag-up showing up in numbers:
-the current FRCOV is "NPV false-positive happy" and assigns genuinely bare desert to the
-non-photosynthetic-vegetation endmember, so a 0.65 floor on the *bare* fraction alone discards two
-thirds of the scene. At `hard_floor: 0.35` / `min_soil: 0.55` the 2 x 3 set recovers to 45.6 %.
+vegetated mineral sites on Earth. That is the Mines tag-up caveat in numbers: the current FRCOV is
+"NPV false-positive happy" and assigns genuinely bare desert to the non-photosynthetic-vegetation
+endmember, so a 0.65 floor on the *bare* fraction alone discards two thirds of the scene.
 
-The manifest ships the recommended 0.65 / 0.80 rather than the values that make the picture look
-better, because those are what the science team recommended and tuning them here would hide the
-finding. **Worth putting to Phil and Thomas before any delivered run:** whether the cutoff should
-be lower for this product, or whether it belongs on bare + NPV together rather than on bare alone.
+The manifest ships the recommended 0.65 / 0.80 rather than values that flatter the picture.
+**Worth putting to Phil and Thomas before any delivered run:** whether the cutoff should be lower
+for this product, or belongs on bare + NPV together rather than bare alone. The thresholds are
+`scorer.params`, so changing them re-runs resolve, reduce and publish and touches neither the GLTs
+nor the warps.
 
-The thresholds are `scorer.params`, so changing them re-runs resolve, reduce and publish and
-touches neither the GLTs nor the warps.
+> **Not comparable to sections 4 and 5.** Those measure the baseline: a different area *and* a
+> different year. The baseline's 62.4 % vote rate is a `min_view_zenith` run over six tiles of
+> 2026, and nothing here should be read against it directly.
 
 ### What the cloud filter does, and does not
 
@@ -352,18 +356,17 @@ touches neither the GLTs nor the warps.
 exceeds 80 %, at plan time, before a byte is read. It is cost control, not quality control: an
 85 %-cloudy scene may still hold the only clear look at some cell.
 
-Here it happens to cost nothing. The 10 granules it drops have cloud fractions 0.83 to 0.97, and
-they are *exactly* the 10 for which no FRCOV was published &mdash; the upstream producer gives up on
-the same scenes. That is luck rather than design, and it is not true of the baseline, where those
-10 do carry mineral data.
+Here it happens to cost nothing, because the granules it drops are exactly the ones for which no
+FRCOV was published &mdash; the upstream producer gives up on the same scenes. That is luck rather
+than design, and it is not true of the baseline, where those granules do carry mineral data.
 
 **Nothing here masks cloud per pixel.** The mask for that (`l2a_standard`, reading the L2A MASK
-product's cloud, cirrus, water and spacecraft flags) is built but not used by either manifest;
-adding it means a fourth collection, about 3 GB, and a cross-version join, since the mask is
-published at v002 while the mineral product is v001. [observed] It matters more than it looks:
-sampled over the 59 staged granules, the mineral product writes **no fill at all**, and even at
-60-80 % cloud still returns a mineral identification for 39 % of pixels. Unmasked cloud does not
-produce absence, it produces plausible-looking identifications.
+product's cloud, cirrus, water and spacecraft flags) is built but used by neither manifest; adding
+it means a fourth collection, about 3 GB, and a cross-version join, since the mask is published at
+v002 while the mineral product is v001. [observed] It matters more than it looks: sampled over 59
+staged granules, the mineral product writes **no fill at all**, and even at 60-80 % cloud still
+returns a mineral identification for 39 % of pixels. Unmasked cloud does not produce absence, it
+produces plausible-looking identifications.
 
 ## 9. The same run in the cloud
 

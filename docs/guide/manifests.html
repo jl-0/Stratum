@@ -266,9 +266,10 @@ reads, and therefore every snapshot key.</p>
 <h2 id="walkthrough">Walkthrough: the bare-earth manifest</h2>
 
 <p><a href="https://github.com/jl-0/Stratum/blob/main/examples/emit-cmr-cuprite/manifest-bare-earth.yaml"><code>examples/emit-cmr-cuprite/manifest-bare-earth.yaml</code></a>
-scores 18 tiles around Cuprite on how much bare ground a pixel actually shows, rather than on
-where the sensor was looking. It is the smallest manifest that uses every input path at once, so
-it is worth tracing end to end.</p>
+scores 18 tiles around Cuprite over all of 2025 on how much bare ground a pixel actually shows,
+rather than on where the sensor was looking &mdash; twelve monthly votes reduced to one annual
+product. It is the smallest manifest that uses every input path at once, so it is worth tracing end
+to end.</p>
 
 <h3 id="w-declare">1. What it declares</h3>
 
@@ -306,15 +307,16 @@ pixel_mask:
 names are matched against that collection's globs; anything unmatched is not indexed and can never
 be fetched.</p>
 
-<pre><code>wrote index/granules.parquet: 197 row(s), 69 granule(s)
-  EMITL1BRAD     69 row(s)   69 with checksums
-  EMITL2BFRCOV   59 row(s)   59 with checksums
-  EMITL2BMIN     69 row(s)   69 with checksums</code></pre>
+<pre><code>wrote index/granules.parquet: 300 row(s), 105 granule(s)
+  EMITL1BRAD    105 row(s)  105 with checksums
+  EMITL2BFRCOV   90 row(s)   90 with checksums
+  EMITL2BMIN    105 row(s)  105 with checksums</code></pre>
 
-<p><strong>197 rows, 69 granules</strong> &mdash; that gap is the id merge working. Had the three
-collections disagreed on ids you would see 197 granules, and every one would be missing two of its
-three roles. Ten granules have no fractional cover; they are exactly the ten the cloud filter drops
-anyway, so requiring the role costs nothing here. Not a byte of pixel data has moved.</p>
+<p><strong>300 rows, 105 granules</strong> &mdash; that gap is the id merge working. Had the three
+collections disagreed on ids you would see 300 granules, and every one would be missing two of its
+three roles. Fifteen granules have no fractional cover; they are exactly the fifteen the cloud
+filter drops anyway, so requiring the role costs nothing here. Not a byte of pixel data has
+moved.</p>
 
 <h3 id="w-plan">3. Plan &mdash; where cheap failures happen</h3>
 
@@ -350,18 +352,23 @@ mineral        EMITL2BMIN     space=sensor   resampling=None</code></pre>
 built from the geolocation role's per-pixel latitude and longitude and from nothing else &mdash;
 not the mineral data, not the fractional cover. So the manifest does not control what goes
 <em>into</em> one; it controls how many get built: every <code>(granule, tile)</code> pair whose
-footprints meet. Here that is 327 of the 18 &times; 59 = 1,062 possible pairs.</p>
+footprints meet. Here that is 482 of the 18 &times; 90 = 1,620 possible pairs.</p>
 
 <p>Its key is the granule, the grid, the search radius and the algorithm version. No scorer, no
 mask, no role, no time range. That is why this run rebuilt none of them:</p>
 
 <pre><code>stage    items  hits  seconds
-regrid   327    146   117.15    <span class="c"># 146 reused from the smaller run over the same grid</span>
-resolve  1184   471    63.58    <span class="c"># and 471 of its snapshots, untouched by the wider box</span></code></pre>
+regrid    482    476   19.69
+resolve  1803      0  216.94
+reduce    288      0   59.93
+publish    18      0    6.28
+total    2591    476  302.85</code></pre>
 
-<p>That is the shape worth noticing: tripling the area rebuilt only the new tiles. A lookup table
-is keyed on its granule and grid, a snapshot on its own block's window &mdash; neither mentions the
-AOI, so widening it invalidates nothing.</p>
+<p>The 476 regrid hits are from an earlier attempt at the same run that was interrupted after
+building them; a cold run pays those plus about 15&nbsp;GB of downloads. The shape worth noticing
+is elsewhere: when this manifest's <em>area</em> was widened from 6 tiles to 18, every artifact
+from the smaller run stayed valid. A lookup table is keyed on its granule and grid, a snapshot on
+its own block's window &mdash; neither mentions the AOI.</p>
 
 <h3 id="w-resolve">5. Resolve &mdash; where <code>obs</code> is assembled</h3>
 
@@ -387,10 +394,10 @@ granule and the other from a public bucket in Frankfurt.</p>
 <p>Re-running with only <code>hard_floor</code> and <code>min_soil</code> changed:</p>
 
 <pre><code>stage    items  hits  seconds
-regrid   327    327   3.85      <span class="c"># every lookup table already existed</span>
-resolve  1184   0     19.28     <span class="c"># recomputed, but the warps behind them were hits</span>
-reduce   288    0     51.05
-total   1817    327   80.44</code></pre>
+regrid    327    327   3.85     <span class="c"># every lookup table already existed</span>
+resolve  1184      0  19.28     <span class="c"># recomputed, but the warps behind them were hits</span>
+reduce    288      0  51.05
+total    1817    327  80.44</code></pre>
 
 <p>Every snapshot was recomputed, because the thing that changed is in their key. But no lookup
 table and no fractional-cover warp was rebuilt &mdash; those are keyed on the granule and the grid,

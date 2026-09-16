@@ -15,7 +15,7 @@
 # Every path below is relative to this file. README.md has the tile map and the measured cost.
 
 run_id: emit-cmr-cuprite-bare-earth             # the run label; the run id is this plus a hash of the manifest
-description: Cuprite 3 x 6 tiles - bare, well-lit ground wins; landcover from aux
+description: Cuprite 3 x 6 tiles, all of 2025 - monthly votes reduced to one annual product
 
 grid:
   crs: EPSG:4326                                                # geographic degrees; every unit below is degrees
@@ -69,10 +69,24 @@ aoi:
   #                                 #   this demo's AOI.
 
 time:
-  start: 2026-01-01               # inclusive, UTC
-  end:   2026-09-01               # exclusive
-  epoch: P1M                      # the voting unit: one snapshot per calendar month
-  deliver: P8M                    # one delivered product PER TILE over the whole eight months
+  start: 2025-01-01               # inclusive, UTC
+  end:   2026-01-01               # exclusive - a whole calendar year
+  epoch: P1M                      # the voting unit: one snapshot per calendar month, so 12
+  deliver: P1Y                    # one delivered product PER TILE over the whole year. The long
+                                  #   form is {every: P1Y, window: P1Y, align: exact}; `deliver`
+                                  #   normalises to it, so this and the long form hash the same.
+                                  #
+                                  # Epoch and delivery are different questions. The EPOCH is how
+                                  # finely observations are bucketed before anything is combined -
+                                  # a month here, so a cell can be seen several times in January
+                                  # and still cast one January vote. DELIVERY is how those buckets
+                                  # collapse into a product. Twelve monthly votes reduced to one
+                                  # annual answer is the Critical Minerals shape.
+                                  #
+                                  # More epochs do NOT mean more downloads: the same granules are
+                                  # partitioned more finely. What costs bandwidth is widening
+                                  # `start`/`end`, which this does - a full year is 90 usable
+                                  # granules against the 59 of an eight-month window.
 
 inputs:
   index_location: ./index         # where the granule index lives; `stratum plan` builds it here if absent
@@ -172,6 +186,9 @@ snapshot:                         # what one month's snapshot holds, and how mon
       source: mineral
       classes: source             # the granules' own class table; every granule must agree by fingerprint
       aggregate: {method: vote, min_count: 2, ignore: [none], tie_break: highest_score}
+                                  # 2 of 12 months now rather than 2 of 8, so a cell has more
+                                  # chances to clear the bar - raise it if a year of evidence
+                                  # should demand more than two agreeing months.
                                   # a cell needs 2 agreeing months; `none` (nothing identified) does not vote
     depth_1:
       kind: continuous

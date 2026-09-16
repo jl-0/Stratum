@@ -63,11 +63,15 @@ echo "digest  ${DIGEST}"
 echo
 echo "This is what the deployment pins. Record it in .env, replacing any earlier line:"
 echo
-echo "    STRATUM_IMAGE_DIGEST=${DIGEST}             # the worker, and the viewer with it"
-echo
-echo "One image, two pins. To move the viewer WITHOUT repointing a worker you have frozen,"
-echo "leave STRATUM_IMAGE_DIGEST alone and set the viewer's instead:"
-echo
-echo "    STRATUM_VIEWER_IMAGE_DIGEST=${DIGEST}      # the viewer only"
+echo "    STRATUM_IMAGE_DIGEST=${DIGEST}"
 echo
 echo "then  make stratum-infrastructure"
+echo
+echo "That one line moves the worker AND the viewer: an empty STRATUM_VIEWER_IMAGE_DIGEST"
+echo "means the viewer runs the worker's image, which is what you want almost always."
+echo
+echo "The exception, and the only reason the second pin exists: the worker is frozen for a"
+echo "campaign and you want to rebuild just the viewer. Then leave STRATUM_IMAGE_DIGEST"
+echo "alone and set"
+echo
+echo "    STRATUM_VIEWER_IMAGE_DIGEST=${DIGEST}      # the viewer only"
