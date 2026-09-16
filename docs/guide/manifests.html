@@ -59,7 +59,8 @@ scorer:         {ref, params}     <span class="c"># REQUIRED. Which observation 
 snapshot:                         <span class="c"># REQUIRED. What is recorded, and how epochs collapse</span>
   name / layers
 
-reducer: {ref, params}            <span class="c"># optional; the reduce STAGE always runs - this replaces it</span>
+reducer: {ref, params}            <span class="c"># optional CUSTOM reducer; the built-in one is</span>
+                                  <span class="c">#   snapshot.layers.*.aggregate, above</span>
 outputs:                          <span class="c"># REQUIRED. bucket, formats, stac, render</span>
 plugins: {...}                    <span class="c"># optional. Where plugin code comes from</span>
 budget:                           <span class="c"># REQUIRED. Checked before anything is opened</span>
