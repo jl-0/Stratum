@@ -207,3 +207,17 @@ refused — the same limit granule assets have ([12 §4](12-data-access.md)).
    the epoch's start and read with `aux.raster(alias, epoch=obs.epoch)`; the warp is keyed on the
    resolved date, so it is computed once per epoch and shared by every granule and block in it, and
    its key enters the snapshot key like any other aux read ([06 §2](06-caching.md)).
+4. **A categorical aux source usually publishes its own legend, and `raster()` cannot reach it.**
+   [observed] 2026-09-17: an ESA WorldCover v200 GeoTIFF carries
+   `legend: '10 Tree cover / … / 80 Permanent water bodies / …'` as a TIFF tag, and a 256-entry
+   colour table. So the authority for "which integer is water" exists **in the file**, exactly as
+   a mineral product's class table does — and [11 §9](11-types.md) is emphatic that a product's
+   own table is the one to read, because it cannot drift from the pixels it describes. But
+   `AuxAccessor.raster()` returns a bare ndarray, so a `PixelMask` has no way to see it:
+   `stratum_emit.masks.Landcover` therefore carries WorldCover's codes as a **default parameter**
+   and a run that points the alias at NLCD or MCD12Q1 must pass that product's codes or silently
+   exclude the wrong classes. Two ways out, neither built: preserve the source's tags through the
+   warp and add an accessor for them (`aux.legend(alias)`), or declare the mapping in the manifest
+   beside the source, where `validate_static` could at least check that every name a mask excludes
+   is one the source declares. The second is cheaper and makes the cache key honest; the first is
+   the one consistent with how class tables are handled everywhere else.

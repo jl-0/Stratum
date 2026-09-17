@@ -150,3 +150,34 @@ def test_developer_pages_are_registered_in_the_nav(page: Path) -> None:
     nav = (ROOT / "docs" / "assets" / "stratum.js").read_text()
     assert f"id: '{data_page.group(1)}'" in nav, (
         f"{page.name} declares data-page {data_page.group(1)!r}, which is not an id in PAGES")
+
+
+# --------------------------------------------------------- every shipped plugin is documented
+#
+# The rot this guards is an omission, not a broken link: a plugin added to the entry points and
+# described nowhere breaks nothing and is undiscoverable. `Landcover` shipped in the bare-earth
+# work and was absent from both mask tables for two weeks, so a reader could only find it by
+# reading `pyproject.toml`.
+#
+# The `ref:` name is what a manifest writes, so that is what must appear - not the class name.
+_PLUGIN_GROUPS = {
+    "stratum.masks": ("docs/specs/04-cost-functions.md", "docs/guide/plugins.html"),
+    "stratum.scorers": ("docs/specs/04-cost-functions.md", "docs/guide/plugins.html"),
+    "stratum.reducers": ("docs/specs/04-cost-functions.md", "docs/guide/plugins.html"),
+}
+
+
+@pytest.mark.parametrize("group", sorted(_PLUGIN_GROUPS))
+def test_every_shipped_plugin_ref_appears_in_the_docs(group: str) -> None:
+    from importlib.metadata import entry_points
+
+    refs = sorted(ep.name for ep in entry_points(group=group))
+    assert refs, f"no entry points in {group}; the plugin distribution is not installed"
+    for page in _PLUGIN_GROUPS[group]:
+        text = (ROOT / page).read_text()
+        missing = [r for r in refs if r not in text]
+        assert not missing, (
+            f"{page} does not mention {missing} from {group}. A shipped plugin that no page "
+            "names cannot be found except by reading pyproject.toml - add it to the table, or "
+            "drop the entry point."
+        )

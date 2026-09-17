@@ -348,6 +348,12 @@ before compute is provisioned, and plugins may only read aliases declared here.<
 <p>Masks compose by conjunction — a pixel is eligible only if every entry admits it. Order does not
 affect the result. Any additional keys are passed to the plugin constructor.</p>
 
+<p><code>ref</code> is an entry-point name or <code>module:Class</code>. The five masks
+<code>stratum_emit</code> ships &mdash; <code>edge_trim</code>, <code>slit_dust</code>,
+<code>l2a_standard</code>, <code>soil_fraction</code>, <code>landcover</code> &mdash; are tabulated
+under <a href="../guide/plugins.html#builtin-masks">built-in masks</a>, with what each one needs.
+<code>stratum plugins list</code> prints what your environment actually provides.</p>
+
 <h2 id="scorer">scorer</h2>
 
 <pre><code>scorer:

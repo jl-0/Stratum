@@ -131,8 +131,19 @@ class Landcover:
     the scorer's business: "this pixel is unusable" and "this pixel is merely worse" are
     different statements and mixing them is the mistake 04 section 3 exists to prevent.
 
-    Codes are ESA WorldCover's (10 m, v100/v200), the map this ships against. A different
-    landcover product means a different `codes` mapping, which is a parameter and not a fork.
+    **How a name becomes a pixel value.** `codes` maps class name to the integer the raster
+    holds, and it defaults to ESA WorldCover's (10 m, v100/v200) - the map this ships against.
+    Point `alias` at a different land-cover product (NLCD, Copernicus CGLS, MCD12Q1) and you
+    MUST pass its codes, because nothing here can tell one uint8 raster from another: the aux
+    accessor hands over a plain array, and an NLCD raster read with WorldCover codes would
+    exclude the wrong classes silently.
+
+    That is a real limitation and not a preference. A WorldCover GeoTIFF **publishes its own
+    legend** in a TIFF tag - `10 Tree cover / ... / 80 Permanent water bodies / ...` - so the
+    authority exists in the file, exactly as a mineral product's class table does. `AuxAccessor.
+    raster()` returns an ndarray with no metadata, so a mask cannot reach it; reading and
+    checking that legend needs framework surface that does not exist yet
+    ([05 section 7](../../../../docs/specs/05-ancillary-data.md)).
     """
 
     space = "map"
@@ -148,11 +159,18 @@ class Landcover:
 
     def __init__(self, alias: str = "landcover",
                  exclude: tuple[str, ...] = ("water", "built-up", "tree"),
-                 on_missing: str = "keep") -> None:
-        unknown = [c for c in exclude if c not in self.CODES]
+                 on_missing: str = "keep",
+                 codes: Mapping[str, int] | None = None) -> None:
+        self.codes = dict(self.CODES if codes is None else codes)
+        if not self.codes:
+            raise ValueError("Landcover: codes is empty; name at least one class")
+        bad = {k: v for k, v in self.codes.items() if not isinstance(v, int) or isinstance(v, bool)}
+        if bad:
+            raise ValueError(f"Landcover: code(s) must be integers; got {bad}")
+        unknown = [c for c in exclude if c not in self.codes]
         if unknown:
             raise ValueError(f"Landcover: unknown class(es) {unknown}; choose from "
-                             f"{sorted(self.CODES)}")
+                             f"{sorted(self.codes)}")
         if on_missing not in ("keep", "reject"):
             raise ValueError("Landcover: on_missing is 'keep' or 'reject'")
         self.alias = alias
@@ -164,7 +182,7 @@ class Landcover:
         cover = np.asarray(aux.raster(self.alias))
         ok = np.ones(cover.shape, dtype=bool)
         for name in self.exclude:
-            ok &= cover != self.CODES[name]
+            ok &= cover != self.codes[name]
         if self.on_missing == "reject":
             ok &= cover != 0        # 0 is the product's nodata, not a class
         return ok
