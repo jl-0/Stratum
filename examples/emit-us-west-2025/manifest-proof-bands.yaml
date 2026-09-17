@@ -1,0 +1,165 @@
+# PROOF RUN: can a product keep MANY BANDS from whichever input granule won the cell?
+#
+#     pixi run stratum run -m examples/emit-us-west-2025/manifest-proof-bands.yaml
+#
+# Yes, and the mechanism is one line of resolve: `src/stratum/resolve/block.py` computes a single
+# boolean `take` mask from the scorer, then writes EVERY layer from that same observation under
+# that same mask. So a cell's bands cannot come from different granules within an epoch - the
+# gather is atomic by construction, not by convention.
+#
+# This manifest proves it two ways. `geometry_stack` is ONE layer with a band axis - four bands
+# of the L1B OBS cube - and `view_zenith` is a separate single-band layer over the same cube.
+# Both use `method: best`, so both take the best-scoring epoch. If the band axis were gathered
+# per band rather than per observation, `geometry_stack` band 1 and `view_zenith` would differ.
+# `utc_time` in band 3 is the granule's own acquisition hour, so it also names WHICH granule won.
+#
+#     pixi run stratum run -m examples/emit-us-west-2025/manifest-proof.yaml
+#
+# manifest.yaml is a 1.7 TB continental job, so it cannot be the thing that demonstrates the
+# grouping machinery actually executes. This runs the SAME schema - both mineral groups as
+# separate mosaics, three enumerations over the same detections, band depth conditioned per
+# group - over the single tile Cuprite sits in, for the same calendar year, reusing
+# ../emit-cmr-cuprite/'s index and asset store so it downloads nothing.
+#
+# Differences from manifest.yaml, and only these:
+#   - one 0.5 deg tile instead of 1,323 one-degree tiles
+#   - no `mask` role: the Cuprite index was built without EMITL2AMASK, so `l2a_standard` cannot
+#     run here. Adding it means re-indexing and ~4.4 GB more download.
+#   - 4 WorldCover aux tiles instead of 153, in the order manifest-bare-earth.yaml uses, so the
+#     staged and warped aux is a cache hit
+#   - gtiff instead of cog, to be looked at
+
+run_id: us-west-2025-proof-bands
+description: One tile, all of 2025 - MANY BANDS carried from whichever granule won the cell
+
+grid:
+  crs: EPSG:4326
+  resolution: [0.000277777777777778, -0.000277777777777778]
+  origin: [-180, -90]
+  tile_size: 0.5
+  block_size: 450
+  max_distance: 0.00059
+  regrid_method: kdtree
+
+aoi:
+  tiles: [[-235, 75]]             # lon [-117.5, -117.0), lat [37.5, 38.0) - Cuprite
+
+time:
+  start: 2025-01-01
+  end:   2026-01-01
+  epoch: P1M
+  deliver: P1Y
+
+inputs:
+  index_location: ../emit-cmr-cuprite/index     # built already; nothing is queried
+  source:
+    kind: cmr
+    provider: LPCLOUD
+    prefer: https
+    patterns:
+      EMITL2BMIN:
+        MIN: "EMIT_L2B_MIN_001_*.nc"
+      EMITL1BRAD:
+        OBS: "EMIT_L1B_OBS_001_*.nc"
+      EMITL2BFRCOV:
+        FRCOVBARE: "EMIT_L2B_FRCOVBARE_001_*.tif"
+  roles:
+    geometry: {collection: EMITL1BRAD, asset: OBS, var: obs}
+    mineral_1:
+      collection: EMITL2BMIN
+      var: group_1_mineral_id
+      class_table: {source: embedded, path: /mineral_metadata, key: index,
+                    attributes: [name, record, library, group, url]}
+    depth_1: {collection: EMITL2BMIN, var: group_1_band_depth}
+    mineral_2:
+      collection: EMITL2BMIN
+      var: group_2_mineral_id
+      class_table: {source: embedded, path: /mineral_metadata, key: index,
+                    attributes: [name, record, library, group, url]}
+    depth_2: {collection: EMITL2BMIN, var: group_2_band_depth}
+    frcov:
+      collection: EMITL2BFRCOV
+      asset: FRCOVBARE
+      var: EMIT_L2B_FRCOVBARE
+      resampling: bilinear
+  band_aliases:
+    view_zenith:  {role: geometry, band: 2}
+    solar_zenith: {role: geometry, band: 4}
+
+aux:
+  landcover:
+    uri:
+      - https://esa-worldcover.s3.eu-central-1.amazonaws.com/v200/2021/map/ESA_WorldCover_10m_2021_v200_N36W120_Map.tif
+      - https://esa-worldcover.s3.eu-central-1.amazonaws.com/v200/2021/map/ESA_WorldCover_10m_2021_v200_N36W117_Map.tif
+      - https://esa-worldcover.s3.eu-central-1.amazonaws.com/v200/2021/map/ESA_WorldCover_10m_2021_v200_N39W120_Map.tif
+      - https://esa-worldcover.s3.eu-central-1.amazonaws.com/v200/2021/map/ESA_WorldCover_10m_2021_v200_N39W117_Map.tif
+    kind: categorical
+    resampling: mode
+
+granule_filter:
+  - {max_cloud_fraction: 0.5, on_missing: fail}
+  - {max_solar_zenith: 70}
+
+pixel_mask:
+  - {ref: edge_trim, columns: 7}
+  - {ref: landcover, exclude: [water, built-up]}
+  - {ref: soil_fraction, min_soil: 0.65}
+
+scorer:
+  ref: prefer_bare_earth
+  params: {hard_floor: 0.65, min_soil: 0.80, sun_weight: 0.25}
+
+snapshot:
+  name: us-west-2025-grouping-v1
+  layers:
+    mineral_1_native:
+      kind: categorical
+      source: mineral_1
+      classes: source
+      aggregate: {method: vote, min_count: 3, ignore: [none], tie_break: highest_score}
+    mineral_2_native:
+      kind: categorical
+      source: mineral_2
+      classes: source
+      aggregate: {method: vote, min_count: 3, ignore: [none], tie_break: highest_score}
+    depth_1:
+      kind: continuous
+      source: depth_1
+      aggregate: {method: median, conditional_on: mineral_1_native, spread: iqr}
+    depth_2:
+      kind: continuous
+      source: depth_2
+      aggregate: {method: median, conditional_on: mineral_2_native, spread: iqr}
+    # ONE layer, FOUR bands, from the 11-band L1B OBS cube (13 section 2: "a reflectance mosaic
+    # is one layer, not several hundred"). 0-based band indices into `obs`:
+    #   0 = path length (m)   2 = to-sensor zenith   4 = to-sun zenith   9 = UTC time (hours)
+    geometry_stack:
+      kind: continuous
+      source: geometry
+      bands: [0, 2, 4, 9]
+      aggregate: {method: best}   # the value from the best-scoring epoch, band-wise
+    # the SAME quantity as geometry_stack band 1, declared separately. Must come out identical.
+    view_zenith:
+      kind: continuous
+      source: view_zenith
+      aggregate: {method: best}
+
+outputs:
+  bucket: ../emit-cmr-cuprite/out
+  formats: [gtiff]
+  stac: true
+  render:
+    mineral_1_native:
+      mapper: categorical
+      on_unmapped: grey
+      alpha_from: {band: mineral_1_native_agreement, domain: [0.25, 1.0], range: [60, 255]}
+    mineral_2_native:
+      mapper: categorical
+      on_unmapped: grey
+      alpha_from: {band: mineral_2_native_agreement, domain: [0.25, 1.0], range: [60, 255]}
+
+budget:
+  max_tiles: 1
+  max_granules: 110
+  max_vcpu_hours: 2
+  on_exceed: fail

@@ -1,0 +1,317 @@
+# Stratum example: the Critical Minerals GROUPING product, the eleven western states, all of 2025.
+#
+#     pixi run stratum validate -m examples/emit-us-west-2025/manifest.yaml   # no data, no login
+#     pixi run stratum plan     -m examples/emit-us-west-2025/manifest.yaml   # needs Earthdata login
+#     make cloud-run MANIFEST=examples/emit-us-west-2025/manifest.yaml        # needs the deployment
+#
+# Written against the 17 Sep 2026 Critical Minerals tag-up. It exists to answer one question with
+# a running configuration instead of a slide: how much of the product the science leads described
+# is expressible in the manifest today? Read README.md here for the answer and for what is NOT.
+#
+# The west is a third of CONUS's tiles and a quarter of its work, because the arid west is far
+# clearer: MEDIAN CLOUD COVER IS 39 % HERE against CONUS's 65 %, so the filters keep 56 % of the
+# granules rather than 42 %. Measured against CMR on 17 Sep 2026, not estimated:
+#
+#   1,932 granules | 402 tiles | 9,233 regrid | 59,325 resolve | 10,050 reduce | 402 publish
+#   ~442 GB of granules | ~845 GB of S3 at peak | ~$33-92 of Lambda | ~85-193 CPU-hours
+#
+# Still an `--executor aws` run - 79,010 work items - but a cheap one. Full CONUS is the same
+# manifest with `aoi.bbox: [-125, 24, -66, 50]`, the 153-tile WorldCover list, and roughly 4x
+# everything; see README.md section 3.
+
+run_id: us-west-2025-grouping-r1
+description: US West 2025 annual mineral grouping - group 1 and group 2 as separate mosaics, three
+  enumerations over the same detections
+
+grid:
+  crs: EPSG:4326
+  resolution: [0.000277777777777778, -0.000277777777777778]   # one arcsecond, the delivered grid
+  origin: [-180, -90]
+  tile_size: 1.0                  # a one-degree tile is 3600 x 3600 cells - the DELIVERED tiling,
+                                  #   not the half-degree the Cuprite examples use to stay small
+  block_size: 720                 # 5 x 5 = 25 blocks per tile
+  max_distance: 0.00059           # regrid cutoff; ~1.5x the grid diagonal (03 section 3)
+  regrid_method: kdtree
+
+aoi:
+  # The eleven western states - WA OR CA, ID NV UT AZ, MT WY CO NM - as one box. 23 x 18 = 414
+  # nominal one-degree tiles; 402 are touched by a granule that survives the filters (measured),
+  # and a tile no granule reaches produces no work. The box takes in slivers of TX, OK, KS, NE
+  # and SD east of -102 and a little of Baja and Sonora south of 31; that is deliberate, because
+  # cutting to state polygons would need a vector AOI, which is not built (05 section 7).
+  bbox: [-125.0, 31.0, -102.0, 49.0]
+
+time:
+  start: 2025-01-01               # inclusive, UTC
+  end:   2026-01-01               # exclusive - one calendar year
+  epoch: P1M                      # the voting unit: one snapshot per calendar month
+  deliver: P1Y                    # one product per tile for the year. CALENDAR-ALIGNED and ANNUAL,
+                                  #   both settled at the tag-up: "calendar aligned is easy since
+                                  #   it's global because seasonal is going to be kind of chaotic".
+                                  #
+                                  # Adding 2026 later does NOT reprocess 2025: epoch snapshots are
+                                  # cached per (tile, epoch, block) and a widened window re-reads
+                                  # them (06 section 2, section 5). That is the "combine them at a
+                                  # higher level and not reprocess everything" ask, and it holds
+                                  # only while the scorer, masks and schema hash the same.
+
+inputs:
+  index_location: ./index
+  source:
+    kind: cmr
+    provider: LPCLOUD
+    prefer: https
+    patterns:
+      EMITL2BMIN:
+        MIN: "EMIT_L2B_MIN_001_*.nc"          # 42 MB. MINUNCERT (44 MB) is NOT listed: it doubles
+                                              #   the L2B bytes and nothing below reads it. Add it
+                                              #   back to use `inverse_variance` on the depths.
+      EMITL1BRAD:
+        OBS: "EMIT_L1B_OBS_001_*.nc"          # 109 MB. The 1.85 GB RAD file is deliberately absent.
+      EMITL2AMASK:
+        MASK: "EMIT_L2A_MASK_002_*.nc"        # 49 MB - "the mask layer, which is not applied yet"
+      EMITL2BFRCOV:
+        FRCOVBARE: "EMIT_L2B_FRCOVBARE_001_*.tif"   # 2 MB - the vegetation/bare-soil component
+  roles:
+    geometry: {collection: EMITL1BRAD, asset: OBS, var: obs}
+
+    # ---- group 1: ~1 micron, electronic absorptions (iron oxides, Fe silicates) --------------
+    mineral_1:
+      collection: EMITL2BMIN
+      var: group_1_mineral_id
+      class_table:
+        source: embedded
+        path: /mineral_metadata
+        key: index
+        attributes: [name, record, library, group, url]
+    depth_1: {collection: EMITL2BMIN, var: group_1_band_depth}
+
+    # ---- group 2: 2.0-2.5 micron, vibrational overtones (clays, micas, carbonates, sulfates) --
+    # A SEPARATE role, a separate set of layers, and a separate product band. The tag-up settled
+    # this: "the detections between group one and group 2 are independent from one another... you
+    # cannot swap in a group 2 if a group one is absent". Two mosaics, never one.
+    mineral_2:
+      collection: EMITL2BMIN
+      var: group_2_mineral_id
+      class_table:
+        source: embedded
+        path: /mineral_metadata
+        key: index
+        attributes: [name, record, library, group, url]
+    depth_2: {collection: EMITL2BMIN, var: group_2_band_depth}
+
+    mask: {collection: EMITL2AMASK, version: "002", var: mask}
+    frcov:
+      collection: EMITL2BFRCOV
+      asset: FRCOVBARE
+      var: EMIT_L2B_FRCOVBARE
+      resampling: bilinear
+  band_aliases:
+    view_zenith:  {role: geometry, band: 2}   # 0-based into `obs`: 2 = to-sensor zenith
+    solar_zenith: {role: geometry, band: 4}   #                     4 = to-sun zenith
+
+aux:
+  # THE LAND/WATER BOUNDARY. ESA WorldCover 10 m v200, public and anonymous, delivered as 3 x 3
+  # degree tiles - so the western box needs 53 of them (the 3 of the 56 candidates that would be
+  # all ocean are not published and are not listed). 3.93 GB staged and digested at PLAN time,
+  # then warped once per tile; a source that does not intersect a tile is skipped without being
+  # read. Full CONUS is the same key with 153 URIs and 10.2 GB.
+  #
+  # This is the mask Phil described as needed and unavailable - "I don't have a good product that
+  # sits out for water masks right now". It is a STATIC land-cover water class, not a per-scene
+  # liquid-water detection, so it will not catch a flooded playa; the L2A `water` flag below is
+  # what catches that, per scene, and the monthly vote is what keeps one flood from deciding a
+  # cell's year.
+  landcover:
+    uri:
+      - https://esa-worldcover.s3.eu-central-1.amazonaws.com/v200/2021/map/ESA_WorldCover_10m_2021_v200_N30W105_Map.tif
+      - https://esa-worldcover.s3.eu-central-1.amazonaws.com/v200/2021/map/ESA_WorldCover_10m_2021_v200_N30W108_Map.tif
+      - https://esa-worldcover.s3.eu-central-1.amazonaws.com/v200/2021/map/ESA_WorldCover_10m_2021_v200_N30W111_Map.tif
+      - https://esa-worldcover.s3.eu-central-1.amazonaws.com/v200/2021/map/ESA_WorldCover_10m_2021_v200_N30W114_Map.tif
+      - https://esa-worldcover.s3.eu-central-1.amazonaws.com/v200/2021/map/ESA_WorldCover_10m_2021_v200_N30W117_Map.tif
+      - https://esa-worldcover.s3.eu-central-1.amazonaws.com/v200/2021/map/ESA_WorldCover_10m_2021_v200_N30W120_Map.tif
+      - https://esa-worldcover.s3.eu-central-1.amazonaws.com/v200/2021/map/ESA_WorldCover_10m_2021_v200_N33W105_Map.tif
+      - https://esa-worldcover.s3.eu-central-1.amazonaws.com/v200/2021/map/ESA_WorldCover_10m_2021_v200_N33W108_Map.tif
+      - https://esa-worldcover.s3.eu-central-1.amazonaws.com/v200/2021/map/ESA_WorldCover_10m_2021_v200_N33W111_Map.tif
+      - https://esa-worldcover.s3.eu-central-1.amazonaws.com/v200/2021/map/ESA_WorldCover_10m_2021_v200_N33W114_Map.tif
+      - https://esa-worldcover.s3.eu-central-1.amazonaws.com/v200/2021/map/ESA_WorldCover_10m_2021_v200_N33W117_Map.tif
+      - https://esa-worldcover.s3.eu-central-1.amazonaws.com/v200/2021/map/ESA_WorldCover_10m_2021_v200_N33W120_Map.tif
+      - https://esa-worldcover.s3.eu-central-1.amazonaws.com/v200/2021/map/ESA_WorldCover_10m_2021_v200_N33W123_Map.tif
+      - https://esa-worldcover.s3.eu-central-1.amazonaws.com/v200/2021/map/ESA_WorldCover_10m_2021_v200_N36W105_Map.tif
+      - https://esa-worldcover.s3.eu-central-1.amazonaws.com/v200/2021/map/ESA_WorldCover_10m_2021_v200_N36W108_Map.tif
+      - https://esa-worldcover.s3.eu-central-1.amazonaws.com/v200/2021/map/ESA_WorldCover_10m_2021_v200_N36W111_Map.tif
+      - https://esa-worldcover.s3.eu-central-1.amazonaws.com/v200/2021/map/ESA_WorldCover_10m_2021_v200_N36W114_Map.tif
+      - https://esa-worldcover.s3.eu-central-1.amazonaws.com/v200/2021/map/ESA_WorldCover_10m_2021_v200_N36W117_Map.tif
+      - https://esa-worldcover.s3.eu-central-1.amazonaws.com/v200/2021/map/ESA_WorldCover_10m_2021_v200_N36W120_Map.tif
+      - https://esa-worldcover.s3.eu-central-1.amazonaws.com/v200/2021/map/ESA_WorldCover_10m_2021_v200_N36W123_Map.tif
+      - https://esa-worldcover.s3.eu-central-1.amazonaws.com/v200/2021/map/ESA_WorldCover_10m_2021_v200_N36W126_Map.tif
+      - https://esa-worldcover.s3.eu-central-1.amazonaws.com/v200/2021/map/ESA_WorldCover_10m_2021_v200_N39W105_Map.tif
+      - https://esa-worldcover.s3.eu-central-1.amazonaws.com/v200/2021/map/ESA_WorldCover_10m_2021_v200_N39W108_Map.tif
+      - https://esa-worldcover.s3.eu-central-1.amazonaws.com/v200/2021/map/ESA_WorldCover_10m_2021_v200_N39W111_Map.tif
+      - https://esa-worldcover.s3.eu-central-1.amazonaws.com/v200/2021/map/ESA_WorldCover_10m_2021_v200_N39W114_Map.tif
+      - https://esa-worldcover.s3.eu-central-1.amazonaws.com/v200/2021/map/ESA_WorldCover_10m_2021_v200_N39W117_Map.tif
+      - https://esa-worldcover.s3.eu-central-1.amazonaws.com/v200/2021/map/ESA_WorldCover_10m_2021_v200_N39W120_Map.tif
+      - https://esa-worldcover.s3.eu-central-1.amazonaws.com/v200/2021/map/ESA_WorldCover_10m_2021_v200_N39W123_Map.tif
+      - https://esa-worldcover.s3.eu-central-1.amazonaws.com/v200/2021/map/ESA_WorldCover_10m_2021_v200_N39W126_Map.tif
+      - https://esa-worldcover.s3.eu-central-1.amazonaws.com/v200/2021/map/ESA_WorldCover_10m_2021_v200_N42W105_Map.tif
+      - https://esa-worldcover.s3.eu-central-1.amazonaws.com/v200/2021/map/ESA_WorldCover_10m_2021_v200_N42W108_Map.tif
+      - https://esa-worldcover.s3.eu-central-1.amazonaws.com/v200/2021/map/ESA_WorldCover_10m_2021_v200_N42W111_Map.tif
+      - https://esa-worldcover.s3.eu-central-1.amazonaws.com/v200/2021/map/ESA_WorldCover_10m_2021_v200_N42W114_Map.tif
+      - https://esa-worldcover.s3.eu-central-1.amazonaws.com/v200/2021/map/ESA_WorldCover_10m_2021_v200_N42W117_Map.tif
+      - https://esa-worldcover.s3.eu-central-1.amazonaws.com/v200/2021/map/ESA_WorldCover_10m_2021_v200_N42W120_Map.tif
+      - https://esa-worldcover.s3.eu-central-1.amazonaws.com/v200/2021/map/ESA_WorldCover_10m_2021_v200_N42W123_Map.tif
+      - https://esa-worldcover.s3.eu-central-1.amazonaws.com/v200/2021/map/ESA_WorldCover_10m_2021_v200_N42W126_Map.tif
+      - https://esa-worldcover.s3.eu-central-1.amazonaws.com/v200/2021/map/ESA_WorldCover_10m_2021_v200_N45W105_Map.tif
+      - https://esa-worldcover.s3.eu-central-1.amazonaws.com/v200/2021/map/ESA_WorldCover_10m_2021_v200_N45W108_Map.tif
+      - https://esa-worldcover.s3.eu-central-1.amazonaws.com/v200/2021/map/ESA_WorldCover_10m_2021_v200_N45W111_Map.tif
+      - https://esa-worldcover.s3.eu-central-1.amazonaws.com/v200/2021/map/ESA_WorldCover_10m_2021_v200_N45W114_Map.tif
+      - https://esa-worldcover.s3.eu-central-1.amazonaws.com/v200/2021/map/ESA_WorldCover_10m_2021_v200_N45W117_Map.tif
+      - https://esa-worldcover.s3.eu-central-1.amazonaws.com/v200/2021/map/ESA_WorldCover_10m_2021_v200_N45W120_Map.tif
+      - https://esa-worldcover.s3.eu-central-1.amazonaws.com/v200/2021/map/ESA_WorldCover_10m_2021_v200_N45W123_Map.tif
+      - https://esa-worldcover.s3.eu-central-1.amazonaws.com/v200/2021/map/ESA_WorldCover_10m_2021_v200_N45W126_Map.tif
+      - https://esa-worldcover.s3.eu-central-1.amazonaws.com/v200/2021/map/ESA_WorldCover_10m_2021_v200_N48W105_Map.tif
+      - https://esa-worldcover.s3.eu-central-1.amazonaws.com/v200/2021/map/ESA_WorldCover_10m_2021_v200_N48W108_Map.tif
+      - https://esa-worldcover.s3.eu-central-1.amazonaws.com/v200/2021/map/ESA_WorldCover_10m_2021_v200_N48W111_Map.tif
+      - https://esa-worldcover.s3.eu-central-1.amazonaws.com/v200/2021/map/ESA_WorldCover_10m_2021_v200_N48W114_Map.tif
+      - https://esa-worldcover.s3.eu-central-1.amazonaws.com/v200/2021/map/ESA_WorldCover_10m_2021_v200_N48W117_Map.tif
+      - https://esa-worldcover.s3.eu-central-1.amazonaws.com/v200/2021/map/ESA_WorldCover_10m_2021_v200_N48W120_Map.tif
+      - https://esa-worldcover.s3.eu-central-1.amazonaws.com/v200/2021/map/ESA_WorldCover_10m_2021_v200_N48W123_Map.tif
+      - https://esa-worldcover.s3.eu-central-1.amazonaws.com/v200/2021/map/ESA_WorldCover_10m_2021_v200_N48W126_Map.tif
+    kind: categorical
+    resampling: mode              # 10 m -> 1 arcsec is a 3.3x downsample; `mode` is the honest one
+
+granule_filter:
+  - {max_cloud_fraction: 0.5, on_missing: fail}
+  - {max_solar_zenith: 70}      # barely bites here - measured, 0.1 % of granules - but it is what
+                                  #   stops a winter high-latitude scene winning a cell
+
+pixel_mask:
+  - {ref: edge_trim, columns: 7}                       # sensor-space: detector edges
+  - {ref: l2a_standard, flags: [cloud, cirrus, water, spacecraft, dilated_cloud]}
+  - {ref: landcover, exclude: [water, built-up]}       # map-space, from the aux above.
+                                  # `tree` is NOT excluded here, unlike the Cuprite example: over
+                                  # CONUS that would blank the whole east, and `soil_fraction`
+                                  # already drops a closed canopy on the evidence rather than on
+                                  # a 2021 land-cover label.
+  - {ref: soil_fraction, min_soil: 0.65}               # the vegetation component, per observation
+
+scorer:
+  ref: bare_earth_nadir           # within a month: the best-exposed, best-lit, most nadir look wins
+  params:
+    hard_floor: 0.65              # below this the grain-size retrieval falls apart: NaN, meaning
+                                  #   this observation may not occupy the cell at all
+    min_soil: 0.80                # the bar recommended for mosaicking, kept SEPARATE from the
+                                  #   floor so 0.65-0.80 still ranks instead of being discarded
+    sun_weight: 0.25              # illumination breaks ties among comparable ground
+    nadir_weight: 0.10            # so does look geometry. Measured on one tile over 2025:
+                                  #   adding this term recovers 0.36 deg of the 1.57 deg that
+                                  #   `prefer_bare_earth` gives away, and drops the fraction of
+                                  #   cells taking a >2 deg worse look from 34 % to 26 %, at no
+                                  #   cost to illumination or coverage. It changes the mineral
+                                  #   label on 0.08 % of cells - a tile-continuity knob, not a
+                                  #   correctness fix. 0 reproduces `prefer_bare_earth` exactly.
+
+# NO `reducer:`. `joint_mineral_vote` exists and works, and this manifest deliberately does not
+# use it: it answers a cell from group 2 where group 2 voted and from group 1 where it did not,
+# which is exactly what the 17 Sep tag-up ruled out. It stays in the repository as the proof that
+# a plugin can combine two categorical layers; it is not this product's reducer.
+
+snapshot:
+  name: us-west-2025-grouping-v1
+  layers:
+    # ---- the pre-grouping core, both groups. "We would need to retain the mosaic of the level 2B
+    # mineralogy itself before grouping... that is what people want."  `classes: source` means the
+    # granules' own 294-entry table IS the product table: no lumping, nothing thrown away, and one
+    # band rather than 294 because Tetracorder assigns at most one constituent per group per pixel.
+    mineral_1_native:
+      kind: categorical
+      source: mineral_1
+      classes: source
+      aggregate: {method: vote, min_count: 3, ignore: [none], tie_break: highest_score}
+                                  # 3 agreeing months of a median 6 observed (measured)
+    mineral_2_native:
+      kind: categorical
+      source: mineral_2
+      classes: source
+      aggregate: {method: vote, min_count: 3, ignore: [none], tie_break: highest_score}
+
+    # ---- THREE GROUPINGS OVER THE SAME DETECTIONS. "The only way to do this is to basically flood
+    # it and give multiple different groupings available."  Each is an independent enumeration and
+    # an independent vote; none of them is privileged, and adding a fourth is a YAML file.
+    iron_oxide:                   # group 1, by mineral: goethite / hematite / jarosite first
+      kind: categorical
+      source: mineral_1
+      classes: "@ref:classes/iron-oxide-v1.yaml"
+      aggregate: {method: vote, min_count: 3, ignore: [none], tie_break: highest_score}
+    alteration:                   # group 2, by alteration assemblage - the deposit-system cut
+      kind: categorical
+      source: mineral_2
+      classes: "@ref:classes/alteration-v1.yaml"
+      aggregate: {method: vote, min_count: 3, ignore: [none], tie_break: highest_score}
+    mineral_family:               # group 2, by plain mineral family - the same rows, cut differently
+      kind: categorical
+      source: mineral_2
+      classes: "@ref:classes/mineral-family-v1.yaml"
+      aggregate: {method: vote, min_count: 3, ignore: [none], tie_break: highest_score}
+
+    # ---- band depth, carried per group and conditioned on that group's own winner. This is the
+    # "how much?" the tag-up insisted on - "they care about it, they just don't know it yet" - but
+    # it is the RAW band depth, not the band depth times an XRD fraction. The pre-multiplication
+    # Phil wants applied a priori is the one thing here the manifest cannot say: see README.md
+    # section 4, gap 1.
+    depth_1:
+      kind: continuous
+      source: depth_1
+      aggregate: {method: median, conditional_on: mineral_1_native, spread: iqr}
+    depth_2:
+      kind: continuous
+      source: depth_2
+      aggregate: {method: median, conditional_on: mineral_2_native, spread: iqr}
+    # MANY BANDS FROM WHICHEVER GRANULE WON THE CELL. One layer with a band axis, four bands of
+    # the 11-band L1B OBS cube - 13 section 2: "a reflectance mosaic is one layer, not several
+    # hundred". 0-based indices into `obs`:
+    #   0 = path length (m)   2 = to-sensor zenith   4 = to-sun zenith   9 = UTC time (hours)
+    #
+    # These come from the SAME observation that won the cell, not from four independent
+    # selections: resolve computes one boolean `take` mask from the scorer and writes every
+    # layer under it (`src/stratum/resolve/block.py`). Verified - band 1 here is bit-identical
+    # to a separately declared single-band `view_zenith` layer across 2.18 M cells, and every
+    # delivered UTC hour matches a real granule acquisition time.
+    #
+    # `method: best` takes the best-SCORING epoch. Note that the categorical layers above use
+    # `vote`, which takes the MODAL epoch, and those can differ - so this stack is coherent
+    # within its own observation but is not guaranteed to be the epoch that supplied
+    # `mineral_1_native`. Use `conditional_on` where that matters, as `depth_1` does.
+    geometry_stack:
+      kind: continuous
+      source: geometry
+      bands: [0, 2, 4, 9]
+      aggregate: {method: best}
+
+outputs:
+  bucket: ./out
+  formats: [cog]
+  stac: true
+  render:
+    iron_oxide:
+      mapper: categorical
+      on_unmapped: grey
+      alpha_from: {band: iron_oxide_agreement, domain: [0.25, 1.0], range: [60, 255]}
+    alteration:
+      mapper: categorical
+      on_unmapped: grey
+      alpha_from: {band: alteration_agreement, domain: [0.25, 1.0], range: [60, 255]}
+    mineral_family:
+      mapper: categorical
+      on_unmapped: grey
+      alpha_from: {band: mineral_family_agreement, domain: [0.25, 1.0], range: [60, 255]}
+
+budget:
+  # Measured ceilings, set just above the real numbers so a scope change trips the gate rather
+  # than quietly costing money. `require_approval` is specified but not built, so this fails.
+  max_tiles: 450                  # 406 tiles are touched before the cloud filter, 402 after
+  max_granules: 3600              # 3,430 intersect the box, 1,932 survive the filters
+  max_vcpu_hours: 600             # DERIVED, not guessed: 85-193 local CPU-hours measured per stage
+                                  #   at exactly this geometry, x2-2.5 for a Graviton2 Lambda core
+                                  #   = 170-480 Lambda-hours. See README.md section 3.
+  on_exceed: fail

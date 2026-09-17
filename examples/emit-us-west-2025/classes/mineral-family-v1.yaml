@@ -1,0 +1,257 @@
+# mineral-family-v1: the SAME group-2 rows cut by plain mineral family instead of by alteration assemblage. Two enumerations over one input is the answer to 'different people group these in different, perfectly valid ways' - both ship, as separate layers of one product.
+#
+# GENERATED from the EMIT L2B reference matrix (mineral_grouping_matrix_20230503.csv,
+# verified row-for-row against a real granule's /mineral_metadata). Group 2 only.
+# Members are matched on (library, record, group) - the attributes the product's own
+# embedded table carries - so a re-delivered table with different integer indices still
+# resolves. Class CONTENTS here are provisional: the structure is the deliverable, the
+# bucket membership is the science lead's call.
+#
+name: mineral-family-v1
+version: 1
+match_on: [library, record, group]
+unmapped: other-group-2    # the two rows the table cannot address by attribute land here
+classes:
+  - id: 1
+    name: alunite
+    members:                        # 26 constituent(s)
+      - {library: splib06, record: 300, group: 2}   # 109 Alunite GDS97 K Syn (150C) W2R4Na
+      - {library: splib06, record: 294, group: 2}   # 110 Alunite GDS96 K Syn (250C) W2R4Na
+      - {library: splib06, record: 324, group: 2}   # 111 Alunite RES-2 K Syn (450C) W2R4Na
+      - {library: splib06, record: 288, group: 2}   # 112 Alunite GDS95 Na Syn (150C) W2R4Na
+      - {library: splib06, record: 336, group: 2}   # 113 Alunite RES-4 Na Syn (300C) W2R4Na
+      - {library: splib06, record: 330, group: 2}   # 114 Alunite RES-3 Na Syn (450C) W2R4Na
+      - {library: splib06, record: 246, group: 2}   # 115 Alunite GDS82 Na82 W1R1Bb
+      - {library: splib06, record: 5382, group: 2}   # 116 Alunite+Dickite MV99-6-26b W1R1Fc
+      - {library: splib06, record: 252, group: 2}   # 117 Alunite GDS83 Na63 W1R1Bb
+      - {library: splib06, record: 342, group: 2}   # 118 Alunite RES-9 Summitv (400C) W2R4Nb
+      - {library: splib06, record: 276, group: 2}   # 119 Alunite GDS84 Na03 W2R4Na
+      - {library: splib06, record: 348, group: 2}   # 120 Alunite RES10 NA56% Syn 450C W2R4Na
+      - {library: splib06, record: 354, group: 2}   # 121 Alunite RES12 NA78% Syn 450C W2R4NaIS
+      - {library: splib06, record: 5394, group: 2}   # 122 Alunite0.35K+.65Na CU91-217H W2R4Nb
+      - {library: splib06, record: 5418, group: 2}   # 123 Alunite0.73K+.27Na CU91-217D W2R4Na
+      - {library: splib06, record: 5412, group: 2}   # 124 Alunite0.66K+.34Na CU91-217A W2R4Nb
+      - {library: splib06, record: 5358, group: 2}   # 157 Alun366+.50PyroPYS1A GDS222 W1R1Bb
+      - {library: splib06, record: 5370, group: 2}   # 158 Alunite+Pyrophyl SD1093A W1R1Bb
+      - {library: splib06, record: 5352, group: 2}   # 161 Alun0.3+Musc0.4+Pyro0.3 AMX1 W1R1Ba
+      - {library: splib06, record: 5406, group: 2}   # 162 Alunite0.5+Kaol_KGa-1 AMX3 W1R1Bb
+      - {library: splib06, record: 5910, group: 2}   # 163 Kaolwxl.75+Alun_HS295 AMX14 W1R1Bb
+      - {library: splib06, record: 5820, group: 2}   # 164 Kalun+kaol+gth mv2-ar3 W1R1Fb
+      - {library: splib06, record: 5364, group: 2}   # 165 Alun_Na+Kaol+Hemat MV00-11a W1R1Fc
+      - {library: splib06, record: 5388, group: 2}   # 175 Alunite.5+MuscCU91-250A AMX4 W1R1Ba
+      - {library: splib06, record: 5346, group: 2}   # 176 Alun.33+Kaol.33+Musc.33 AMX2 W1R1Ba
+      - {library: splib06, record: 5436, group: 2}   # 182 Alunite_NH4+Jaro NMNH145596A W1R1Bb
+  - id: 2
+    name: kaolinite-group
+    members:                        # 11 constituent(s)
+      - {library: sprlb06, record: 606, group: 2}   # 133 Kaolinite CM9 (wxl) W1R1Hb
+      - {library: sprlb06, record: 672, group: 2}   # 134 Kaolinite KGa-2 (pxl) W1R1Hb
+      - {library: sprlb06, record: 684, group: 2}   # 135 Halloysite NMNH106237 W1R1Ha
+      - {library: splib06, record: 3462, group: 2}   # 136 Nacrite GDS88 s06crj3a=c
+      - {library: sprlb06, record: 708, group: 2}   # 137 Dickite NMNH106242 W1R1Bb
+      - {library: splib06, record: 5868, group: 2}   # 139 Kaolin_Smect H89-FR-2 .5Kaol W1R1Bb
+      - {library: splib06, record: 5880, group: 2}   # 140 Kaolin_Smect H89-FR-5 .3Kaol W1R1Bb
+      - {library: splib06, record: 6054, group: 2}   # 155 Pyrophyl.25+wxlKaol.75 AMX17
+      - {library: splib06, record: 5832, group: 2}   # 166 Kaol.5+MuscCU91-250A AMX13 W1R1Bb
+      - {library: splib06, record: 5838, group: 2}   # 167 Kaol_Wxl+0.5Musc_Ruby AMX12 W1R1Ba
+      - {library: sprlb06, record: 870, group: 2}   # 168 Kaol+Musc_intimate CU93-5C W1R1Ha AREF
+  - id: 3
+    name: mica-group
+    members:                        # 19 constituent(s)
+      - {library: splib06, record: 5976, group: 2}   # 125 Muscovite CU91-250A med Al W2R4NbS
+      - {library: sprlb06, record: 654, group: 2}   # 127 Muscovite GDS113 Ruby W1R1Bb splib06 3348
+      - {library: splib06, record: 3876, group: 2}   # 128 Paragonite GDS109 W1R1Ba
+      - {library: sprlb06, record: 714, group: 2}   # 129 Illite IMt-1.b <2um W1R1BaS
+      - {library: sprlb06, record: 726, group: 2}   # 130 Illite GDS4.2 Marblehead_WI W1R1H_
+      - {library: splib06, record: 3306, group: 2}   # 131 Muscovite CU93-1 low-Al Phyl W2R4Nb
+      - {library: splib06, record: 3372, group: 2}   # 132 Muscovite GDS116 Tanzania W1R1Ba
+      - {library: splib06, record: 5988, group: 2}   # 160 Muscovite+Pyrophyl JH_PYRP1 W1R1Fb
+      - {library: sprlb06, record: 876, group: 2}   # 169 Muscov+Jaros CU93-314 coatng W1R1Hb
+      - {library: splib06, record: 5754, group: 2}   # 173 Gyp.3+jr.1+msc.4+dic.2 AMX22 W1R1Ba
+      - {library: splib06, record: 774, group: 2}   # 187 Biotite HS28.3B W1R1Bb
+      - {library: sprlb06, record: 912, group: 2}   # 188 Biotite-phlogopite P23-5 Sam W1R1H_
+      - {library: splib06, record: 2862, group: 2}   # 256 Lepidolite NMNH88526-1 W1R1Ba
+      - {library: splib06, record: 2976, group: 2}   # 257 Margarite GDS106 W1R1Bc
+      - {library: splib06, record: 4380, group: 2}   # 266 Roscoelite EN124 W1R1Bb
+      - {library: sprlb06, record: 624, group: 2}   # 290 Vermiculite GDS458 W1R1Hc
+      - {library: sprlb06, record: 630, group: 2}   # 291 Vermiculite ALB4SA00 W1R1Hc
+      - {library: sprlb06, record: 636, group: 2}   # 292 Vermiculite WS682 W1R1Hc
+      - {library: sprlb06, record: 642, group: 2}   # 293 Vermiculite WS681 W1R1Hc
+  - id: 4
+    name: smectite
+    members:                        # 12 constituent(s)
+      - {library: sprlb06, record: 588, group: 2}   # 141 Montmorillonite SWy-1 W1R1Hb
+      - {library: sprlb06, record: 54, group: 2}   # 142 Montmorillonite_Fe GDS759A
+      - {library: sprlb06, record: 600, group: 2}   # 143 Montmorillonite SAz-1 W1R1Hb
+      - {library: splib06, record: 5466, group: 2}   # 150 Beidellite+Montmor GDS123 =b
+      - {library: splib06, record: 5478, group: 2}   # 151 Beidellite+Montmor GDS124 =b
+      - {library: sprlb06, record: 786, group: 2}   # 178 Ammonio-Illite/Smectit GDS87 W1R1Hb
+      - {library: splib06, record: 3558, group: 2}   # 221 Nontronite NG-1.a W1R1Bb
+      - {library: sprlb06, record: 696, group: 2}   # 222 Hectorite SHCa-1.Ac-B W1R1Hb
+      - {library: sprlb06, record: 702, group: 2}   # 223 Saponite SapCa-1.AcB W1R1Hb
+      - {library: sprlb06, record: 690, group: 2}   # 224 Sepiolite SepNev-1.AcB W1R1Ha
+      - {library: splib06, record: 5544, group: 2}   # 230 Calcite.33+Ca-mont.67 AMX19 W1R1Bb
+      - {library: splib06, record: 3870, group: 2}   # 234 Palygorskite PFL-1 Attapulg W1R1Bb
+  - id: 5
+    name: chlorite
+    members:                        # 13 constituent(s)
+      - {library: splib06, record: 5982, group: 2}   # 177 Muscovite+Chlorite CU91-253D W2R4Na
+      - {library: splib06, record: 5664, group: 2}   # 189 Chlorite_Serpentine BR93-22B W1R1Bb
+      - {library: splib06, record: 1080, group: 2}   # 190 Chlorite SMR-13.b 60-104um W1R1Ba
+      - {library: sprlb06, record: 252, group: 2}   # 191 Prehnite+.50Chlorite AMIX
+      - {library: sprlb06, record: 258, group: 2}   # 192 Prehnite+.67Chlorite AMIX
+      - {library: sprlb06, record: 264, group: 2}   # 193 Prehnite+.75Chlorite AMIX
+      - {library: sprlb06, record: 660, group: 2}   # 195 Clinochlore GDS158 Flagst W1R1Hb
+      - {library: splib06, record: 1212, group: 2}   # 196 Clinochlore NMNH83369 =bb
+      - {library: sprlb06, record: 648, group: 2}   # 197 Clinochlore_Fe GDS157.b W1R1Ha
+      - {library: splib06, record: 1260, group: 2}   # 198 Clinochlore_Fe SC-CCa-1.b =aa_
+      - {library: splib06, record: 1338, group: 2}   # 199 Cookeite CAr-1.a 104-150um =bb_
+      - {library: splib06, record: 1368, group: 2}   # 200 Cookeite CAr-1.c <30um =cc_
+      - {library: splib06, record: 4872, group: 2}   # 201 Thuringite SMR-15.b 32um W1R1Ba
+  - id: 6
+    name: carbonate
+    members:                        # 24 constituent(s)
+      - {library: sprlb06, record: 1038, group: 2}   # 126 Calcite.33+Kaol.33+Mus AMXr2 W1R1Ba
+      - {library: sprlb06, record: 612, group: 2}   # 184 Dolomite HS102.3B W1R1Hb
+      - {library: sprlb06, record: 276, group: 2}   # 194 Aragonite GDS898 Moracco
+      - {library: splib06, record: 5538, group: 2}   # 211 Calcite+Talc PC99-1G W1R1Fc
+      - {library: splib06, record: 5682, group: 2}   # 212 Dolomit+Calcite+Talc PC99-1E W1R1Fc
+      - {library: splib06, record: 5568, group: 2}   # 213 Calcite.8+Ca-Montmor.2 AMX15 W1R1BbS
+      - {library: splib06, record: 5922, group: 2}   # 214 Magnesite+Hydroma HS47.3B W1R1Ba
+      - {library: sprlb06, record: 666, group: 2}   # 215 Calcite WS272 W1R1Ha
+      - {library: splib06, record: 5532, group: 2}   # 216 Calcite+Dolomite.5 AMX8 W1R1Bb
+      - {library: splib06, record: 5694, group: 2}   # 217 Dolomite.50+Ca-Montmor AMX10 W1R1Bb
+      - {library: splib06, record: 5514, group: 2}   # 218 Calc.25+dolo.25+mont.5 AMX18 W1R1Bb
+      - {library: splib06, record: 5508, group: 2}   # 219 Calc.25+Dolo.25+Ca-Mon AMX7 W1R1Bb
+      - {library: splib06, record: 4560, group: 2}   # 220 Siderite HS271.3B W1R1Ba
+      - {library: splib06, record: 5574, group: 2}   # 225 Calcite.80+Mont_Swy-1 GDS212 W1R1Ba
+      - {library: splib06, record: 5526, group: 2}   # 226 Calcite+.50Ca-Mont AMX6 W1R1Bb
+      - {library: splib06, record: 5520, group: 2}   # 227 Calcite+.33Muscov AMX5 Ruby W1R1Ba
+      - {library: splib06, record: 5688, group: 2}   # 229 Dolomite.5+Na-mont.5 AMX21 W1R1Bb
+      - {library: splib06, record: 5580, group: 2}   # 231 Calcite.80wt+Kaol_CM9 GDS213 W1R1Ba
+      - {library: splib06, record: 5562, group: 2}   # 232 Calcite.7+Kaolwxl.3 AMX9 W1R1Ba
+      - {library: splib06, record: 4278, group: 2}   # 240 Rhodochrosite HS338.3B W1R1Bb
+      - {library: splib06, record: 5268, group: 2}   # 241 Witherite HS273.3B W1R1Ba
+      - {library: splib06, record: 4764, group: 2}   # 267 Strontianite HS272.3B W1R1Bb
+      - {library: splib06, record: 720, group: 2}   # 270 Azurite WS316 W1R1Ba
+      - {library: splib06, record: 2964, group: 2}   # 271 Malachite HS254.3B W1R1Bb
+  - id: 7
+    name: sulfate
+    members:                        # 18 constituent(s)
+      - {library: sprlb06, record: 618, group: 2}   # 138 Gypsum HS333.3B (Selenite) W1R1Ha
+      - {library: sprlb06, record: 66, group: 2}   # 145 Kieserite Batch4 GDS671
+      - {library: sprlb06, record: 150, group: 2}   # 146 Szomolnokite NMNH104303 UT
+      - {library: sprlb06, record: 192, group: 2}   # 147 Szomolnokite GDS874 Heat275C
+      - {library: splib06, record: 5748, group: 2}   # 170 Gyp+jar+ill BRCM1 Marysvale W1R1Fb
+      - {library: splib06, record: 5766, group: 2}   # 171 Gyp.5+Kjar.3+hAlmsc.2 AMX24 W1R1Ba
+      - {library: splib06, record: 5760, group: 2}   # 172 Gyp.4+jr20+msc.2+dic.2 AMX23 W1R1Ba
+      - {library: splib06, record: 390, group: 2}   # 183 Ammonio-Jarosite SCR-NHJ W1R1Ba
+      - {library: splib06, record: 2538, group: 2}   # 204 Jarosite GDS24 Na W1R1Bb
+      - {library: splib06, record: 2568, group: 2}   # 205 Jarosite GDS99 K 200C Syn W1R1Ba
+      - {library: splib06, record: 2604, group: 2}   # 206 Jarosite SJ-1 H3O 10-20% W1R1Bb
+      - {library: splib06, record: 3996, group: 2}   # 245 Polyhalite NMNH92669-4 W1R1Ba
+      - {library: splib06, record: 6114, group: 2}   # 249 White_Crust LV30 starkeyite W1R1Fc
+      - {library: splib06, record: 3012, group: 2}   # 258 Mascagnite GDS65.b (fr) W1R1Ba
+      - {library: splib06, record: 3114, group: 2}   # 259 Mirabilite GDS150 Na2SO4 W1R1Ba
+      - {library: splib06, record: 4788, group: 2}   # 268 Syngenite GDS139 W1R1Ba
+      - {library: splib06, record: 7008, group: 2}   # 284 WTC_Dust_Debris WTC01-2 W1R1Fa
+      - {library: splib06, record: 7014, group: 2}   # 285 WTC_Dust_Debris WTC01-28 W1R1Fa
+  - id: 8
+    name: pyrophyllite-diaspore
+    members:                        # 6 constituent(s)
+      - {library: splib06, record: 1488, group: 2}   # 153 Diaspore HS416.3B W1R1Bb
+      - {library: splib06, record: 4188, group: 2}   # 154 Pyrophyllite PYS1A fine gr W1R1Ba
+      - {library: splib06, record: 6060, group: 2}   # 156 Pyrophyl.50+Ca-Mont.50 AMX16 W1R1Ba
+      - {library: splib06, record: 6048, group: 2}   # 159 Pyrophyl+Muscovite JH_PYRM1 W1R1Fb
+      - {library: splib06, record: 1824, group: 2}   # 237 Gibbsite WS214 W1R1Bb
+      - {library: splib06, record: 5310, group: 2}   # 283 Zunyite GDS-241B <150um W1R1B?
+  - id: 9
+    name: serpentine-talc
+    members:                        # 8 constituent(s)
+      - {library: splib06, record: 5142, group: 2}   # 208 Tremolite HS18.3 W1R1Bc
+      - {library: splib06, record: 4800, group: 2}   # 209 Talc GDS23 74-250um fr W1R1Ba
+      - {library: splib06, record: 4830, group: 2}   # 210 Talc WS659 W1R1Bb
+      - {library: splib06, record: 834, group: 2}   # 251 Brucite HS247.3B W1R1Bc
+      - {library: splib06, record: 1152, group: 2}   # 262 Chrysotile ML99-12A Coar Fib W1R1Fb
+      - {library: splib06, record: 1158, group: 2}   # 263 Chrysotile ML99-12C Fine Fib W1R1Fb
+      - {library: splib06, record: 1146, group: 2}   # 264 Chrysotile HS323.1B W1R1Ba
+      - {library: splib06, record: 1440, group: 2}   # 265 Cronstedtite M3542 =bb_
+  - id: 10
+    name: amphibole-pyroxene-epidote
+    members:                        # 8 constituent(s)
+      - {library: splib06, record: 72, group: 2}   # 185 Actinolite NMNHR16485 W1R1Bb
+      - {library: splib06, record: 402, group: 2}   # 186 Amphibole NMNH78662 W1R1Bb
+      - {library: splib06, record: 1668, group: 2}   # 202 Epidote GDS26.a 75-200um W1R1Bb
+      - {library: splib06, record: 2274, group: 2}   # 203 Hornblende_Fe HS115.3B W1R1Bc
+      - {library: splib06, record: 5298, group: 2}   # 235 Zoisite HS347.3B W1R1Bb
+      - {library: splib06, record: 4026, group: 2}   # 242 Prehnite GDS613.a <60um =aa_
+      - {library: splib06, record: 3126, group: 2}   # 243 Mizzonite BM1931 12 Scapolte W1R1Bc
+      - {library: splib06, record: 4338, group: 2}   # 261 Richterite NMNH150800 HCl W1R1Bb
+  - id: 11
+    name: silica
+    members:                        # 2 constituent(s)
+      - {library: sprlb06, record: 60, group: 2}   # 144 HyBasaltGlassMLUT03-9CMarP&T
+      - {library: splib06, record: 990, group: 2}   # 152 Chalcedony CU91-6A W1R1Ba
+  - id: 12
+    name: zeolite
+    members:                        # 2 constituent(s)
+      - {library: splib06, record: 414, group: 2}   # 250 Analcime GDS1 Zeolite W1R1Ba
+      - {library: splib06, record: 3474, group: 2}   # 260 Natrolite HS169.3B Zeolite W1R1Bb
+  - id: 13
+    name: feldspar-ammonium
+    members:                        # 1 constituent(s)
+      - {library: splib06, record: 846, group: 2}   # 179 Buddingtonite GDS85 D-206 W1R1Bb
+  - id: 14
+    name: salt-borate-nitrate
+    members:                        # 11 constituent(s)
+      - {library: sprlb06, record: 96, group: 2}   # 148 Perchlorate_Mg GDS851.2 220K
+      - {library: sprlb06, record: 144, group: 2}   # 149 Perchlorate_Na GDS857 230C r06crj3a=_
+      - {library: splib06, record: 3546, group: 2}   # 238 Niter GDS43 (K-Saltpeter) W1R1Ba
+      - {library: splib06, record: 3978, group: 2}   # 244 Pinnoite NMNH123943 W1R1Ba
+      - {library: splib06, record: 4368, group: 2}   # 246 Rivadavite NMNH170164 Amph W1R1Ba
+      - {library: splib06, record: 2298, group: 2}   # 247 Howlite GDS155 W1R1Ba
+      - {library: splib06, record: 5190, group: 2}   # 248 Ulexite HS441.3B W1R1Ba
+      - {library: splib06, record: 942, group: 2}   # 252 Carnallite NMNH98011 W1R1Bb
+      - {library: splib06, record: 1320, group: 2}   # 253 Colemanite GDS143 W1R1Bb
+      - {library: sprlb06, record: 234, group: 2}   # 288 Potassium Nitrate GDS43
+      - {library: sprlb06, record: 240, group: 2}   # 289 Sodium Nitrate GDS883
+  - id: 15
+    name: non-geologic
+    members:                        # 26 constituent(s)
+      - {library: splib06, record: 7128, group: 2}   #  96 Dry_Long_Grass AV87-2 W1R1Ba
+      - {library: splib06, record: 7248, group: 2}   #  97 Grass_Golden_Dry GDS480 W1R1Fa
+      - {library: splib06, record: 6912, group: 2}   #  98 Plywood GDS365 Fresh Pine W1R1Fa
+      - {library: splib06, record: 6864, group: 2}   #  99 Plastic_Tarp GDS340 Blu_Wovn W1R1Fa
+      - {library: splib06, record: 6876, group: 2}   # 100 Plastic_Vinyl GDS372 White W1R1Fa
+      - {library: splib06, record: 6558, group: 2}   # 101 Fiberglass GDS337 Grn Roofng W1R1Fa
+      - {library: splib06, record: 6936, group: 2}   # 102 Polystyrene GDS345 BluInsul W1R1Fa
+      - {library: splib06, record: 6816, group: 2}   # 103 Plastic_PETE GDS380 Clear W1R1Fa
+      - {library: splib06, record: 6714, group: 2}   # 105 Plastic_HDPE GDS393 GlosWhTr W1R1Fa
+      - {library: splib06, record: 6672, group: 2}   # 106 Painted_Aluminum GDS333 LgGr W1R1Fa
+      - {library: splib06, record: 6834, group: 2}   # 107 Plastic_PETE GDS383 Clrbluis W1R1Fa
+      - {library: sprlb06, record: 30, group: 2}   # 228 Grass_dry+0.17%Na-Mont AMX35 W1R1Ba AREF
+      - {library: splib06, record: 6522, group: 2}   # 272 Cyanide_Cadmium_Potassium W2R4Na RREF
+      - {library: splib06, record: 6528, group: 2}   # 273 Cyanide_Nickel_Potassium W2R4Na RREF
+      - {library: splib06, record: 6534, group: 2}   # 274 Cyanide_Trihydrate CT1 W1R1Ba
+      - {library: splib06, record: 6552, group: 2}   # 275 Cyanide_Potassium_Ferro W1R1Ba
+      - {library: splib06, record: 6540, group: 2}   # 276 Cyanide_Zinc_Potassium W1R1Ba
+      - {library: splib06, record: 6690, group: 2}   # 277 Plastic GGA-54 Grnhouse Roof W1R1Ba
+      - {library: splib06, record: 6606, group: 2}   # 278 Montmorill+Benzene SWy 1ml W1R1Ba
+      - {library: splib06, record: 6624, group: 2}   # 279 Montmorill+Trichlor SWy 1ml W1R1Ba
+      - {library: splib06, record: 6618, group: 2}   # 280 Montmorill+Toluene SWy .5ml W1R1Ba
+      - {library: splib06, record: 6630, group: 2}   # 281 Montmorill+Unleaded_Gas SWy W1R1Ba
+      - {library: splib06, record: 6612, group: 2}   # 282 Montmorill+TCE SWy saturated W1R1Ba
+      - {library: splib06, record: 6498, group: 2}   # 286 Coated_Steel_Girder WTC01-8 W1R1Fa
+      - {library: splib06, record: 4008, group: 2}   # 287 Portlandite GDS525 Ca(OH)2 W1R1Fa
+      - {library: sprlb06, record: 1008, group: 2}   # 294 CO2+O2+CH4 TRANSM ModtranZ20 r06crj3a=
+  - id: 16
+    name: other-group-2
+    members:                        # 8 constituent(s)
+      - {library: splib06, record: 5670, group: 2}   # 174 Dic.4+msc.3+gyp.2+jr.1 AMX20 W1R1Ba
+      - {library: splib06, record: 3930, group: 2}   # 207 Phlogopite HS23.3B W1R1Bb
+      - {library: splib06, record: 1314, group: 2}   # 233 Clintonite NMNH126553 W1R1Bc
+      - {library: splib06, record: 1626, group: 2}   # 236 Elbaite NMNH94217-1.c <74 W1R1Bb
+      - {library: splib06, record: 5040, group: 2}   # 239 Topaz Mt._Antero_#5 W1R1Bb
+      - {library: splib06, record: 1470, group: 2}   # 254 Datolite HS442.3B W1R1Bb
+      - {library: splib06, record: 2310, group: 2}   # 255 Hydrogrossular NMNH120555 W1R1Bb
+      - {library: splib06, record: 1134, group: 2}   # 269 Chrysocolla HS297.3B W1R1Bb

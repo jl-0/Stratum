@@ -1,0 +1,50 @@
+# GENERATED abundance weights for `spectral_abundance`, group 1 only.
+#
+# NOT READ BY ANYTHING. This is the generator input and the provenance record for the numbers
+# that appear INLINE under `reducer.params.weights` in manifest-proof-abundance.yaml. Reducer
+# params are free-form by contract - the plugin defines them - so the framework has no `@ref:`
+# for them the way a categorical layer's `classes:` does. The manifest's copy is what runs, what
+# enters `manifest_hash`, and what reaches a worker through plan.json.
+#
+# Consequence: editing a weight means editing the manifest, and this file is how you know where
+# those numbers came from. It lives in `weights/` and not `classes/` because everything in
+# `classes/` IS loaded, by `@ref:`, and a file that looks loaded but is not is worse than no file.
+#
+# fraction = the XRD-measured weight fraction of that mineral in the library sample, from
+# mineral_grouping_matrix_20230503.csv (the EMIT-10 Goethite and Hematite columns). A -1 in
+# the matrix means 'unknown but non-zero' and is taken as 1.0, exactly as the LP DAAC L2B
+# tutorial does. Keys are the constituent name the granule's own /mineral_metadata reports,
+# never the integer index, so a re-delivered table resolves.
+#
+# 26 constituents; 1 of them reach MORE THAN ONE output class, which is the
+# thing an Enumeration cannot express:
+#   index 46: nHematit+fg-Goethit 34B2+MPC W1R1Hb -> {'goethite': 0.1, 'hematite': 0.05}
+
+classes: [goethite, hematite]
+weights:
+  "Hematite.02+Quartz.98 GDS76 W1R1Ha": {hematite: 0.02}
+  "Goethite WS222 <250um MedGrn W1R1H_ AREF": {goethite: 1.0}
+  "Goethite0.02+Quartz GDS240 W1R1Ba": {goethite: 0.02}
+  "Goethite MPCMA2-B FineGr adj W1R1Bb": {goethite: 0.2}
+  "Goethite MPCMA2-C M-Crsgrad2 W1R1Hb AREF": {goethite: 0.37}
+  "Goethite WS222 coarse grain W1R1H_": {goethite: 1.0}
+  "Goethite_Thin_Film WS222 W1R1Ba": {goethite: 0.1}
+  "Goeth+qtz.5+Jarosite.5 AMX11 W1R1BbS": {goethite: 0.02}
+  "Lepidocrosite GDS80 (Syn) W1R1Hb": {goethite: 1.0}
+  "Goethite CU91-252 coatedchip W1R1H_": {goethite: 0.04}
+  "Chlor+Goethite CU93-4B Phyl W1R1Ba": {goethite: 0.02}
+  "Fe-Hydroxide SU93-106 amorph W1R1Bb": {goethite: 0.2}
+  "Hematite GDS27 W1R1Ha": {hematite: 1.0}
+  "Hematite_Thin_Film GDS27 W1R1Ba": {hematite: 0.05}
+  "Hematite FE2602 W1R1Bb": {hematite: 1.0}
+  "Hematite WS161 W1R1Hb": {hematite: 0.79}
+  "Magnetite_skarn BR93-5B W1R1Hb AREF": {hematite: 0.17}
+  "Basalt_weathered BR93-43 W1R1Bb": {hematite: 0.01}
+  "Hematite_Coatd_Qtzt BR93-25A W1R1Hb AREF": {hematite: 0.01}
+  "Hematite_Coatd_Qtz BR93-25B W1R1Bb": {hematite: 0.05}
+  "Hematite_Coatd_Qtzt BR93-25C W1R1Hb AREF": {hematite: 0.69}
+  "Nanohematite BR93-34B2 W1R1BbS": {hematite: 0.1}
+  "nHematit+fg-Goethit 34B2+MPC W1R1Hb": {goethite: 0.1, hematite: 0.05}
+  "Nanohematite FBR93-34B2b ed1 W1R1Hb": {hematite: 0.1}
+  "Hematite_Coatd_Qtz BR93-34C W1R1Ha AREF": {hematite: 0.63}
+  "Maghemite GDS81 Syn (M-3) W1R1Bb": {hematite: 0.85}

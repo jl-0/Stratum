@@ -1,0 +1,154 @@
+# iron-oxide-v1: the group-1 (~1 micron) grouping. Phil's 'start with the easy ones' - goethite, hematite, jarosite are the classes with defensible XRD behind them.
+#
+# GENERATED from the EMIT L2B reference matrix (mineral_grouping_matrix_20230503.csv,
+# verified row-for-row against a real granule's /mineral_metadata). Group 1 only.
+# Members are matched on (library, record, group) - the attributes the product's own
+# embedded table carries - so a re-delivered table with different integer indices still
+# resolves. Class CONTENTS here are provisional: the structure is the deliverable, the
+# bucket membership is the science lead's call.
+#
+name: iron-oxide-v1
+version: 1
+match_on: [library, record, group]
+unmapped: other-group-1    # the two rows the table cannot address by attribute land here
+classes:
+  - id: 1
+    name: hematite
+    members:                        # 14 constituent(s)
+      - {library: sprlb06, record: 744, group: 1}   #   2 Hematite.02+Quartz.98 GDS76 W1R1Ha
+      - {library: sprlb06, record: 738, group: 1}   #  30 Hematite GDS27 W1R1Ha
+      - {library: splib06, record: 6198, group: 1}   #  31 Hematite_Thin_Film GDS27 W1R1Ba
+      - {library: splib06, record: 2100, group: 1}   #  32 Hematite FE2602 W1R1Bb
+      - {library: sprlb06, record: 906, group: 1}   #  33 Hematite WS161 W1R1Hb
+      - {library: sprlb06, record: 846, group: 1}   #  36 Magnetite_skarn BR93-5B W1R1Hb AREF
+      - {library: splib06, record: 5460, group: 1}   #  40 Basalt_weathered BR93-43 W1R1Bb
+      - {library: sprlb06, record: 840, group: 1}   #  42 Hematite_Coatd_Qtzt BR93-25A W1R1Hb AREF
+      - {library: splib06, record: 6174, group: 1}   #  43 Hematite_Coatd_Qtz BR93-25B W1R1Bb
+      - {library: sprlb06, record: 816, group: 1}   #  44 Hematite_Coatd_Qtzt BR93-25C W1R1Hb AREF
+      - {library: splib06, record: 3468, group: 1}   #  45 Nanohematite BR93-34B2 W1R1BbS
+      - {library: sprlb06, record: 1026, group: 1}   #  46 nHematit+fg-Goethit 34B2+MPC W1R1Hb
+      - {library: sprlb06, record: 918, group: 1}   #  47 Nanohematite FBR93-34B2b ed1 W1R1Hb
+      - {library: sprlb06, record: 822, group: 1}   #  48 Hematite_Coatd_Qtz BR93-34C W1R1Ha AREF
+  - id: 2
+    name: goethite
+    members:                        # 8 constituent(s)
+      - {library: sprlb06, record: 882, group: 1}   #   3 Goethite WS222 <250um MedGrn W1R1H_ AREF
+      - {library: splib06, record: 5736, group: 1}   #   4 Goethite0.02+Quartz GDS240 W1R1Ba
+      - {library: splib06, record: 1878, group: 1}   #   5 Goethite MPCMA2-B FineGr adj W1R1Bb
+      - {library: sprlb06, record: 852, group: 1}   #   6 Goethite MPCMA2-C M-Crsgrad2 W1R1Hb AREF
+      - {library: sprlb06, record: 894, group: 1}   #   7 Goethite WS222 coarse grain W1R1H_
+      - {library: splib06, record: 6168, group: 1}   #   8 Goethite_Thin_Film WS222 W1R1Ba
+      - {library: sprlb06, record: 900, group: 1}   #  18 Goethite CU91-252 coatedchip W1R1H_
+      - {library: splib06, record: 5604, group: 1}   #  19 Chlor+Goethite CU93-4B Phyl W1R1Ba
+  - id: 3
+    name: jarosite
+    members:                        # 3 constituent(s)
+      - {library: splib06, record: 5730, group: 1}   #   9 Goeth+qtz.5+Jarosite.5 AMX11 W1R1BbS
+      - {library: splib06, record: 2568, group: 1}   #  15 Jarosite GDS99 K 200C Syn W1R1BaS
+      - {library: splib06, record: 6210, group: 1}   #  49 Jarosite_on_Qtzite BR93-34A2 W1R1Bb
+  - id: 4
+    name: lepidocrocite
+    members:                        # 1 constituent(s)
+      - {library: sprlb06, record: 732, group: 1}   #  16 Lepidocrosite GDS80 (Syn) W1R1Hb
+  - id: 5
+    name: ferrihydrite
+    members:                        # 2 constituent(s)
+      - {library: splib06, record: 5724, group: 1}   #  28 Fe-Hydroxide SU93-106 amorph W1R1Bb
+      - {library: splib06, record: 1740, group: 1}   #  29 Ferrihydrite GDS75 Syn F6 W1R1Bb
+  - id: 6
+    name: schwertmannite
+    members:                        # 1 constituent(s)
+      - {library: splib06, record: 4476, group: 1}   #  11 Schwertmannite BZ93-1 W1R1Bb
+  - id: 7
+    name: fe-sulfate
+    members:                        # 3 constituent(s)
+      - {library: splib06, record: 1386, group: 1}   #  66 Coquimbite GDS22 W1R1Bc
+      - {library: splib06, record: 1374, group: 1}   #  67 Copiapite GDS21 W1R1Bb
+      - {library: splib06, record: 858, group: 1}   #  76 Butlerite GDS25 W1R1Ba
+  - id: 8
+    name: acid-mine-assemblage
+    members:                        # 4 constituent(s)
+      - {library: splib06, record: 5316, group: 1}   #  13 Acid_Mine_Dr Assemb1-Fe3+ W1R1Fb
+      - {library: splib06, record: 5322, group: 1}   #  14 Acid_Mine_Dr Assemb2-Fe3+ W1R1Fb
+      - {library: splib06, record: 6942, group: 1}   #  52 Renyolds_TnlSldgWet SM93-15w W1R1Ba
+      - {library: splib06, record: 6594, group: 1}   #  60 Green_Slime SM93-14A Summitv W1R1Ba
+  - id: 9
+    name: copper-oxide-carbonate
+    members:                        # 6 constituent(s)
+      - {library: splib06, record: 720, group: 1}   #  56 Azurite WS316 W1R1Ba
+      - {library: splib06, record: 3990, group: 1}   #  57 Pitch_Limonite GDS104 Cu W1R1B?
+      - {library: splib06, record: 2964, group: 1}   #  58 Malachite HS254.3B W1R1Bb
+      - {library: splib06, record: 5496, group: 1}   #  59 Blue_Efflorscnt_Min SU93-300 W1R1Bb
+      - {library: splib06, record: 1134, group: 1}   #  68 Chrysocolla HS297.3B W1R1Bb
+      - {library: splib06, record: 1458, group: 1}   #  81 Cuprite HS127.3B W1R1Bb
+  - id: 10
+    name: sulfide
+    members:                        # 3 constituent(s)
+      - {library: splib06, record: 6042, group: 1}   #  10 Pyrite LV95-6A Weath on Tail W1R1Bb
+      - {library: splib06, record: 1002, group: 1}   #  78 Chalcopyrite HS431.3B W1R1Bb
+      - {library: splib06, record: 1164, group: 1}   #  80 Cinnabar HS133.3B W1R1Bc
+  - id: 11
+    name: magnetite-maghemite
+    members:                        # 2 constituent(s)
+      - {library: splib06, record: 2928, group: 1}   #  87 Maghemite GDS81 Syn (M-3) W1R1Bb
+      - {library: splib06, record: 2940, group: 1}   #  88 Magnetite HS195.3B W1R1Bb
+  - id: 12
+    name: mn-oxide-coating
+    members:                        # 5 constituent(s)
+      - {library: splib06, record: 6144, group: 1}   #  12 Blck_Mn_Coat_Tailngs LV95-3 W1R1Bb
+      - {library: splib06, record: 6156, group: 1}   #  82 Desert_Varnish GDS141 W1R1Ba
+      - {library: splib06, record: 6162, group: 1}   #  83 Desert_Varnish GDS78A Rhy W1R1Ba
+      - {library: splib06, record: 4158, group: 1}   #  89 Pyrolusite HS138.3B W1R1Bb
+      - {library: splib06, record: 4314, group: 1}   #  94 Rhodonite NMNHC6148 >250um W1R1Bb
+  - id: 13
+    name: fe-silicate
+    members:                        # 37 constituent(s)
+      - {library: splib06, record: 5634, group: 1}   #  17 Chlorite+Muscovite CU93-65A W1R1Ba
+      - {library: splib06, record: 1446, group: 1}   #  20 Cummingtonite HS294.3B W1R1Bc
+      - {library: splib06, record: 72, group: 1}   #  21 Actinolite NMNHR16485 W1R1Bb
+      - {library: splib06, record: 42, group: 1}   #  22 Actinolite HS22.3B W1R1Bb
+      - {library: splib06, record: 2334, group: 1}   #  23 Hypersthene NMNHC2368 W1R1Bb
+      - {library: splib06, record: 1548, group: 1}   #  24 Diopside NMNHR18685 ~160 Pyx W1R1Bb
+      - {library: splib06, record: 2502, group: 1}   #  25 Jadeite HS343.3B W1R1Bb
+      - {library: splib06, record: 3966, group: 1}   #  26 Pigeonite HS199.3B W1R1Bb
+      - {library: splib06, record: 1668, group: 1}   #  27 Epidote GDS26.a 75-200um W1R1Bb
+      - {library: splib06, record: 3558, group: 1}   #  34 Nontronite NG-1.a W1R1Bb
+      - {library: splib06, record: 5328, group: 1}   #  35 Actinolite-Hornfels BR93-5a W1R1Bc
+      - {library: splib06, record: 5334, group: 1}   #  37 Actinolite-Tremolit BR93-22C W1R1Bb
+      - {library: splib06, record: 1656, group: 1}   #  38 Epidote BR93-33a W1R1Bb AREF
+      - {library: splib06, record: 5490, group: 1}   #  39 Biotite-Chlorite_Mx BR93-36A W1R1Bb
+      - {library: splib06, record: 5454, group: 1}   #  41 Basalt_fresh BR93-46B W1R1Bb
+      - {library: splib06, record: 5340, group: 1}   #  50 Actinolite_Dolomit BR93-60B W1R1BbS
+      - {library: splib06, record: 6036, group: 1}   #  51 Phlogopite_Sand_Mix BR93-20 W1R1Ba
+      - {library: sprlb06, record: 660, group: 1}   #  53 Clinochlore GDS158 Flagst W1R1Hb
+      - {library: splib06, record: 1200, group: 1}   #  54 Clinochlore NMNH83369 W1R1Bb
+      - {library: splib06, record: 4890, group: 1}   #  55 Thuringite SMR-15.c 32um W1R1Ba
+      - {library: splib06, record: 3696, group: 1}   #  61 Olivine HS285.4B Fo80 W1R1Bb
+      - {library: splib06, record: 3666, group: 1}   #  62 Olivine GDS71.a Fo91 65um W1R1Bb
+      - {library: splib06, record: 4560, group: 1}   #  64 Siderite HS271.3B W1R1Ba
+      - {library: splib06, record: 4362, group: 1}   #  65 Riebeckite NMNH122689 Amph W1R1Ba
+      - {library: splib06, record: 708, group: 1}   #  71 Axinite HS342.3B W1R1Bb
+      - {library: splib06, record: 4728, group: 1}   #  72 Staurolite HS188.3B W1R1Bb
+      - {library: splib06, record: 216, group: 1}   #  73 Almandine WS479 Garnet W1R1Bb
+      - {library: splib06, record: 678, group: 1}   #  74 Augite NMNH120049 W1R1Bb
+      - {library: splib06, record: 810, group: 1}   #  75 Bronzite HS9.3B Pyroxene W1R1Bc
+      - {library: splib06, record: 882, group: 1}   #  77 Bytownite HS106.3B Plagio W1R1Bc
+      - {library: splib06, record: 1122, group: 1}   #  79 Chromite HS281.3B W1R1Bb
+      - {library: splib06, record: 1644, group: 1}   #  84 Enstatite NMNH128288 W1R1Bc
+      - {library: splib06, record: 2088, group: 1}   #  85 Hedenbergite NMNH119197 W1R1Bb
+      - {library: splib06, record: 3042, group: 1}   #  90 Microcline HS103.3B Feldspar W1R1Bc
+      - {library: splib06, record: 132, group: 1}   #  91 Albite HS143.3B Plagioclase W1R1Bc
+      - {library: splib06, record: 3852, group: 1}   #  92 Orthoclase NMNH142137 Fe W1R1Bb
+      - {library: splib06, record: 3882, group: 1}   #  93 Pectolite NMNH94865.a W1R1Bb
+  - id: 14
+    name: ree-oxide
+    members:                        # 2 constituent(s)
+      - {library: splib06, record: 3498, group: 1}   #  69 Neodymium_Oxide GDS34 W1R1Ba
+      - {library: splib06, record: 4410, group: 1}   #  70 Samarium_Oxide GDS36 W1R1Ba
+  - id: 15
+    name: other-group-1
+    members:                        # 4 constituent(s)
+      - {library: splib06, record: 6858, group: 1}   #   1 Plastic_Tarp GDS339 Green W1R1Fa
+      - {library: splib06, record: 4278, group: 1}   #  63 Rhodochrosite HS338.3B W1R1Bb
+      - {library: splib06, record: 2796, group: 1}   #  86 Lazurite HS418.3B W1R1Bb
+      - {library: splib06, record: 4776, group: 1}   #  95 Sulfur GDS94 Reagent W1R1Ba
