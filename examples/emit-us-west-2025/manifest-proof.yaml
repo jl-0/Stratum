@@ -143,6 +143,17 @@ outputs:
   formats: [gtiff]
   stac: true
   render:
+    # The ungrouped layers too. 294 classes is a busy legend and the deterministic palette
+    # is the only sane way to colour it, but a picture of the raw detections is what tells you
+    # whether a grouping threw something away - so it ships beside them rather than instead.
+    mineral_1_native:
+      mapper: categorical
+      on_unmapped: grey
+      alpha_from: {band: mineral_1_native_agreement, domain: [0.25, 1.0], range: [60, 255]}
+    mineral_2_native:
+      mapper: categorical
+      on_unmapped: grey
+      alpha_from: {band: mineral_2_native_agreement, domain: [0.25, 1.0], range: [60, 255]}
     iron_oxide:
       mapper: categorical
       on_unmapped: grey
