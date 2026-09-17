@@ -600,7 +600,12 @@ Two delivery paths, both recorded in provenance:
 | Path | Mechanism | For | Built |
 |---|---|---|---|
 | **Production** | pinned in the container image, which a deployment names by digest | delivered products — reproducibility from an immutable digest | yes (2026-09-14) |
-| **Iteration** | wheel URI in the manifest, fetched to `/tmp` at cold start | experiments — edit, publish, rerun in ~90s | no; `plugins.wheel` is modelled and unused |
+| **Iteration** | wheel URI in the manifest, fetched to `/tmp` at cold start | experiments — edit, publish, rerun in ~90s | no; `plugins.wheel` is modelled and **refused at validation** |
+
+`plugins.wheel` is refused rather than ignored. Nothing reads the field, so a run that named a
+wheel would resolve plugins from the installed environment anyway and record, in delivered
+provenance, a plugin version the author never chose — a silent substitution, which is worse than
+an absent feature. Validation says so by name instead.
 
 Choosing among *registered* plugins is a manifest edit and needs no deploy. Adding a *new* class
 means a new image, because resolution reads installed metadata — about a two-minute round trip

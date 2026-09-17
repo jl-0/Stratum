@@ -503,6 +503,24 @@ def test_this_slice_refuses_unreachable_aux_and_netcdf_statically(tmp_path):
     assert any("'netcdf'" in p and "07 section 2" in p for p in validate_static(m))
 
 
+def test_a_plugin_wheel_is_refused_not_ignored(tmp_path):
+    """04 section 7: `plugins.wheel` is the unbuilt ITERATION delivery path.
+
+    Nothing reads the field, so a run that named a wheel would resolve plugins from the installed
+    environment and record a plugin version the author never chose. That is a silent substitution
+    in delivered provenance, so validation refuses by name. Omitting the block stays valid -
+    the production path is an installed distribution, which is how every example works.
+    """
+    m = loaded(tmp_path, lambda d: d.update(
+        plugins={"wheel": "s3://bucket/stratum_emit-0.4.2-py3-none-any.whl"}))
+    problems = validate_static(m)
+    assert any("plugins.wheel" in p and "04 section 7" in p for p in problems), problems
+
+    assert not any("plugins" in p for p in validate_static(loaded(tmp_path, lambda d: None)))
+    assert not any("plugins" in p
+                   for p in validate_static(loaded(tmp_path, lambda d: d.update(plugins={}))))
+
+
 def test_alpha_from_must_name_a_band_the_reducer_delivers(tmp_path):
     """09 section 5 / 13 section 4: `depth_1` is continuous, so `depth_1_agreement` is never
     written; `mineral_1_n` neither; `mineral_1_agreement` is."""

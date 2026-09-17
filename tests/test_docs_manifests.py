@@ -116,8 +116,12 @@ def test_the_dictionary_covers_what_the_examples_actually_use() -> None:
     # Only keys the SCHEMA declares count. A manifest also invents names - `mineral_1` is a
     # layer the author chose, `view_zenith` an alias they named - and the decoder is right not to
     # colour those: they mean whatever this manifest says they mean.
+    #
+    # `prefer` is exempt for a different reason: two unrelated keys share the name. It is
+    # `inputs.source.prefer` (https | direct) and also a JointMineralVote param naming a layer,
+    # and a bare-name lookup cannot tell them apart.
     content = {"source", "path", "key", "attributes", "band", "role", "method", "provider",
-               "prefer", "wheel", "plugins"}
+               "prefer"}
     missing = (used & schema_keys()) - dictionary_keys() - content
     assert not missing, (
         f"shipped manifests use schema key(s) the decoder cannot explain: {sorted(missing)}")

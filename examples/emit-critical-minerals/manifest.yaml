@@ -1,6 +1,18 @@
-# DESIGN TARGET, not yet runnable. This is the full Critical Minerals product as designed
-# (spec 09 is written around it). `stratum validate` lists what the framework does not build
-# yet - that list is the roadmap. The runnable subset is ../emit-cmr-nevada/. See README.md here.
+# DESIGN TARGET, not runnable, and NOTIONAL in places. This is the full Critical Minerals
+# product as designed (spec 09 is written around it); `stratum validate` lists what the framework
+# does not build yet, and that list is the roadmap.
+#
+# Two different kinds of "not real" appear below, and the difference matters when reading it:
+#
+#   UNBUILT   - the feature is specified and the framework refuses it by name, so it cannot rot
+#               silently. `validate` prints four: aux `s3://`, aux `temporal`, `formats:
+#               [netcdf]`, `plugins.wheel`. `on_exceed: require_approval` is a fifth but only
+#               bites at run time, when the executor refuses instead of parking the run.
+#   NOTIONAL  - the VALUE is invented. Buckets, the wheel filename and the aux URIs name nothing
+#               that exists, and no tool can tell you so. Each is marked `# NOTIONAL` at its line.
+#
+# Everything not marked either way is real and runs today. The runnable examples are
+# ../emit-cmr-nevada/ (one tile) and ../emit-cmr-cuprite/ (three manifests). See README.md here.
 run_id: cm-zones-2026-annual-r3
 description: Critical Minerals annual mineral ID, 4 pilot zones
 
@@ -31,7 +43,8 @@ time:
 #   deliver: {every: P1M, window: P13M, align: center}
 
 inputs:
-  index_location: s3://emit-l3/index/   # what a RUN reads: a directory Stratum writes
+  index_location: s3://emit-l3/index/   # NOTIONAL bucket. What a RUN reads: a directory Stratum
+                                        # writes. S3 access itself is also unbuilt (12 section 4).
   source:                                           # how that index is BUILT - see 12
     kind: cmr
     provider: LPCLOUD
@@ -72,8 +85,17 @@ inputs:
     solar_zenith: {role: geometry, band: 4}   # 4 = to-sun zenith
     # swir_2200:  {role: reflectance, match: {wavelength: 2200}, tolerance: 10}   # by reader-reported attribute
 
+# Aux itself IS built - ../emit-cmr-cuprite/manifest-bare-earth.yaml stages four real ESA
+# WorldCover tiles over anonymous https and warps them per tile. What is not built is how these
+# two want to be fetched, so `validate` refuses both:
 aux:
+  # NOTIONAL uri, and UNBUILT scheme: aux stages through the asset store, which opens https://
+  # and file:// only. A slope raster is a static file, so this one becomes real the day someone
+  # points it at a published DEM derivative - no framework change needed.
   slope: {uri: "s3://.../slope.tif", kind: continuous,  resampling: bilinear}
+  # UNBUILT twice over. `{date}` + `temporal: nearest` means "find the nearest date that EXISTS",
+  # which needs a listing, and a run never queries a catalogue (02 section 6). This is why
+  # `cleanest_nadir` cannot run yet: it calls aux.raster("snow", date=...).
   snow:  {uri: "s3://.../snow/{date}.tif", kind: categorical, resampling: nearest,
           temporal: nearest, max_age: P3D}
 
@@ -116,11 +138,16 @@ snapshot:                                 # what resolve writes and how reduce c
       source: view_zenith
       aggregate: {method: none}
 
-# reducer:                                # only for logic the schema vocabulary cannot express
+# reducer:  Reducer plugins ARE built, and ../emit-cmr-cuprite/manifest-joint.yaml is a working
+#           one: JointMineralVote combines EMIT's two mineral groups, which no `aggregate` entry
+#           can do. ClassifyLast is the case that stays out of reach, and NOT because of the
+#           reducer - a snapshot stores only the WINNING observation, so the per-candidate
+#           evidence classify-last needs was never written (04 section 4). Reaching it means
+#           `source: scorer` layers and a full re-resolve, not a new reducer.
 #   ref: my_package:ClassifyLast
 
 outputs:
-  bucket: s3://emit-l3-products
+  bucket: s3://emit-l3-products         # NOTIONAL bucket
   formats: [cog, netcdf]
   stac: true
   render:
@@ -129,8 +156,14 @@ outputs:
       on_unmapped: fail
       alpha_from: {band: mineral_1_agreement, domain: [0.3, 0.8], range: [60, 255]}
 
+# UNBUILT, and the reason it is called out rather than deleted: `wheel` is the ITERATION
+# delivery path (04 section 7) - publish a wheel, rerun, skip the image build. Today plugins
+# resolve from entry points in the INSTALLED environment and nothing reads this key, so it is
+# refused rather than ignored. The PRODUCTION path is built: `plugins/stratum-emit/` is a path
+# dependency of the workspace, pinned in the image, named by digest.
 plugins:
-  wheel: s3://emit-l3/plugins/stratum_emit-0.4.2-py3-none-any.whl
+  wheel: s3://emit-l3/plugins/stratum_emit-0.4.2-py3-none-any.whl   # NOTIONAL: the real
+                                        # distribution is stratum-emit 0.0.1, installed in-image
 
 budget:
   max_tiles: 64

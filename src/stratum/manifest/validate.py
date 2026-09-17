@@ -249,6 +249,18 @@ def validate_static(m: Manifest) -> list[str]:
     except (NotImplementedError, ValueError) as e:
         problems.append(str(e))
 
+    # -- the iteration delivery path (04 section 7). `wheel` is modelled and read by NOTHING, so
+    # without this a manifest names a wheel, the run silently uses whatever is installed instead,
+    # and provenance records a plugin version the author never chose. A silent ignore is the one
+    # failure mode this repo refuses to ship; every other unbuilt feature says so by name.
+    if m.plugins is not None and m.plugins.wheel:
+        problems.append(
+            f"plugins.wheel {m.plugins.wheel!r}: fetching a plugin wheel at run time is not built "
+            "(04 section 7). Plugins resolve from entry points in the INSTALLED environment, so "
+            "naming a wheel here changes nothing about which code runs. Until the iteration path "
+            "exists, deliver the plugin in the image: a path dependency under `plugins/`, or a "
+            "built wheel in `plugins/wheels/`")
+
     # -- render names layers and their classes (07 section 3, 09 section 5)
     delivered = _delivered_names(m, problems, reducer)
     for band, r in m.outputs.render.items():
