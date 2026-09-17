@@ -18,6 +18,17 @@ from stratum.types import ClassTable
 CLASSES_NAME = "classes.json"
 
 
+def layer_classes_name(layer: str) -> str:
+    """`classes.{layer}.json` - the sidecar for one categorical layer's own table.
+
+    A product with several categorical layers that lump the SAME raw table differently has no
+    single product class table, so it publishes one per layer instead of one per product
+    ([13 section 3](../../docs/specs/13-snapshot-schema.md)). `classes.json` is still written
+    when every categorical layer shares one table, which is the common case and what a reader
+    that predates this looks for."""
+    return f"classes.{layer}.json"
+
+
 def legend_record(legend: Legend) -> dict[str, Any]:
     """The JSON shape: {"kind", "entries": [...], "note"?}."""
     doc: dict[str, Any] = {"kind": legend.kind, "entries": [dict(e) for e in legend.entries]}
@@ -50,9 +61,9 @@ def class_table_record(table: ClassTable) -> dict[str, Any]:
             "entries": table.entries.to_pylist()}
 
 
-def write_classes(out_dir: Path, class_table: ClassTable) -> Path:
-    """Write `classes.json` - the product publishes its own class table (13 section 3 rule 3)."""
-    path = Path(out_dir) / CLASSES_NAME
+def write_classes(out_dir: Path, class_table: ClassTable, *, layer: str | None = None) -> Path:
+    """Write the class-table sidecar: `classes.json`, or `classes.{layer}.json` with `layer`."""
+    path = Path(out_dir) / (CLASSES_NAME if layer is None else layer_classes_name(layer))
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(class_table_record(class_table), indent=2, default=str) + "\n")
     return path

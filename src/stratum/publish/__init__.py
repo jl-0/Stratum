@@ -42,6 +42,8 @@ from stratum.publish.mappers import (
 from stratum.publish.period import (
     Published,
     period_dirname,
+    band_class_tables,
+    layer_class_tables,
     product_class_table,
     product_dir,
     publish_period,
@@ -84,7 +86,7 @@ __all__ = [
     "legend_record",
     "palette_color",
     "period_dirname",
-    "product_class_table",
+    "band_class_tables", "layer_class_tables", "product_class_table",
     "product_dir",
     "publish_period",
     "read_band",

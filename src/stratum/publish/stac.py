@@ -99,7 +99,12 @@ def build_stac_item(*, run_id: str, manifest_hash: str, tile: TileRef, period: E
                     data_paths: Mapping[str, Path] | None = None,
                     images: Mapping[str, Path] | None = None,
                     legends: Mapping[str, Path] | None = None,
-                    classes_path: Path | None = None, out_dir: Path | None = None,
+                    class_tables: Mapping[str, ClassTable] | None = None,
+                    class_tables_by_layer: Mapping[str, ClassTable] | None = None,
+                    colors_by_band: Mapping[str, Mapping[str, Sequence[int]]] | None = None,
+                    classes_path: Path | None = None,
+                    classes_paths: Mapping[str, Path] | None = None,
+                    out_dir: Path | None = None,
                     run_dir: Path | None = None, collection_href: str = "../../collection.json",
                     extra_properties: Mapping[str, Any] | None = None,
                     fmt: str = "cog") -> dict[str, Any]:
@@ -107,7 +112,15 @@ def build_stac_item(*, run_id: str, manifest_hash: str, tile: TileRef, period: E
     `run_dir` given, links to `provenance.json` and `index.parquet` are relative paths too.
 
     `fmt` decides the raster media type, so the item never claims `profile=cloud-optimized` for
-    a file written as a plain GeoTIFF (07 section 7)."""
+    a file written as a plain GeoTIFF (07 section 7).
+
+    `class_tables`/`colors_by_band` override `class_table`/`colors` per BAND (so `L` and
+    `L_runner_up` both resolve), `class_tables_by_layer` is the same map keyed by LAYER and is
+    what `stratum:class_tables` reports, and `classes_paths`
+    names one sidecar per layer. That is the several-enumerations case: `classification:classes`
+    is then per asset rather than product-wide, `stratum:class_tables` maps layer to fingerprint,
+    and `stratum:class_table_fingerprint` is written only when one table covers everything - it
+    would otherwise name one enumeration and imply it described all of them."""
     out_dir = Path(out_dir) if out_dir is not None else None
     geometry, bbox = tile_geometry(tile)
     crs = CRS.from_user_input(tile.grid.crs)
@@ -127,8 +140,17 @@ def build_stac_item(*, run_id: str, manifest_hash: str, tile: TileRef, period: E
     }
     if crs.to_epsg() is None:
         props["proj:wkt2"] = crs.to_wkt()
+    tables_by_layer = dict(class_tables or {})
+    prints = {t.fingerprint() for t in tables_by_layer.values()}
     if class_table is not None:
-        props["stratum:class_table_fingerprint"] = class_table.fingerprint()
+        prints.add(class_table.fingerprint())
+    if len(prints) == 1:
+        one = class_table if class_table is not None else next(iter(tables_by_layer.values()))
+        props["stratum:class_table_fingerprint"] = one.fingerprint()
+    reported = dict(class_tables_by_layer or {})
+    if reported:
+        props["stratum:class_tables"] = {k: v.fingerprint()
+                                         for k, v in sorted(reported.items())}
     props.update(dict(extra_properties or {}))
 
     def href(p: Path | None, default: str) -> str:
@@ -143,8 +165,10 @@ def build_stac_item(*, run_id: str, manifest_hash: str, tile: TileRef, period: E
             "type": media_type(fmt), "title": spec.name, "description": spec.description,
             "roles": ["data"], "raster:bands": raster_bands(spec),
         }
-        if is_categorical(spec) and class_table is not None:
-            asset["classification:classes"] = classification_classes(class_table, colors)
+        table = tables_by_layer.get(spec.name, class_table)
+        if is_categorical(spec) and table is not None:
+            asset["classification:classes"] = classification_classes(
+                table, (colors_by_band or {}).get(spec.name, colors))
         assets[spec.name] = asset
     for name, p in (images or {}).items():
         assets[f"{name}_rgba"] = {"href": href(p, f"./{name}_rgba.tif"), "type": media_type(fmt),
@@ -153,6 +177,11 @@ def build_stac_item(*, run_id: str, manifest_hash: str, tile: TileRef, period: E
         assets[f"{name}_legend"] = {"href": href(p, f"./{name}_legend.json"),
                                     "type": JSON_MEDIA_TYPE, "title": f"{name} legend",
                                     "roles": ["metadata", "legend"]}
+    if classes_paths:
+        for layer, p in sorted(classes_paths.items()):
+            assets[f"classes_{layer}"] = {
+                "href": href(p, f"./classes.{layer}.json"), "type": JSON_MEDIA_TYPE,
+                "title": f"{layer} class table", "roles": ["metadata"]}
     if classes_path is not None or class_table is not None:
         assets["classes"] = {"href": href(classes_path, "./classes.json"), "type": JSON_MEDIA_TYPE,
                              "title": "product class table", "roles": ["metadata"]}

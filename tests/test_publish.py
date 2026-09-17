@@ -18,6 +18,9 @@ import rasterio
 
 from stratum import __version__
 from stratum.publish import (
+    band_class_tables,
+    layer_class_tables,
+    product_class_table,
     COG_MIN_BLOCKSIZE,
     RAMPS,
     AlphaFrom,
@@ -551,3 +554,44 @@ def test_gtiff_is_accepted_by_the_manifest_and_netcdf_still_refuses():
     check_formats(["gtiff"])
     with pytest.raises(NotImplementedError):
         check_formats(["netcdf"])
+
+
+# --------------------------------------------------- several enumerations over one detection band
+def _two_table_schema() -> SnapshotSchema:
+    """Two categorical layers whose enumerations lump the SAME raw table differently, which is
+    what declaring several groupings over one mineral band produces (13 section 3)."""
+    coarse = ClassTable(key="id", entries=pa.table({"id": [0, 1], "name": ["none", "iron"]}),
+                        source="enumeration:coarse@1")
+    fine = ClassTable(key="id",
+                      entries=pa.table({"id": [0, 1, 2], "name": ["none", "goethite", "hematite"]}),
+                      source="enumeration:fine@1")
+    agg = Aggregation("vote", {"min_count": 1, "ignore": (), "tie_break": "highest_score"})
+    return SnapshotSchema(name="two", layers=(
+        LayerSpec(name="coarse", kind="categorical", source="m", classes=coarse, aggregate=agg),
+        LayerSpec(name="fine", kind="categorical", source="m", classes=fine, aggregate=agg),
+    ))
+
+
+def test_product_class_table_is_none_when_layers_disagree_and_per_layer_map_is_not():
+    schema = _two_table_schema()
+    assert product_class_table(schema) is None
+    by_layer = layer_class_tables(schema)
+    assert set(by_layer) == {"coarse", "fine"}
+    assert by_layer["coarse"].fingerprint() != by_layer["fine"].fingerprint()
+    # both id bands of each layer resolve against that layer's table; `_agreement` is a fraction
+    bands = band_class_tables(schema)
+    assert set(bands) == {"coarse", "coarse_runner_up", "fine", "fine_runner_up"}
+    assert bands["coarse_runner_up"] is by_layer["coarse"]
+    assert bands["fine_runner_up"] is by_layer["fine"]
+
+
+def test_product_class_table_still_collapses_when_every_layer_shares_one():
+    one = class_table()
+    agg = Aggregation("vote", {"min_count": 1, "ignore": (), "tie_break": "highest_score"})
+    schema = SnapshotSchema(name="one", layers=(
+        LayerSpec(name="a", kind="categorical", source="m", classes=one, aggregate=agg),
+        LayerSpec(name="b", kind="categorical", source="m", classes=one, aggregate=agg),
+    ))
+    assert product_class_table(schema) is one
+    # ... and then publish writes the product-wide sidecar, not per-layer ones
+    assert band_class_tables(schema)["a"] is one

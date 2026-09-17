@@ -30,6 +30,7 @@ class Published:
     images: dict[str, Path] = field(default_factory=dict)
     legends: dict[str, Path] = field(default_factory=dict)
     classes: Path | None = None
+    class_files: dict[str, Path] = field(default_factory=dict)
     item: Path | None = None
 
 
@@ -43,21 +44,45 @@ def product_dir(products_dir: Path, tile: TileRef, period: Epoch) -> Path:
     return Path(products_dir) / f"{tile.tx}_{tile.ty}" / period_dirname(period)
 
 
+def layer_class_tables(schema: SnapshotSchema) -> dict[str, ClassTable]:
+    """Layer name -> its own product class table, for every categorical layer that has one.
+
+    A layer's table comes from its enumeration, so two layers over the SAME raw table that lump
+    it differently have different product tables - which is the whole point of declaring several
+    groupings over one detection band (13 section 3). This is the authoritative per-layer map;
+    `product_class_table` is the special case where it collapses to one.
+    """
+    return {layer.name: layer.classes for layer in schema.layers
+            if layer.kind == "categorical" and layer.classes is not None}
+
+
+def band_class_tables(schema: SnapshotSchema) -> dict[str, ClassTable]:
+    """Delivered BAND name -> the class table it is read against.
+
+    A categorical layer L delivers two bands holding product ids, `L` and `L_runner_up`
+    (`L_agreement` is a fraction), so both map to L's table. Keyed by band because that is what
+    `write_data_cogs` and the STAC asset loop iterate over.
+    """
+    out: dict[str, ClassTable] = {}
+    for name, table in layer_class_tables(schema).items():
+        out[name] = table
+        out[f"{name}_runner_up"] = table
+    return out
+
+
 def product_class_table(schema: SnapshotSchema) -> ClassTable | None:
-    """The product's class table: the one every categorical layer shares. None when the schema
-    has no categorical layer with a table; NotImplementedError when layers carry different
-    tables - one product, one table, in the first slice (13 section 3)."""
-    tables = [(layer.name, layer.classes) for layer in schema.layers
-              if layer.kind == "categorical" and layer.classes is not None]
+    """The single class table every categorical layer shares, or None when there is not one.
+
+    None means two different things and the caller must handle both: a schema with no categorical
+    layer at all, and a schema whose categorical layers carry DIFFERENT tables. In the second
+    case the product publishes one sidecar per layer instead of one per product - see
+    `layer_class_tables`. Before 2026-09-17 this raised NotImplementedError on the second case.
+    """
+    tables = list(layer_class_tables(schema).values())
     if not tables:
         return None
-    fps = {t.fingerprint() for _, t in tables}
-    if len(fps) > 1:
-        raise NotImplementedError("categorical layers "
-                                  f"{[n for n, _ in tables]} carry different class tables; one "
-                                  "product class table per product in the first slice "
-                                  "(13 section 3 rule 3)")
-    return tables[0][1]
+    fps = {t.fingerprint() for t in tables}
+    return tables[0] if len(fps) == 1 else None
 
 
 def render_colors(outputs: Mapping[str, Any], layer: str) -> Mapping[str, Sequence[int]] | None:
@@ -89,28 +114,50 @@ def publish_period(out_dir: Path, product_dirs: Sequence[tuple[BlockRef, Path]],
     bands = product_bands(schema, reducer, band_counts=band_counts)
     mappers = build_mappers(outputs, schema)              # validate before any IO
     stack = stitch(product_dirs, tile, bands)
+
+    # One product table when every categorical layer shares one - the common case, and what
+    # `classes.json` is. Several enumerations over the same detections means there is no single
+    # product table, so each categorical BAND carries its own (13 section 3).
     class_table = product_class_table(schema)
-    cat_layers = [layer.name for layer in schema.layers if layer.kind == "categorical"]
-    colors = render_colors(outputs, cat_layers[0]) if cat_layers else None
+    by_layer = layer_class_tables(schema)
+    per_band = band_class_tables(schema) if class_table is None else {}
+    colors_by_band: dict[str, Any] = {}
+    if class_table is None:
+        for layer in by_layer:
+            cols = render_colors(outputs, layer)
+            if cols is not None:
+                colors_by_band[layer] = cols
+                colors_by_band[f"{layer}_runner_up"] = cols
+        colors = None
+    else:
+        cat_layers = list(by_layer)
+        colors = render_colors(outputs, cat_layers[0]) if cat_layers else None
 
     all_tags = {"run_id": run_id, "manifest_hash": manifest_hash, "schema": schema.name,
                 "period_start": period.start.isoformat(), "period_end": period.end.isoformat(),
                 **dict(tags or {})}
     data_paths = write_data_cogs(out_dir, stack, tile, class_table=class_table, tags=all_tags,
-                                 fmt=fmt,
-                                 colors=colors)
+                                 fmt=fmt, colors=colors,
+                                 class_tables=per_band or None,
+                                 colors_by_band=colors_by_band or None)
     data = {spec.name: p for spec, p in zip(stack.specs, data_paths, strict=True)}
 
     images = write_images(out_dir, {n: m.render(stack) for n, m in mappers.items()}, tile,
                           tags=all_tags, fmt=fmt)
     legends = {n: write_legend(out_dir, n, m.legend()) for n, m in mappers.items()}
     classes = write_classes(out_dir, class_table) if class_table is not None else None
+    class_files = ({} if class_table is not None
+                   else {n: write_classes(out_dir, tb, layer=n) for n, tb in by_layer.items()})
 
     item = None
     if outputs.get("stac", True):
         item = write_stac_item(out_dir, run_id=run_id, manifest_hash=manifest_hash, tile=tile,
                                period=period, stack=stack, class_table=class_table, colors=colors,
+                               class_tables=per_band or None,
+                               class_tables_by_layer=(by_layer if class_table is None else None),
+                               colors_by_band=colors_by_band or None,
                                data_paths=data, images=images, legends=legends,
-                               classes_path=classes, run_dir=run_dir, fmt=fmt)
+                               classes_path=classes, classes_paths=class_files or None,
+                               run_dir=run_dir, fmt=fmt)
     return Published(out_dir=out_dir, data=data, images=images, legends=legends, classes=classes,
-                     item=item)
+                     class_files=class_files, item=item)

@@ -164,6 +164,8 @@ def write_geotiff(path: Path, data: np.ndarray, spec: BandSpec, *, transform: Af
 def write_data_cogs(out_dir: Path, stack: BandStack, tile: TileRef, *,
                     class_table: ClassTable | None, tags: Mapping[str, Any],
                     colors: Mapping[str, Sequence[int]] | None = None,
+                    class_tables: Mapping[str, ClassTable] | None = None,
+                    colors_by_band: Mapping[str, Mapping[str, Sequence[int]]] | None = None,
                     fmt: str = "cog") -> list[Path]:
     """Write every band of `stack` as `{band}.tif` under `out_dir` on the tile's grid.
 
@@ -174,19 +176,33 @@ def write_data_cogs(out_dir: Path, stack: BandStack, tile: TileRef, *,
     `colors` leaves out are black in the table - the image, not the data COG, is where
     `on_unmapped` is enforced - and so is `none`: a TIFF colour table carries no alpha (GDAL
     reads every entry back opaque), so the data COG's only transparency is its nodata value.
+    `class_tables` and `colors_by_band` override `class_table`/`colors` FOR ONE BAND, keyed by
+    band name. A product whose categorical layers lump the same raw table differently has no
+    single product table, so each categorical band gets its own colour table; a band neither
+    names falls back to the product-wide pair, which is the single-table case unchanged.
+
     Returns the paths in band order.
     """
     _require_tags(tags)
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
-    colormap = None
-    if class_table is not None:
-        colormap = gdal_colormap(resolve_class_colors(class_table, colors,
-                                                      on_unmapped="transparent"))
+    cache: dict[tuple[int, int], Mapping[int, Any]] = {}
+
+    def colormap_for(name: str) -> Mapping[int, Any] | None:
+        table = (class_tables or {}).get(name, class_table)
+        if table is None:
+            return None
+        cols = (colors_by_band or {}).get(name, colors)
+        key = (id(table), id(cols))
+        if key not in cache:
+            cache[key] = gdal_colormap(resolve_class_colors(table, cols,
+                                                            on_unmapped="transparent"))
+        return cache[key]
+
     full_tags = {**tags, "grid_id": tile.grid.id, "tile": f"{tile.tx}_{tile.ty}"}
     paths: list[Path] = []
     for spec in stack.specs:
-        cm = colormap if is_categorical(spec) else None
+        cm = colormap_for(spec.name) if is_categorical(spec) else None
         paths.append(write_geotiff(out_dir / f"{spec.name}.tif", stack[spec.name], spec,
                                    transform=tile.transform, crs=tile.grid.crs, tags=full_tags,
                                    colormap=cm, cog=fmt == "cog"))

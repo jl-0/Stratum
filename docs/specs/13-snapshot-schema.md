@@ -321,6 +321,15 @@ compatibility; it either extends its ancestor or it does not.
    `stratum:class_table_fingerprint` is the **product** `(id, name)` table's. `classes.json`
    links them through its `source` field, but the STAC name suggests the vintage fingerprint.
    Name both, or ship both on the item ([10 §4](10-provenance.md)).
-7. One product, one class table: `product_class_table` refuses a schema whose categorical layers
-   carry different tables. `mineral_1`/`mineral_2` share one enumeration today; a product whose
-   layers do not will need per-layer `classes.json` and colour tables ([07 §2](07-output-mapping.md)).
+7. ~~One product, one class table: `product_class_table` refuses a schema whose categorical
+   layers carry different tables.~~ **Resolved 2026-09-17.** Several groupings over one detection
+   band is the Critical Minerals product shape — *"the only way to do this is to basically flood
+   it and give multiple different groupings available"* — and each grouping is a different
+   enumeration, so there is no single product table. `product_class_table` now returns `None`
+   for that case instead of raising, `layer_class_tables` is the authoritative per-layer map, and
+   publish writes `classes.{layer}.json` per categorical layer with a per-band colour table and a
+   per-asset `classification:classes` ([07 §2](07-output-mapping.md)). `classes.json` and
+   `stratum:class_table_fingerprint` are still written when one table covers every layer, which
+   is the common case; when it does not, `stratum:class_tables` maps layer to fingerprint and the
+   single-table property is omitted rather than naming one enumeration and implying it described
+   all of them.

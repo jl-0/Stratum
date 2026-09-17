@@ -54,6 +54,7 @@ Publish writes both, from the same block, in the same run:
 | **Data** | class indices, counts, agreement, score — as the schema's aggregations deliver them, or a `Reducer` plugin declares. A categorical band embeds a colour table derived from its enumeration | analysis, reprocessing, statistics, restyling |
 | **Image** | RGBA rendering via `OutputMapper` | MMGIS, QGIS, anyone looking at a map |
 | **Legend** | class table or ramp stops | both — makes the image interpretable and the data joinable |
+| **Class table** | `classes.json` when one table covers every categorical layer; `classes.{layer}.json` per layer when they carry different enumerations, with a per-band colour table and a per-asset `classification:classes` ([13 §3](13-snapshot-schema.md)) | analysis, joining a class id to a name |
 
 The legend is authoritative in the STAC item's `classification` extension; the COG's colour table
 and the JSON sidecar are derived from it. That single requirement is what stops us
