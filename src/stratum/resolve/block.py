@@ -234,7 +234,11 @@ def resolve_window(plan: PlanContext, block: BlockRef, epoch: Epoch,
             contributing.append(granule.granule_id)
     for layer in plan.schema.layers:
         if layer.name not in layers:
-            layers[layer.name] = empty_layer(layer, shape)
+            # No observation won this layer anywhere in the block. It still needs a plane, and
+            # the plane still needs the layer's BAND COUNT - a declared subset knows it without
+            # reading anything, and getting it wrong writes an (H, W) plane for a layer whose
+            # other epochs are (H, W, B), which `stack_snapshots` then cannot stack.
+            layers[layer.name] = empty_layer(layer, shape, len(layer.bands) if layer.bands else 1)
     return Resolved(layers={k: v[core] for k, v in layers.items()}, score=best[core],
                     valid=won[core], contributing=contributing)
 

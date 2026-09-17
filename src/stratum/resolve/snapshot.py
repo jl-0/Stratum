@@ -147,12 +147,32 @@ def stack_snapshots(dirs: Sequence[Path | None], epochs: Sequence[Epoch], schema
             raise KeyError(f"snapshot lacks {missing}; written under another schema? "
                            "(11 section 8: one schema per run)")
 
+    def width(layer: LayerSpec) -> int:
+        """The layer's band count across the epochs that have one: the widest.
+
+        An epoch in which NO observation won a multi-band layer can write a narrower plane
+        (`bands: None` makes the width unknowable until something is read), and every value in
+        it is nodata by definition. Widening that is lossless; widening a plane that actually
+        holds data would not be, so `plane` refuses it.
+        """
+        return max((p[layer.name].shape[2] if p[layer.name].ndim == 3 else 1) for p in present)
+
     def plane(s: dict[str, np.ndarray] | None, layer: LayerSpec) -> np.ndarray:
-        if s is not None:
-            return s[layer.name]
-        template = next(p[layer.name] for p in present)
-        bands = template.shape[2] if template.ndim == 3 else 1
-        return empty_layer(layer, shape, bands)
+        want = width(layer)
+        if s is None:
+            return empty_layer(layer, shape, want)
+        arr = s[layer.name]
+        have = arr.shape[2] if arr.ndim == 3 else 1
+        if have == want:
+            return arr
+        fill = empty_layer(layer, shape, 1)
+        if not np.array_equal(arr.reshape(shape + (have,)), np.broadcast_to(
+                fill.reshape(shape + (1,)), shape + (have,)), equal_nan=True):
+            raise ValueError(
+                f"layer {layer.name!r}: an epoch carries {have} band(s) where others carry "
+                f"{want}, and it is not all-nodata, so it cannot be widened. Snapshots were "
+                "written under different schemas (11 section 8: one schema per run)")
+        return empty_layer(layer, shape, want)
 
     layers = {layer.name: np.stack([plane(s, layer) for s in snaps]) for layer in schema.layers}
     valid = np.stack([s[VALID_NAME] if s is not None else np.zeros(shape, dtype=bool)

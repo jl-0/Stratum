@@ -3,6 +3,7 @@ seam-equivalence invariant (12 section 2, 04 sections 3-4, 13 section 3, 01 sect
 from __future__ import annotations
 
 from dataclasses import replace
+from typing import Any
 from datetime import UTC, datetime
 from importlib.metadata import version
 from pathlib import Path
@@ -602,3 +603,57 @@ def test_observation_key_carries_the_remap_and_the_asset_identity(pair_plan: Pla
     assert plan.cache.explain(k1)["class_tables"] == {"mineral": [remap.raw_fingerprint]}
     k2 = resolve_block(item(TILE, EPOCH, 0, 0), other)
     assert k1.path != k2.path and set(plan.cache.diff(k1, k2)) == {"obs_keys"}
+
+
+# ------------------------------------------ a multi-band layer no observation won in some epoch
+def _band_axis_schema() -> tuple[Any, Any]:
+    from stratum.types import Aggregation, LayerSpec, SnapshotSchema
+    layer = LayerSpec(name="stack", kind="continuous", source="geometry", bands=(0, 2, 4),
+                      aggregate=Aggregation("best"), dtype="float32")
+    return layer, SnapshotSchema(name="bandaxis", layers=[layer])
+
+
+def test_a_multiband_layer_stacks_when_one_epoch_had_no_winner(tmp_path: Path) -> None:
+    """The bug this guards: an epoch in which nothing won a multi-band layer used to write an
+    (H, W) plane for a layer whose other epochs are (H, W, B), and `stack_snapshots` then raised
+    'all input arrays must have the same shape' at reduce time - after resolve had succeeded."""
+    from stratum.resolve.snapshot import empty_layer
+    layer, sch = _band_axis_schema()
+    shape = (6, 8)
+    transform = BlockRef(TILE, 0, 0).transform
+    won = np.full((*shape, 3), 1.5, dtype=np.float32)
+    narrow = empty_layer(layer, shape, 1)                 # the narrow plane the bug produced
+    a = write_snapshot(tmp_path / "e1", layers={"stack": won},
+                       score=np.ones(shape, dtype=np.float32),
+                       valid=np.ones(shape, dtype=bool), schema=sch, transform=transform,
+                       crs=GRID.crs)
+    b = write_snapshot(tmp_path / "e2", layers={"stack": narrow},
+                       score=np.full(shape, np.nan, dtype=np.float32),
+                       valid=np.zeros(shape, dtype=bool), schema=sch, transform=transform,
+                       crs=GRID.crs)
+    eps = [Epoch(datetime(2026, 1, 1, tzinfo=UTC), datetime(2026, 2, 1, tzinfo=UTC)),
+           Epoch(datetime(2026, 2, 1, tzinfo=UTC), datetime(2026, 3, 1, tzinfo=UTC))]
+    stack = stack_snapshots([a, b], eps, sch)
+    assert stack["stack"].shape == (2, *shape, 3)
+    assert np.allclose(stack["stack"][0], 1.5)
+    assert np.isnan(stack["stack"][1]).all()              # widened to nodata, losing nothing
+
+
+def test_widening_refuses_a_narrow_plane_that_actually_holds_data(tmp_path: Path) -> None:
+    """Widening is lossless only because the narrow plane is all nodata. One that is not means
+    two schemas were mixed, and that must not be papered over."""
+    layer, sch = _band_axis_schema()
+    shape = (6, 8)
+    transform = BlockRef(TILE, 0, 0).transform
+    a = write_snapshot(tmp_path / "e1", layers={"stack": np.full((*shape, 3), 1.5, np.float32)},
+                       score=np.ones(shape, dtype=np.float32),
+                       valid=np.ones(shape, dtype=bool), schema=sch, transform=transform,
+                       crs=GRID.crs)
+    b = write_snapshot(tmp_path / "e2", layers={"stack": np.full(shape, 7.0, np.float32)},
+                       score=np.ones(shape, dtype=np.float32),
+                       valid=np.ones(shape, dtype=bool), schema=sch, transform=transform,
+                       crs=GRID.crs)
+    eps = [Epoch(datetime(2026, 1, 1, tzinfo=UTC), datetime(2026, 2, 1, tzinfo=UTC)),
+           Epoch(datetime(2026, 2, 1, tzinfo=UTC), datetime(2026, 3, 1, tzinfo=UTC))]
+    with pytest.raises(ValueError, match="cannot be widened"):
+        stack_snapshots([a, b], eps, sch)
