@@ -156,8 +156,10 @@ Established by reading code and data. Do not re-derive; do not assume the opposi
   after it — [`03` §5](docs/specs/03-regrid-glt.md), [`12` §2](docs/specs/12-data-access.md).
 - **Reduction is DECLARED per layer, not named once.** There is no "which reducer" - the built-in
   one executes each layer's `aggregate`. A `Reducer` plugin replaces that vocabulary and is only
-  for what it cannot say; `joint_mineral_vote` is the one shipped, because combining two
-  categorical layers is not expressible as an `aggregate`. A plugin's `outputs` replace the
+  for what it cannot say. Two are shipped: `joint_mineral_vote` (combining two categorical
+  layers) and `spectral_abundance` (band depth x a per-constituent XRD fraction, applied per
+  epoch, with one constituent allowed to reach SEVERAL output classes - which an `Enumeration`
+  refuses, since `classes.py:resolve` raises on a raw key claimed twice). A plugin's `outputs` replace the
   schema-derived bands (the schema still governs what a SNAPSHOT holds), `n_epochs` is appended
   for it, `halo > 0` and aux are refused, and its bands cannot be rendered - `outputs.render`
   names a schema layer.
@@ -168,6 +170,12 @@ Established by reading code and data. Do not re-derive; do not assume the opposi
 - **`CloudCover` is top-level in EMIT UMM-G**, not an `AdditionalAttribute`, and present on every
   L2B MIN granule. One L2B record carries two files, `MIN` and `MINUNCERT`, so a role may name an
   `asset:` within a collection.
+- **A product may publish SEVERAL class tables.** Two categorical layers that lump the same raw
+  table differently have different product tables, so there is no single one:
+  `product_class_table` returns `None` and publish writes `classes.{layer}.json` per layer with a
+  per-band colour table. `classes.json` is still written when one table covers everything. Before
+  2026-09-17 publish raised `NotImplementedError` on the several-table case, which blocked the
+  whole multiple-groupings product shape at the last stage.
 - **Products carry their own class tables; use them.** The L2B granule embeds `/mineral_metadata`
   (294 entries). Read the table from the granule being processed rather than a checked-in CSV — it
   cannot drift from the pixels it describes. Raw values are positional and differ between vintages

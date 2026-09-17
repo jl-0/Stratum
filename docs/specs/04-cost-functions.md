@@ -144,12 +144,18 @@ notice it changing.
 Instrument knowledge belongs in `stratum_emit`, not in user config. Per the science lead at the Mines tag-up
 ([notes](../notes/2026-08-28-mines-tagup.md#2-concrete-instrument-artifacts-to-mask)):
 
-| Mask | Space | Behaviour |
-|---|---|---|
-| `EdgeTrim` | sensor | Drop the outer **7 columns** each side (5 minimum). Every column is a different detector; the outermost are unreliable. |
-| `SlitDust` | sensor | Drop 2–3 columns at cross-track centre. Mostly cleaned up upstream; off by default. |
-| `L2AStandard` | map | Cloud, cirrus, water, spacecraft flags — AMD's `filter-clouds-1-4` semantics |
-| `SoilFraction` | map | Require soil fraction ≥ threshold from the `frcov` role. See §4. |
+The `ref:` column is what a manifest writes; the class is where the code lives. They are
+connected by an entry point in the plugin's `pyproject.toml`, and `stratum plugins list` prints
+the live mapping for the installed environment — which is the authority, since a deployment may
+carry plugins this table does not know about.
+
+| `ref:` | Class | Space | Needs | Behaviour |
+|---|---|---|---|---|
+| `edge_trim` | `EdgeTrim` | sensor | — | Drop the outer **7 columns** each side (5 minimum). Every column is a different detector; the outermost are unreliable. |
+| `slit_dust` | `SlitDust` | sensor | — | Drop 2–3 columns at cross-track centre. Mostly cleaned up upstream; off by default. |
+| `l2a_standard` | `L2AStandard` | map | `mask` role | Cloud, cirrus, water, spacecraft flags — AMD's `filter-clouds-1-4` semantics |
+| `soil_fraction` | `SoilFraction` | map | `frcov` role | Require soil fraction ≥ threshold. See §4. |
+| `landcover` | `Landcover` | map | an **aux** alias | Drop cells whose land cover cannot carry a surface mineral signal — open water, built-up, closed canopy. Classes are named, not numbered; `codes` defaults to ESA WorldCover's and **must** be passed for any other product ([05 §7](05-ancillary-data.md) question 4). |
 
 **No along-track trimming.** EMIT is a push-broom collecting one continuous strip; granule
 boundaries in the along-track direction are a download convenience with no physical meaning, so
@@ -282,6 +288,19 @@ obs.n                     # observation count — 1 when streaming, N when stack
 
 In `stack` mode the same accessors return a leading observation axis: `(N, H, W)`.
 
+### Shipped scorers
+
+Same convention as the masks above: `ref:` is what a manifest writes, the class is where the code
+lives, and `stratum plugins list` is the authority for the installed environment.
+
+| `ref:` | Class | Needs | Picks |
+|---|---|---|---|
+| `min_view_zenith` | `MinViewZenith` | `geometry` | The most nadir look. V002 parity. |
+| `max_band_depth` | `MaxBandDepth` | `mineral_depth` | The deepest absorption feature. A trial scorer, not a product one — it is the wrong bias for a base map, and it exists because a directory of L2B granules with no OBS beside them is the common local case. |
+| `prefer_bare_earth` | `PreferBareEarth` | `frcov`, `solar_zenith` | The best-exposed, best-lit look. **No view-zenith term.** |
+| `bare_earth_nadir` | `BareEarthNadir` | `frcov`, `solar_zenith`, `view_zenith` | The same, plus a nadir term. `nadir_weight: 0` reproduces `prefer_bare_earth`. |
+| `cleanest_nadir` | `CleanestNadir` | `geometry`, **aux** `slope` + `snow` | Nadir-preferring, penalised for steep terrain, rejecting snow. **Cannot run yet**: it calls `aux.raster("snow", date=…)` and `temporal` date-keying is refused ([05 §2](05-ancillary-data.md)). |
+
 ### Worked examples
 
 ```python
@@ -344,6 +363,29 @@ class MaxBandDepth:
 nothing else. It is shipped as `max_band_depth` and is a trial scorer, not a product one: it
 prefers the deeper feature over the more nadir look, which is the wrong bias for a base map.
 
+`BareEarthNadir` (`bare_earth_nadir`) is `PreferBareEarth` with a view-zenith term, because
+`PreferBareEarth` has none at all — it reads `frcov` and `solar_zenith` only, so a further-off-nadir
+look at marginally barer ground wins. **[observed] 2026-09-17**, tile `-235_75`, all of 2025,
+24 granules, `min_soil: 0.65`:
+
+| scorer | winner view zenith | winner solar zenith | group-1 cells classified |
+|---|---|---|---|
+| `min_view_zenith` | mean 6.83° | mean 34.2° | 1,075,203 |
+| `prefer_bare_earth` | mean 8.40°, p95 10.36° | mean 27.9° | 1,075,998 |
+| `bare_earth_nadir` (`nadir_weight: 0.10`) | mean 8.03°, p95 10.29° | mean 27.8° | 1,076,609 |
+
+Ignoring nadir costs **+1.57° mean** against the best available look (p95 +4.77°, and 34 % of
+cells take a >2° worse one) and buys **6.3° of illumination**. Adding the term recovers 0.36° of
+that and drops the >2° fraction to 26 %, at no cost to illumination or coverage. The group-1
+mineral label agrees on **99.4 %** of co-classified cells between `min_view_zenith` and
+`prefer_bare_earth`, and **99.92 %** between `prefer_bare_earth` and `bare_earth_nadir` — so on
+EMIT, whose swath spans only a few degrees of view zenith, this is a look-geometry and
+tile-continuity knob and **not a correctness fix**. That is worth stating plainly, because the
+intuition carried over from wide-swath airborne instruments is the opposite.
+
+`nadir_weight: 0` reproduces `PreferBareEarth` exactly, and `sun_weight + nadir_weight > 1` is
+refused: the tie-breakers may not outrank cover, which is the one thing they must not do.
+
 The two thresholds are deliberate. `hard_floor=0.65` is V002's cutoff, chosen because grain-size
 retrieval "completely falls apart" below it; `min_soil=0.80` is the higher bar recommended for
 mosaicking. Keeping them separate lets the scorer *rank* between 0.65 and 0.80 rather than
@@ -378,8 +420,25 @@ coded**: each layer names its method — `vote`, `median`, `inverse_variance` an
 has no `reducer:` block. Outputs, the raster schema, the STAC item and the `OutputMapper` contract
 are all derived from the schema without running anything.
 
-A `Reducer` plugin is for what the vocabulary cannot say — a joint vote across candidate layers,
-classify-last over per-candidate evidence — and it takes the same input:
+A `Reducer` plugin is for what the vocabulary cannot say. **Two are shipped, and each marks a
+different limit of the vocabulary:**
+
+| plugin | what no `aggregate` entry can say |
+|---|---|
+| `joint_mineral_vote` | combine two CATEGORICAL layers. `conditional_on` conditions a continuous layer on a categorical one, never one categorical on another |
+| `spectral_abundance` | multiply a band depth by a per-constituent fraction **per epoch**, before anything collapses, and let one constituent reach SEVERAL output classes |
+
+The second is also the answer to a limit of `Enumeration`, not just of `aggregate`: an enumeration
+maps one raw class to exactly one product class with no weight — `classes.py:resolve` raises
+`raw key N claimed by both A and B` — so there is nowhere to put a fraction and no way for a
+mixture like `nHematit+fg-Goethit` to contribute 0.10 goethite *and* 0.05 hematite. A reducer can,
+because it sees every epoch's winning class and its depth before the temporal collapse, which is
+what "apply the abundance calculation a priori" means. **[observed] 2026-09-17**, tile `-235_75`:
+466,258 cells carry both goethite and hematite abundance in exactly the 2.0 ratio those two
+fractions imply. The delivered band is an **index**, not a mass fraction — the mass-fraction model
+(mean optical path length, grain size, a quartz/feldspar term) is a further step and is not here.
+
+Both take the same input:
 
 ```python
 class Reducer(Protocol):

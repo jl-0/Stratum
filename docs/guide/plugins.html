@@ -358,20 +358,48 @@ gather discards the source column. Map-space masks run on the block after it. Bo
 resolve; regrid never sees a mask, which is why changing one never rebuilds geometry. Declaring
 the space is how Stratum knows to run yours at the right point.</p>
 
+<h3 id="builtin-scorers">Shipped scorers</h3>
+
+<p>Five, and the choice between them is the whole point of the framework. <code>ref:</code> is
+what you write; <code>stratum plugins list</code> prints what your environment provides.</p>
+
+<div class="tw"><table>
+<thead><tr><th><code>ref:</code></th><th>Needs</th><th>Picks</th></tr></thead>
+<tbody>
+<tr><td><code>min_view_zenith</code></td><td><code>geometry</code></td><td>The most nadir look</td></tr>
+<tr><td><code>max_band_depth</code></td><td><code>mineral_depth</code></td><td>The deepest absorption feature. A trial scorer &mdash; the wrong bias for a base map, but it runs over L2B granules with no OBS beside them.</td></tr>
+<tr><td><code>prefer_bare_earth</code></td><td><code>frcov</code>, <code>solar_zenith</code></td><td>The best-exposed, best-lit look. No view-zenith term.</td></tr>
+<tr><td><code>bare_earth_nadir</code></td><td><code>frcov</code>, <code>solar_zenith</code>, <code>view_zenith</code></td><td>The same, plus a nadir term. <code>nadir_weight: 0</code> reproduces the one above.</td></tr>
+<tr><td><code>cleanest_nadir</code></td><td><code>geometry</code>, aux <code>slope</code> + <code>snow</code></td><td>Nadir-preferring, terrain-penalised, snow-rejecting. <strong>Cannot run yet</strong> &mdash; it needs date-keyed aux, which is refused.</td></tr>
+</tbody>
+</table></div>
+
 <h3 id="builtin-masks">Built-in masks</h3>
 
-<p><code>stratum_emit</code> ships the instrument knowledge so you do not encode it in config:</p>
+<p><code>stratum_emit</code> ships the instrument knowledge so you do not encode it in config.
+The <code>ref:</code> column is what you write in a manifest; the class is where the code lives,
+and an entry point in the plugin&rsquo;s <code>pyproject.toml</code> connects them. Run
+<code>stratum plugins list</code> for the live mapping in your environment, or
+<code>stratum plugins show landcover</code> to resolve one and print its constructor.</p>
 
-<div class="tw">
-<table>
-<thead><tr><th>Mask</th><th>Space</th><th>Does</th></tr></thead>
+<div class="tw"><table>
+<thead><tr><th><code>ref:</code></th><th>Class</th><th>Space</th><th>Needs</th><th>Does</th></tr></thead>
 <tbody>
-<tr><td><code>EdgeTrim</code></td><td>sensor</td><td>Drops the outer 7 columns each side (5 minimum)</td></tr>
-<tr><td><code>SlitDust</code></td><td>sensor</td><td>Drops 2&ndash;3 columns at cross-track centre. Off by default.</td></tr>
-<tr><td><code>L2AStandard</code></td><td>map</td><td>Cloud, cirrus, water and spacecraft flags from the L2A mask</td></tr>
-<tr><td><code>SoilFraction</code></td><td>map</td><td>Requires soil fraction above a threshold, from the <code>frcov</code> role</td></tr>
+<tr><td><code>edge_trim</code></td><td><code>EdgeTrim</code></td><td>sensor</td><td>&mdash;</td><td>Drops the outer 7 columns each side (5 minimum)</td></tr>
+<tr><td><code>slit_dust</code></td><td><code>SlitDust</code></td><td>sensor</td><td>&mdash;</td><td>Drops 2&ndash;3 columns at cross-track centre. Off by default.</td></tr>
+<tr><td><code>l2a_standard</code></td><td><code>L2AStandard</code></td><td>map</td><td><code>mask</code> role</td><td>Cloud, cirrus, water and spacecraft flags from the L2A mask</td></tr>
+<tr><td><code>soil_fraction</code></td><td><code>SoilFraction</code></td><td>map</td><td><code>frcov</code> role</td><td>Requires soil fraction above a threshold</td></tr>
+<tr><td><code>landcover</code></td><td><code>Landcover</code></td><td>map</td><td>an <strong>aux</strong> alias</td><td>Drops cells whose land cover cannot carry a surface mineral signal &mdash; open water, built-up, closed canopy. The only built-in mask that reads ancillary data rather than the granule.</td></tr>
 </tbody>
-</table>
+</table></div>
+
+<div class="warn"><p><strong>A named class is not a number.</strong> <code>landcover</code>
+excludes classes by name &mdash; <code>exclude: [water, built-up]</code> &mdash; and turns those
+names into pixel values with <code>codes</code>, which defaults to ESA WorldCover&rsquo;s
+(<code>water: 80</code>). Point the alias at a different land-cover product and you must pass
+that product&rsquo;s codes, or the mask excludes the wrong classes with no error. The source file
+usually publishes its own legend, but <code>aux.raster()</code> hands a mask a bare array and
+cannot reach it.</p></div>
 </div>
 
 <h2 id="reducer">Reducer</h2>
@@ -434,6 +462,12 @@ wrong:</p>
 result = vote(snaps.schema[<span class="k">"mineral_2"</span>], snaps[<span class="k">"mineral_2"</span>], snaps.valid, snaps.score,
               snaps.valid.sum(axis=0),
               VoteParams(min_count=2, ignore=(<span class="k">"none"</span>,), tie_break=<span class="k">"highest_score"</span>))</code></pre>
+
+<p>Two reducers ship. <code>spectral_abundance</code> marks a different limit: it multiplies a
+band depth by a per-constituent fraction <em>per epoch</em>, before anything collapses, and lets
+one constituent contribute to several output classes at different fractions &mdash; which an
+enumeration cannot do, because it maps one raw class to exactly one product class with no weight.
+Its delivered band is an index, not a mass fraction.</p>
 
 <p>That is what the shipped <code>joint_mineral_vote</code> does: it votes each of EMIT's two
 mineral groups through this kernel and only the <em>combination</em> &mdash; prefer group 2 where it

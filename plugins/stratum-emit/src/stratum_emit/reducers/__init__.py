@@ -2,8 +2,10 @@
 
 A `Reducer` plugin is only for what the schema's aggregation vocabulary cannot say. Everything
 the vocabulary covers - vote, median, inverse_variance, the rest of 13 section 4 - is declared
-per layer in `aggregate` and needs no code, so there is exactly one reducer here and it earns
-its place by combining two categorical layers, which no `aggregate` entry can do.
+per layer in `aggregate` and needs no code, so there are exactly two reducers here and each
+earns its place: `JointMineralVote` combines two categorical layers, and `SpectralAbundance`
+multiplies a band depth by a per-constituent fraction and lets one constituent reach several
+output classes. Neither an `aggregate` entry nor an `Enumeration` can express either.
 """
 from __future__ import annotations
 
@@ -13,6 +15,7 @@ import numpy as np
 
 from stratum.reduce import CATEGORICAL_NODATA, VoteParams, vote
 from stratum.types import BandSpec, SnapshotStack
+from stratum_emit.reducers.abundance import SpectralAbundance
 
 
 class JointMineralVote:
@@ -121,4 +124,4 @@ class JointMineralVote:
                 "n_epochs": n_epochs.astype(np.uint16)}
 
 
-__all__ = ["JointMineralVote"]
+__all__ = ["JointMineralVote", "SpectralAbundance"]

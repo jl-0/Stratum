@@ -344,3 +344,157 @@ def test_joint_is_registered_and_resolvable_by_name() -> None:
 
     from stratum.plugins import resolve
     assert resolve("reducer", "joint_mineral_vote") is JointMineralVote
+
+
+# ------------------------------------------------------------------------ SpectralAbundance
+def _abundance_stack(ids, depth, valid=None):
+    """A SnapshotStack over one categorical layer and its depth, with a 4-class raw table."""
+    import numpy as np
+    import pyarrow as pa
+    from stratum.types import (Aggregation, ClassTable, LayerSpec, SnapshotSchema,
+                               SnapshotStack)
+    table = ClassTable(key="id", entries=pa.table(
+        {"id": [0, 1, 2, 3], "name": ["none", "Goethite WS222", "Hematite GDS27",
+                                      "nHematit+fg-Goethit"]}),
+        source="enumeration:source:test@1")
+    schema = SnapshotSchema(name="ab", layers=[
+        LayerSpec(name="m", kind="categorical", source="m", classes=table,
+                  aggregate=Aggregation("vote"), dtype="uint16"),
+        LayerSpec(name="d", kind="continuous", source="d", aggregate=Aggregation("median"),
+                  dtype="float32")])
+    ids = np.asarray(ids, dtype=np.uint16)
+    depth = np.asarray(depth, dtype=np.float32)
+    valid = np.ones(ids.shape, bool) if valid is None else np.asarray(valid, bool)
+    return SnapshotStack(schema=schema, epochs=[None] * ids.shape[0],
+                         layers={"m": ids, "d": depth}, valid=valid,
+                         score=np.zeros(ids.shape, np.float32))
+
+
+WEIGHTS = {"Goethite WS222": {"goethite": 1.0},
+           "Hematite GDS27": {"hematite": 1.0},
+           "nHematit+fg-Goethit": {"goethite": 0.10, "hematite": 0.05}}
+
+
+def test_one_constituent_reaches_two_output_classes():
+    """The thing an Enumeration refuses: `classes.py:resolve` raises 'raw key N claimed by both'.
+    A reducer can, and the fractions differ per class."""
+    import numpy as np
+    from stratum_emit.reducers import SpectralAbundance
+
+    r = SpectralAbundance(mineral="m", depth="d", classes=["goethite", "hematite"],
+                          weights=WEIGHTS, min_epochs=1)
+    # two epochs, both won by the shared constituent (id 3), depth 0.40
+    snaps = _abundance_stack(np.full((2, 1, 1), 3), np.full((2, 1, 1), 0.40))
+    out = r.reduce(snaps, None)
+    assert out["abundance_goethite"][0, 0] == pytest.approx(0.040)     # 0.40 x 0.10
+    assert out["abundance_hematite"][0, 0] == pytest.approx(0.020)     # 0.40 x 0.05
+    assert out["abundance_total"][0, 0] == pytest.approx(0.060)
+    assert out["abundance_goethite_n"][0, 0] == 2
+
+
+def test_the_multiply_happens_per_epoch_not_on_the_aggregate():
+    """"Apply the mineral abundance calculations a priori." Two epochs whose winners have
+    DIFFERENT fractions must not be averaged before the multiply - that would use one epoch's
+    fraction on the other's depth."""
+    import numpy as np
+    from stratum_emit.reducers import SpectralAbundance
+
+    r = SpectralAbundance(mineral="m", depth="d", classes=["goethite"], weights=WEIGHTS,
+                          min_epochs=1, method="mean")
+    ids = np.array([[[1]], [[3]]], dtype=np.uint16)          # pure goethite, then the mixture
+    depth = np.array([[[0.20]], [[0.60]]], dtype=np.float32)
+    out = r.reduce(_abundance_stack(ids, depth), None)
+    # per epoch: 0.20 x 1.0 = 0.20, then 0.60 x 0.10 = 0.06 -> mean 0.13
+    assert out["abundance_goethite"][0, 0] == pytest.approx(0.13)
+    # the wrong answer, had it aggregated first: mean depth 0.40 x either fraction
+    assert out["abundance_goethite"][0, 0] != pytest.approx(0.40)
+    assert out["abundance_goethite"][0, 0] != pytest.approx(0.04)
+
+
+def test_epochs_where_the_class_was_absent_do_not_drag_the_estimate_down():
+    """Averaging in the months a mineral was not detected would scale every abundance by how
+    often the cell was looked at, which is revisit and not geology."""
+    import numpy as np
+    from stratum_emit.reducers import SpectralAbundance
+
+    r = SpectralAbundance(mineral="m", depth="d", classes=["goethite"], weights=WEIGHTS,
+                          min_epochs=1, method="median")
+    ids = np.array([[[1]], [[2]], [[2]]], dtype=np.uint16)   # goethite once, hematite twice
+    depth = np.full((3, 1, 1), 0.30, dtype=np.float32)
+    out = r.reduce(_abundance_stack(ids, depth), None)
+    assert out["abundance_goethite"][0, 0] == pytest.approx(0.30)   # not 0.10
+    assert out["abundance_goethite_n"][0, 0] == 1
+    assert out["n_epochs"][0, 0] == 3
+
+
+def test_min_epochs_withholds_a_cell_seen_too_few_times():
+    import numpy as np
+    from stratum_emit.reducers import SpectralAbundance
+
+    r = SpectralAbundance(mineral="m", depth="d", classes=["goethite"], weights=WEIGHTS,
+                          min_epochs=2)
+    out = r.reduce(_abundance_stack(np.full((1, 1, 1), 1), np.full((1, 1, 1), 0.3)), None)
+    assert np.isnan(out["abundance_goethite"][0, 0])
+    assert np.isnan(out["abundance_total"][0, 0])
+
+
+def test_a_declared_class_no_constituent_reaches_still_ships_as_a_band():
+    import numpy as np
+    from stratum_emit.reducers import SpectralAbundance
+
+    r = SpectralAbundance(mineral="m", depth="d", classes=["goethite", "jarosite"],
+                          weights=WEIGHTS, min_epochs=1)
+    assert "abundance_jarosite" in {s.name for s in r.outputs}
+    out = r.reduce(_abundance_stack(np.full((1, 1, 1), 1), np.full((1, 1, 1), 0.3)), None)
+    assert np.isnan(out["abundance_jarosite"][0, 0])
+
+
+def test_a_weight_key_that_matches_no_class_is_an_error_not_a_silent_zero():
+    """Almost always a vintage mismatch or a typo, and both look identical in the output."""
+    from stratum_emit.reducers import SpectralAbundance
+    import numpy as np
+
+    r = SpectralAbundance(mineral="m", depth="d", classes=["goethite"],
+                          weights={"Goethite WS222": {"goethite": 1.0},
+                                   "Goethite FROM ANOTHER VINTAGE": {"goethite": 1.0}},
+                          min_epochs=1)
+    with pytest.raises(KeyError, match="different product vintage"):
+        r.reduce(_abundance_stack(np.full((1, 1, 1), 1), np.full((1, 1, 1), 0.3)), None)
+
+
+def test_spectral_abundance_refuses_configuration_that_cannot_mean_anything():
+    from stratum_emit.reducers import SpectralAbundance
+
+    with pytest.raises(ValueError, match="not one of"):
+        SpectralAbundance(mineral="m", depth="d", classes=["a"], weights={}, method="best")
+    with pytest.raises(ValueError, match="min_epochs"):
+        SpectralAbundance(mineral="m", depth="d", classes=["a"], weights={}, min_epochs=0)
+    with pytest.raises(ValueError, match="at least one output class"):
+        SpectralAbundance(mineral="m", depth="d", classes=[], weights={})
+    with pytest.raises(ValueError, match="duplicate output class"):
+        SpectralAbundance(mineral="m", depth="d", classes=["a", "a"], weights={})
+    with pytest.raises(ValueError, match="outside"):
+        SpectralAbundance(mineral="m", depth="d", classes=["a"], weights={"X": {"a": 1.4}})
+
+
+def test_weights_may_name_classes_this_run_does_not_deliver():
+    """One weights table for the whole EMIT-10 serving a run that delivers two of them is the
+    expected pattern; refusing it would force a weights file per run."""
+    import numpy as np
+    from stratum_emit.reducers import SpectralAbundance
+
+    r = SpectralAbundance(mineral="m", depth="d", classes=["goethite"], weights=WEIGHTS,
+                          min_epochs=1)
+    assert {s.name for s in r.outputs} >= {"abundance_goethite", "abundance_goethite_n"}
+    assert not any(s.name.startswith("abundance_hematite") for s in r.outputs)
+    out = r.reduce(_abundance_stack(np.full((1, 1, 1), 3), np.full((1, 1, 1), 0.40)), None)
+    assert out["abundance_goethite"][0, 0] == pytest.approx(0.040)
+
+
+def test_spectral_abundance_needs_the_layers_it_names():
+    from stratum_emit.reducers import SpectralAbundance
+    import numpy as np
+
+    r = SpectralAbundance(mineral="nope", depth="d", classes=["goethite"], weights=WEIGHTS)
+    with pytest.raises(KeyError, match="does not declare"):
+        r.reduce(_abundance_stack(np.full((1, 1, 1), 1), np.full((1, 1, 1), 0.3)), None)
