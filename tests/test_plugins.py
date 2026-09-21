@@ -143,7 +143,6 @@ class _Aux:
 
 
 def test_landcover_excludes_by_name_using_the_default_worldcover_codes():
-    import numpy as np
     from stratum_emit.masks import Landcover
 
     m = Landcover(exclude=("water", "built-up"))
@@ -183,7 +182,6 @@ def test_landcover_refuses_a_class_its_codes_do_not_name():
 
 
 def test_landcover_nodata_is_kept_or_rejected_but_never_a_class():
-    import numpy as np
     from stratum_emit.masks import Landcover
 
     cover = _Aux([[0, 80, 60]])

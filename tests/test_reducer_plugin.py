@@ -351,8 +351,8 @@ def _abundance_stack(ids, depth, valid=None):
     """A SnapshotStack over one categorical layer and its depth, with a 4-class raw table."""
     import numpy as np
     import pyarrow as pa
-    from stratum.types import (Aggregation, ClassTable, LayerSpec, SnapshotSchema,
-                               SnapshotStack)
+
+    from stratum.types import Aggregation, ClassTable, LayerSpec, SnapshotSchema, SnapshotStack
     table = ClassTable(key="id", entries=pa.table(
         {"id": [0, 1, 2, 3], "name": ["none", "Goethite WS222", "Hematite GDS27",
                                       "nHematit+fg-Goethit"]}),
@@ -451,8 +451,8 @@ def test_a_declared_class_no_constituent_reaches_still_ships_as_a_band():
 
 def test_a_weight_key_that_matches_no_class_is_an_error_not_a_silent_zero():
     """Almost always a vintage mismatch or a typo, and both look identical in the output."""
-    from stratum_emit.reducers import SpectralAbundance
     import numpy as np
+    from stratum_emit.reducers import SpectralAbundance
 
     r = SpectralAbundance(mineral="m", depth="d", classes=["goethite"],
                           weights={"Goethite WS222": {"goethite": 1.0},
@@ -492,8 +492,8 @@ def test_weights_may_name_classes_this_run_does_not_deliver():
 
 
 def test_spectral_abundance_needs_the_layers_it_names():
-    from stratum_emit.reducers import SpectralAbundance
     import numpy as np
+    from stratum_emit.reducers import SpectralAbundance
 
     r = SpectralAbundance(mineral="nope", depth="d", classes=["goethite"], weights=WEIGHTS)
     with pytest.raises(KeyError, match="does not declare"):
