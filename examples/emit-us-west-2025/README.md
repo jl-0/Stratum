@@ -23,6 +23,13 @@ pixi run stratum validate -m examples/emit-us-west-2025/manifest.yaml           
 pixi run stratum run      -m examples/emit-us-west-2025/manifest-proof.yaml       # one tile, 28 s
 ```
 
+`algorithm.excalidraw` is the whole algorithm on one canvas — the six stages, the four data
+sources, and how scoring and reducing actually decide a cell. Open it at
+[excalidraw.com](https://excalidraw.com) (**Open**, then pick the file) or in the VS Code
+Excalidraw extension. Every box is a hyperlink to the code or the manifest line that implements
+it, pinned to the commit that generated it, because a line number only means something at one
+commit. It is a hand-editable drawing, not a generated artefact: edit it in place.
+
 ---
 
 ## 1. What the tag-up asked for, and what the manifest says
@@ -359,6 +366,7 @@ before anything large downloads.
 |---|---|---|
 | `classes/*.yaml` | **yes** | a categorical layer's `classes: "@ref:classes/….yaml"`, resolved at plan time into `plan.json`'s `context.schema` |
 | `weights/abundance-group1-v1.yaml` | **no** | provenance only. Reducer params are free-form by contract, so there is no `@ref:` for them; the numbers appear **inline** under `reducer.params.weights` and that copy is what hashes and what a worker sees |
+| `algorithm.excalidraw` | **no** | documentation. Drawn from `manifest.yaml` once and then hand-edited, so the drawing is the source of truth and there is no generator to re-run against it |
 
 That asymmetry is worth knowing before you edit a weight: changing `weights/` changes nothing,
 changing the manifest changes the `manifest_hash` and therefore the product directory. Verified —
