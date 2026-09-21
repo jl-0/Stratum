@@ -7,6 +7,8 @@ __pycache__/
 .ruff_cache/
 .DS_Store
 .env
+.env.bak*
+.env.local
 *.tif
 *.tiff
 *.nc
