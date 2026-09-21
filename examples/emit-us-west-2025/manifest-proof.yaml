@@ -34,7 +34,8 @@ aoi:
 time:
   start: 2025-01-01
   end:   2026-01-01
-  epoch: P1M
+  epoch: P1W                      # weekly, as manifest.yaml - see there for why, and
+                                  #   09 section 5 for the dropped 53rd partial week
   deliver: P1Y
 
 inputs:

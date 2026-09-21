@@ -44,7 +44,14 @@ aoi:
 time:
   start: 2025-01-01               # inclusive, UTC
   end:   2026-01-01               # exclusive - one calendar year
-  epoch: P1M                      # the voting unit: one snapshot per calendar month
+  epoch: P1W                      # the voting unit. WEEKLY, not monthly: EMIT's revisit is
+                                  #   clustered, so two looks in one month collapse to ONE vote
+                                  #   under a monthly epoch - the scorer picks the better and the
+                                  #   other is discarded. Measured on the pilot tile, halving the
+                                  #   epoch recovered +16 % of classified area in group 1 and
+                                  #   +22 % in group 2 at the same min_count, so weekly recovers
+                                  #   more again. A year is 52 weeks and a day, so the 53rd
+                                  #   (partial) epoch is dropped and plan says so - 09 section 5.
   deliver: P1Y                    # one product per tile for the year. CALENDAR-ALIGNED and ANNUAL,
                                   #   both settled at the tag-up: "calendar aligned is easy since
                                   #   it's global because seasonal is going to be kind of chaotic".
@@ -228,7 +235,7 @@ snapshot:
       source: mineral_1
       classes: source
       aggregate: {method: vote, min_count: 3, ignore: [none], tie_break: highest_score}
-                                  # 3 agreeing months of a median 6 observed (measured)
+                                  # 3 agreeing WEEKS now, not months
     mineral_2_native:
       kind: categorical
       source: mineral_2

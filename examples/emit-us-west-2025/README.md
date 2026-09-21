@@ -127,8 +127,41 @@ a third of the tiles.
 | Median months observed per tile | 8 of 12 | **6 of 12** |
 | Granule bytes at 45.9 + 112.3 + 49 + 21.4 MB each | 784 GB | **442 GB** |
 
-`min_count: 3` is three agreeing months of a median **six** observed — a real bar, and a workable
-one. (Over full CONUS the same filter leaves a median of five, which is why the cloud threshold is
+### The epoch is the voting unit, and monthly was throwing votes away
+
+EMIT's revisit is **clustered**, not evenly spaced: on the pilot tile the 24 contributing granules
+are 13 distinct overpasses separated by gaps of 3, 7, 10, 11, then 42, 43, 45, 58 and 60 days. A
+monthly epoch collapses every look inside one month to a **single** vote — the scorer picks the
+best and the rest are discarded — so a month with four overpasses votes exactly as loudly as a
+month with one.
+
+Shortening the epoch stops discarding them. Measured on tile `-235_75`, same data, same
+`min_count: 3`:
+
+| | `mineral_1` | `mineral_2` | `iron_oxide` | `alteration` |
+|---|---:|---:|---:|---:|
+| `epoch: P1M` (12) | 1,076,609 | 895,635 | 1,274,309 | 1,260,611 |
+| **`epoch: P1W`** (52) | **1,289,936** | **1,126,650** | **1,463,313** | **1,461,642** |
+| gain | **+19.8 %** | **+25.8 %** | **+14.8 %** | **+15.9 %** |
+
+That costs resolve items 118 → 174 (+47 %) on one tile and nothing at all in product size — the
+bands are identical. So `manifest.yaml` uses `P1W`.
+
+**A year is 52 weeks and a day**, so the 53rd epoch is partial and is dropped rather than allowed
+to vote on 1 day of evidence against everyone else's 7. `stratum plan` says so:
+
+```
+> **Dropped partial epoch(s):** 2025-12-31..2026-01-01 - shorter than `P7D`, so they would
+  have voted on less evidence than the rest. Check `time.end`.
+```
+
+Until 21 September 2026 the manifest schema **refused** this outright — `deliver.every P1Y is not
+a whole multiple of epoch P14D` — because `delivery_periods` places windows by counting epochs and
+a year is not a whole number of weeks. It now places them in time when the two are
+incommensurable, provided every period is the same fixed window; a rolling window still needs
+whole epochs to slide by ([09 §5](../../docs/specs/09-run-manifest.md)).
+
+`min_count: 3` is now three agreeing **weeks** of the ~13 observed. (Over full CONUS the same filter leaves a median of five, which is why the cloud threshold is
 worth revisiting at continental scope and not here.) Raising `max_cloud_fraction` to 0.8 would give
 2,562 granules and a median of 7 months, at about 30 % more compute.
 
