@@ -19,8 +19,11 @@ leak the credential (12 section 4).
 """
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import os
+import shutil
+import stat
 import threading
 import time
 from collections.abc import Callable, Iterable, Sequence
@@ -48,6 +51,25 @@ DEFAULT_TIMEOUT: tuple[float, float] = (30.0, 300.0)
 _AUTH_STATUSES = (401, 403)
 #: Transient statuses worth a bounded retry with backoff (08 section 4): rate limit, gateway.
 RETRY_STATUSES = (429, 502, 503, 504)
+#: The asset cache is the only thing on the scratch volume that grows without bound, and on a
+#: Lambda it shares a 10 GB `/tmp` with the storage mirror. 109 MB of OBS per regrid item fills
+#: that in ~91 items, after which every later item in the same warm execution environment fails
+#: with ENOSPC - which is a deterministic crash, not a capacity accident (12 section 4).
+#:
+#: So the cache is bounded and evicts least-recently-used. The mirror is deliberately NOT
+#: evicted: it holds `plan.json` and the work lists a worker is reading, and it grows ~3 MB per
+#: item against the asset cache's ~109 MB, so it is neither safe to prune nor worth pruning.
+SCRATCH_BUDGET_ENV = "STRATUM_ASSET_CACHE_BUDGET_BYTES"
+#: Fraction of the cache volume the assets may occupy when the budget is not set explicitly.
+#: Leaves room for the mirror, the temp files of an in-flight download, and the runtime itself.
+DEFAULT_BUDGET_FRACTION = 0.55
+#: Reserved before a stage-in whose size is not known yet. EMIT's largest indexed asset is the
+#: 109 MB L1B OBS; this covers one of those plus a companion and headroom.
+DEFAULT_RESERVE_BYTES = 512 * 1024 * 1024
+#: An entry younger than this is never evicted, so a file another thread just opened is not
+#: pulled out from under it. `prefetch` is the only multi-threaded reader and it only writes.
+EVICT_GRACE_SECONDS = 60.0
+
 #: Retries after the first attempt, and the base of the exponential backoff in seconds.
 DEFAULT_RETRIES = 3
 DEFAULT_BACKOFF = 1.0
@@ -55,6 +77,83 @@ DEFAULT_BACKOFF = 1.0
 PREFETCH_WORKERS = 8
 #: Hex-digest lengths that identify a bare (unprefixed) checksum.
 _BARE_HEX_ALGOS = {128: "sha512", 64: "sha256"}
+
+
+def cache_budget(cache: Path) -> int:
+    """Bytes the asset cache may occupy: `$STRATUM_ASSET_CACHE_BUDGET_BYTES`, else
+    `DEFAULT_BUDGET_FRACTION` of the volume the cache sits on.
+
+    Derived from the VOLUME rather than hard-coded, so the same default is sensible on a 10 GB
+    Lambda `/tmp` and on a workstation. `0` disables eviction, which is the right answer for a
+    machine whose disk is larger than the archive slice a run touches.
+    """
+    override = os.environ.get(SCRATCH_BUDGET_ENV)
+    if override is not None and override.strip():
+        return max(0, int(override))
+    try:
+        total = shutil.disk_usage(cache if cache.is_dir() else cache.parent).total
+    except OSError:
+        return 0
+    return int(total * DEFAULT_BUDGET_FRACTION)
+
+
+def _entries(cache: Path) -> list[tuple[float, int, Path]]:
+    """`(atime, size, path)` for every complete file in the cache, oldest access first.
+
+    `.part-*` files are in-flight downloads and are never candidates. Access time is what makes
+    this an LRU rather than a FIFO: a granule read by four regrid items - one per tile it
+    touches - keeps being refreshed and stays resident, while one the run has moved past ages
+    out. `open()` touches a hit for exactly this reason.
+    """
+    out: list[tuple[float, int, Path]] = []
+    for path in cache.rglob("*"):
+        if ".part-" in path.name:
+            continue
+        try:
+            st = path.stat()
+        except OSError:
+            continue
+        if not stat.S_ISREG(st.st_mode):
+            continue
+        out.append((st.st_atime, st.st_size, path))
+    out.sort(key=lambda e: e[0])
+    return out
+
+
+def ensure_room(cache: Path, need: int = DEFAULT_RESERVE_BYTES, *, budget: int | None = None,
+                grace: float = EVICT_GRACE_SECONDS) -> int:
+    """Evict least-recently-used assets until `need` bytes fit inside the budget. Returns the
+    bytes freed.
+
+    A verbatim copy of an upstream granule is the one artifact it is always safe to discard:
+    re-staging it costs a download and nothing else, whereas everything derived from it - the
+    GLT, the masked observation, the ortho warp - is content-addressed in the storage root and
+    survives ([06 section 2](../../docs/specs/06-caching.md)). Evicting is therefore a bandwidth
+    trade, never a correctness one.
+
+    Budget `0` disables eviction. An entry younger than `grace` is skipped rather than evicted,
+    and eviction stops when nothing older remains - so a cache genuinely full of hot files is
+    left alone and the caller is allowed to fail on ENOSPC rather than thrash.
+    """
+    budget = cache_budget(cache) if budget is None else budget
+    if budget <= 0 or not cache.is_dir():
+        return 0
+    entries = _entries(cache)
+    used = sum(size for _, size, _ in entries)
+    freed = 0
+    now = time.time()
+    for atime, size, path in entries:
+        if used + need <= budget:
+            break
+        if now - atime < grace:
+            continue
+        try:
+            path.unlink()
+        except OSError:
+            continue
+        used -= size
+        freed += size
+    return freed
 
 
 class AssetStoreError(RuntimeError):
@@ -302,6 +401,7 @@ class AssetStore:
         chunk_size: int = CHUNK_SIZE,
         retries: int = DEFAULT_RETRIES,
         backoff: float = DEFAULT_BACKOFF,
+        reserve: int = DEFAULT_RESERVE_BYTES,
         trusted_hosts: Sequence[str] = TRUSTED_HOSTS,
     ) -> None:
         if asset_cache is None:
@@ -315,6 +415,9 @@ class AssetStore:
         self.chunk_size = int(chunk_size)
         self.retries = max(0, int(retries))
         self.backoff = float(backoff)
+        self.reserve = max(0, int(reserve))
+        #: Bytes eviction reclaimed, reported so a run can say whether it was cache-bound.
+        self.evicted_bytes = 0
         self.trusted_hosts = tuple(trusted_hosts)
         self._auth_obj: Any = None
         self._session: Any = None
@@ -427,10 +530,18 @@ class AssetStore:
         was verified when written, and hashing 100 MB per open would cost more than the fetch
         it saves - the decision recorded in 12 section 4."""
         expected = parse_checksum(checksum)
-        target = asset_cache_path(self._require_cache(uri), uri, checksum, etag)
+        cache = self._require_cache(uri)
+        target = asset_cache_path(cache, uri, checksum, etag)
         if target.is_file():
+            # Mark the access so eviction sees an LRU and not a FIFO: this granule is being
+            # read again, which is the signal that it should outlive one the run has passed.
+            with contextlib.suppress(OSError):
+                os.utime(target)
             return CachedAsset(uri=uri, etag=etag, local=target, checksum=checksum)
         target.parent.mkdir(parents=True, exist_ok=True)
+        freed = ensure_room(cache, self.reserve)
+        if freed:
+            self.evicted_bytes += freed
         # the temp name carries the pid AND the thread id: `prefetch` runs several downloads
         # in one process, and two must never share a partial file
         tmp = target.with_name(f"{target.name}.part-{os.getpid()}-{threading.get_ident()}")

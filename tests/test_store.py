@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import hashlib
 import os
+import shutil
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
@@ -16,6 +17,8 @@ import pytest
 
 from stratum.access.store import (
     ASSET_CACHE_ENV,
+    DEFAULT_BUDGET_FRACTION,
+    SCRATCH_BUDGET_ENV,
     AssetCacheUnconfigured,
     AssetFetchError,
     AssetStore,
@@ -24,6 +27,8 @@ from stratum.access.store import (
     LocalAsset,
     UntrustedScheme,
     asset_cache_path,
+    cache_budget,
+    ensure_room,
     is_trusted_host,
     parse_checksum,
     to_uri,
@@ -541,3 +546,92 @@ def test_prefetch_without_a_callback_is_unchanged(tmp_path, monkeypatch):
                         lambda uri, *, etag=None, checksum=None: (
                             asset_cache_path(tmp_path / "cache", uri, checksum)))
     assert store.prefetch([], workers=2) == 0
+
+
+# ------------------------------------------------------------------- bounded cache, LRU eviction
+def _asset(cache: Path, name: str, size: int, age: float = 0.0) -> Path:
+    p = cache / name[:2] / name
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_bytes(b"\0" * size)
+    when = time.time() - age
+    os.utime(p, (when, when))
+    return p
+
+
+def test_cache_budget_is_a_fraction_of_the_volume_and_overridable(tmp_path, monkeypatch):
+    monkeypatch.delenv(SCRATCH_BUDGET_ENV, raising=False)
+    derived = cache_budget(tmp_path)
+    assert derived > 0
+    assert derived == int(shutil.disk_usage(tmp_path).total * DEFAULT_BUDGET_FRACTION)
+    monkeypatch.setenv(SCRATCH_BUDGET_ENV, "12345")
+    assert cache_budget(tmp_path) == 12345
+    monkeypatch.setenv(SCRATCH_BUDGET_ENV, "0")
+    assert cache_budget(tmp_path) == 0          # eviction off
+
+
+def test_eviction_is_lru_not_fifo(tmp_path):
+    """A granule read once per tile it touches - 4.78 on the western run - must stay resident
+    while one the run has moved past ages out. That is the difference between evicting and
+    re-downloading 109 MB four times."""
+    cache = tmp_path / "assets"
+    old_but_hot = _asset(cache, "aaaa_hot.nc", 100, age=600)
+    coldest = _asset(cache, "bbbb_cold.nc", 100, age=900)
+    middling = _asset(cache, "cccc_mid.nc", 100, age=700)
+    os.utime(old_but_hot)                        # just read again -> newest access
+    # budget fits two of the three, so exactly one must go: the least recently ACCESSED
+    freed = ensure_room(cache, need=100, budget=300, grace=0.0)
+    assert freed == 100
+    assert not coldest.exists(), "the least recently accessed must go first"
+    assert middling.exists() and old_but_hot.exists()
+
+
+def test_eviction_never_touches_an_in_flight_download_or_a_fresh_entry(tmp_path):
+    cache = tmp_path / "assets"
+    part = _asset(cache, "dddd_x.nc.part-123-456", 500, age=900)
+    fresh = _asset(cache, "eeee_fresh.nc", 500, age=1.0)
+    ensure_room(cache, need=10_000, budget=1, grace=60.0)
+    assert part.exists(), ".part- files are in-flight downloads, never candidates"
+    assert fresh.exists(), "an entry younger than the grace period may still be open"
+
+
+def test_eviction_stops_rather_than_thrashing_a_cache_of_hot_files(tmp_path):
+    """If nothing is older than the grace period the caller is allowed to fail on ENOSPC.
+    Evicting a file another worker is mid-read would turn a capacity problem into a corrupt
+    read, which is strictly worse."""
+    cache = tmp_path / "assets"
+    for i in range(4):
+        _asset(cache, f"f{i}_hot.nc", 500, age=1.0)
+    assert ensure_room(cache, need=10_000, budget=1, grace=60.0) == 0
+
+
+def test_budget_zero_disables_eviction(tmp_path):
+    cache = tmp_path / "assets"
+    keep = _asset(cache, "gggg_k.nc", 500, age=9999)
+    assert ensure_room(cache, need=10_000, budget=0, grace=0.0) == 0
+    assert keep.exists()
+
+
+def test_staging_evicts_to_make_room_and_a_hit_refreshes_access(tmp_path, monkeypatch):
+    """The regression: a warm Lambda container filled /tmp with 109 MB OBS files and every
+    later item died with ENOSPC. Staging now makes room first, and counts what it reclaimed."""
+    cache = tmp_path / "assets"
+    cache.mkdir()
+    monkeypatch.setenv(SCRATCH_BUDGET_ENV, "1000")
+    store = AssetStore(asset_cache=cache, reserve=400)
+    stale = _asset(cache, "hhhh_stale.nc", 900, age=900)
+
+    def fake_stage(uri, tmp, expected):
+        tmp.write_bytes(b"\0" * 300)
+
+    monkeypatch.setattr(store, "_download", fake_stage)
+    monkeypatch.setattr(store, "_session_for", lambda *a, **k: None)
+    handle = store.open("https://example.test/new.nc")
+    assert handle.local.is_file()
+    assert not stale.exists(), "the stale entry made room for the new asset"
+    assert store.evicted_bytes == 900
+
+    # a second open of the same URI is a hit, and must refresh access time
+    before = handle.local.stat().st_atime
+    os.utime(handle.local, (before - 500, before - 500))
+    store.open("https://example.test/new.nc")
+    assert handle.local.stat().st_atime > before - 500

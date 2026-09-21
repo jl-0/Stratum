@@ -58,6 +58,12 @@ variable "ephemeral_storage_mb" {
   default     = 10240
 }
 
+variable "asset_cache_budget_mb" {
+  description = "Bytes (in MB) the node-local asset cache may occupy on /tmp before it evicts least-recently-used entries. /tmp also holds the storage mirror and any in-flight download temp file, so this must be well under ephemeral_storage_mb. 0 leaves it to the code's default of 55% of the volume; set explicitly here because the failure mode is a deterministic ENOSPC after ~91 items in a warm execution environment, not a gradual slowdown."
+  type        = number
+  default     = 5500
+}
+
 variable "reserved_concurrency" {
   description = "Invocations this function may run at once. A guard rail, not a throughput target: it stops one run exhausting the account's Lambda concurrency and starving another (08 section 6). -1 leaves the function unreserved."
   type        = number

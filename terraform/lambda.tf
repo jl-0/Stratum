@@ -43,6 +43,9 @@ resource "aws_lambda_function" "worker" {
       # both live in it; neither is durable and neither needs to be.
       STRATUM_SCRATCH     = "/tmp"
       STRATUM_ASSET_CACHE = "/tmp/assets"
+      # Bounded, because /tmp is 10 GB and one L1B OBS is 109 MB: without this a warm execution
+      # environment fills after ~91 items and every later one fails with ENOSPC.
+      STRATUM_ASSET_CACHE_BUDGET_BYTES = tostring(var.asset_cache_budget_mb * 1024 * 1024)
     }
   }
 
