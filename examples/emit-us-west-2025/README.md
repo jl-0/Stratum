@@ -191,17 +191,18 @@ this repository's aux-bearing Cuprite runs scaled per cell (`block_size` 450 →
 | resolve | 59,325 | 13.2 | 86.5 |
 | reduce | 10,050 | 24.1 | 58.6 |
 | publish | 402 | 0.4 | 0.4 |
-| **total** | **79,010** | **85 CPU-h** | **193 CPU-h** |
+| **total** (monthly epoch) | **79,010** | **85 CPU-h** | **193 CPU-h** |
+| **total** (weekly, resolve ×1.47) | **107,164** | **91 CPU-h** | **234 CPU-h** |
 
 ### The bill
 
 A Graviton2 Lambda core at 4 GB runs this work roughly 2–2.5× slower than the M-series core above,
-so 85–193 CPU-hours becomes **170–480 Lambda-hours**. At 4 GB and arm64's $0.0000133334 per
+so 91–234 CPU-hours becomes **182–584 Lambda-hours**. At 4 GB and arm64's $0.0000133334 per
 GB-second in `us-west-2`:
 
 | line item | cost |
 |---|---|
-| **Lambda compute, one full pass** | **$33 – $92** |
+| **Lambda compute, one full pass** (weekly epoch) | **$35 – $112** |
 | Lambda invocations (79,010 × $0.20/1M) | $0.02 |
 | Data transfer in (LP DAAC → `us-west-2`) | $0 |
 | S3 storage, everything retained: 845 GB | **$19 / month** |
@@ -214,7 +215,7 @@ GB-second in `us-west-2`:
 | CloudWatch Logs, 30-day retention | < $1 |
 | Preview viewer (Fargate, 1 vCPU / 2 GB) if left up | **$35 / month** — stop it between demos |
 
-**One western pass: on the order of $60, inside the deployment's default $100 budget alarm.**
+**One western pass: on the order of $70, inside the deployment's default $100 budget alarm** — but note that alarm has no subscriber unless `STRATUM_BUDGET_ALERT_EMAIL` is in `.env`.
 
 ### Iteration is much cheaper than the first pass
 

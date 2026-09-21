@@ -329,7 +329,9 @@ budget:
   # than quietly costing money. `require_approval` is specified but not built, so this fails.
   max_tiles: 450                  # 406 tiles are touched before the cloud filter, 402 after
   max_granules: 3600              # 3,430 intersect the box, 1,932 survive the filters
-  max_vcpu_hours: 600             # DERIVED, not guessed: 85-193 local CPU-hours measured per stage
-                                  #   at exactly this geometry, x2-2.5 for a Graviton2 Lambda core
-                                  #   = 170-480 Lambda-hours. See README.md section 3.
+  max_vcpu_hours: 600             # DERIVED, not guessed: 91-234 local CPU-hours measured per stage
+                                  #   at exactly this geometry, scaled for the weekly epoch
+                                  #   (resolve items 59,325 -> 87,479, x1.47 measured on the
+                                  #   pilot tile), x2-2.5 for a Graviton2 Lambda core = 182-584
+                                  #   Lambda-hours. Fits, but only just at the top of the range.
   on_exceed: fail
