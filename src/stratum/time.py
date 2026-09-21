@@ -105,12 +105,26 @@ def _calendar_anchor(start: datetime, epoch: Duration) -> datetime:
     return start.replace(hour=0, minute=0, second=0, microsecond=0)
 
 
+def is_partial(epoch: Duration, e: Epoch) -> bool:
+    """True when `e` is shorter than one whole `epoch` - truncation left it at a window edge.
+
+    An epoch is the VOTING UNIT (13 section 4), so a short one casts a vote backed by less
+    evidence than every other vote in the same product. That is what `drop_partial` exists to
+    prevent; dropping costs at most one epoch of data at a ragged window edge.
+    """
+    return epoch.add(e.start) != e.end
+
+
 def epochs_between(start: datetime, end: datetime, epoch: Duration, *,
-                   align: EpochAlign = "start") -> list[Epoch]:
+                   align: EpochAlign = "start", drop_partial: bool = False) -> list[Epoch]:
     """Half-open epochs covering [start, end), generated from `start` by `epoch` (11 section 4).
 
     The last epoch is truncated at `end`. With `align="calendar"` the lattice is anchored on the
     calendar unit instead, so the first epoch is truncated at `start` as well.
+
+    `drop_partial` discards any epoch truncation left shorter than one whole `epoch` - see
+    `is_partial`. It is what lets an epoch that does not divide the delivery window be used at
+    all (09 section 5).
     """
     start, end = as_utc(start), as_utc(end)
     if end <= start:
@@ -126,6 +140,8 @@ def epochs_between(start: datetime, end: datetime, epoch: Duration, *,
         if s >= end:
             break
         out.append(Epoch(max(s, start), min(e, end)))
+    if drop_partial:
+        out = [e for e in out if not is_partial(epoch, e)]
     return out
 
 
@@ -146,10 +162,20 @@ def check_delivery(epoch: Duration, every: Duration, window: Duration, align: Al
     """The plan-time rules of 09 section 5: every and window are whole multiples of epoch,
     window >= every, and align is exact only when window == every."""
     ke, kw = every.ratio(epoch), window.ratio(epoch)
-    if ke is None:
-        raise ValueError(f"deliver.every {every} is not a whole multiple of epoch {epoch}")
-    if kw is None:
-        raise ValueError(f"deliver.window {window} is not a whole multiple of epoch {epoch}")
+    if ke is None or kw is None:
+        # An epoch that does not divide the delivery is allowed when every period is the SAME
+        # fixed window: the periods are then placed in TIME rather than by counting epochs, and
+        # the straggler is dropped. A ROLLING window would slide by a non-whole number of
+        # epochs, so no two products would carry comparable evidence - that stays refused.
+        if align == "exact" and window == every:
+            return
+        which = "deliver.every" if ke is None else "deliver.window"
+        other = every if ke is None else window
+        raise ValueError(
+            f"{which} {other} is not a whole multiple of epoch {epoch}, and a rolling window "
+            f"(align: {align!r}, window {window} vs every {every}) needs whole epochs to slide "
+            "by. Either make the epoch divide them, or deliver one fixed window per period "
+            "(align: exact with window == every), where a trailing partial epoch is dropped")
     if kw < ke:
         raise ValueError(f"deliver.window {window} is shorter than deliver.every {every}")
     if align == "exact" and kw != ke:
@@ -165,11 +191,30 @@ def delivery_periods(start: datetime, end: datetime, epoch: Duration, every: Dur
     All placement is in whole epochs, so a window always holds entire epochs. `center` puts
     the surplus epochs half before and half after the period, the odd one after. Windows are
     truncated at `start`/`end`, so edge products carry fewer epochs (11 section 4).
+
+    A PARTIAL epoch - one truncation left shorter than `epoch` - is dropped on both paths, and
+    `Manifest.epochs()` drops it too so resolve does no work reduce will not read. Keeping it
+    would let one vote rest on less evidence than the rest (`is_partial`); `stratum plan` names
+    what it dropped.
     """
     check_delivery(epoch, every, window, align)
-    epochs = epochs_between(start, end, epoch, align=epoch_align)
     ke, kw = every.ratio(epoch), window.ratio(epoch)
-    assert ke is not None and kw is not None
+    if ke is None or kw is None:
+        # Incommensurable, and check_delivery has limited this to one fixed window per period:
+        # place the periods in time and give each the whole epochs that fall inside it.
+        whole = epochs_between(start, end, epoch, align=epoch_align, drop_partial=True)
+        placed: list[DeliveryPeriod] = []
+        i = 0
+        while True:
+            p0, p1 = every.add(as_utc(start), i), every.add(as_utc(start), i + 1)
+            i += 1
+            if p0 >= as_utc(end):
+                break
+            inside = tuple(e for e in whole if e.start >= p0 and e.end <= p1)
+            if inside:
+                placed.append(DeliveryPeriod(inside[0].start, inside[-1].end, inside))
+        return placed
+    epochs = epochs_between(start, end, epoch, align=epoch_align, drop_partial=True)
     n = len(epochs)
     out: list[DeliveryPeriod] = []
     for k in range(0, n, ke):

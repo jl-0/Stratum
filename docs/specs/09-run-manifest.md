@@ -266,8 +266,18 @@ Everything below fails in the plan stage, loudly, while it is cheap:
   alias a plugin's `required_aux` names actually declared;
 - `resampling` present on every ortho-native role and absent from every sensor-space one;
 - `capability` and `halo` consistent with `block_size`;
-- `deliver.every` and `deliver.window` are whole multiples of `epoch`, and
-  `window >= every`; `deliver.align` is `exact` only when `window == every`;
+- `window >= every`, and `deliver.align` is `exact` only when `window == every`;
+- `deliver.every` and `deliver.window` are whole multiples of `epoch` — **unless** every period
+  is the same fixed window (`align: exact`, `window == every`), in which case an epoch that does
+  not divide them is allowed and the trailing **partial epoch is dropped**. This is what lets
+  `epoch: P1W` deliver `P1Y`: a year is 52 weeks and a day, so counting epochs cannot place the
+  period and it is placed in time instead, taking the 52 whole weeks and discarding the 53rd.
+  A rolling window is still refused, because it would slide by a non-whole number of epochs and
+  no two products would carry comparable evidence.
+  An epoch is the voting unit, so a short one would cast a vote backed by less evidence than
+  every other vote in the product; dropping it costs at most one epoch at a ragged window edge.
+  `stratum plan` **warns** and names what it dropped, in the log and in `report.md`, because a
+  ragged window is nearly always an off-by-one in `time.end` rather than an intention;
 - the snapshot schema resolves: every layer `source` names a role or alias, every categorical
   layer's enumeration resolves to **exactly one** row per member in each contributing granule's
   embedded table — matched on attributes, never on positional index — `conditional_on` and `unc`

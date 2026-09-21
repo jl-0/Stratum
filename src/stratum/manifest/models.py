@@ -711,8 +711,18 @@ class Manifest(Strict):
 
     # -- time --------------------------------------------------------------------------------
     def epochs(self) -> list[Epoch]:
+        """The voting units, partials dropped - the same set `delivery_periods` will read, so
+        resolve never does work reduce cannot use. `partial_epochs()` is what was dropped."""
         return epochs_between(self.time.start, self.time.end, self.time.epoch,
-                              align=self.time.align)
+                              align=self.time.align, drop_partial=True)
+
+    def partial_epochs(self) -> list[Epoch]:
+        """Epochs truncation left shorter than `time.epoch`, which `epochs()` drops. Reported by
+        `stratum plan` rather than raised: a ragged window is usually an off-by-one in `end`, and
+        refusing it outright would make a one-day slip fatal."""
+        whole = set(self.epochs())
+        return [e for e in epochs_between(self.time.start, self.time.end, self.time.epoch,
+                                          align=self.time.align) if e not in whole]
 
     def delivery_periods(self) -> list[DeliveryPeriod]:
         d = self.time.deliver

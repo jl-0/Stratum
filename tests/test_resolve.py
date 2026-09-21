@@ -3,13 +3,14 @@ seam-equivalence invariant (12 section 2, 04 sections 3-4, 13 section 3, 01 sect
 from __future__ import annotations
 
 from dataclasses import replace
-from typing import Any
 from datetime import UTC, datetime
 from importlib.metadata import version
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 import pytest
+from stratum_emit.masks import EdgeTrim, L2AStandard, SlitDust
 from synthetic import (
     EPOCH,
     GEOM_BANDS,
@@ -61,7 +62,6 @@ from stratum.types import (
     Window,
     canonical_hash,
 )
-from stratum_emit.masks import EdgeTrim, L2AStandard, SlitDust
 
 pytestmark = pytest.mark.filterwarnings("ignore::rasterio.errors.NotGeoreferencedWarning")
 
@@ -642,7 +642,7 @@ def test_a_multiband_layer_stacks_when_one_epoch_had_no_winner(tmp_path: Path) -
 def test_widening_refuses_a_narrow_plane_that_actually_holds_data(tmp_path: Path) -> None:
     """Widening is lossless only because the narrow plane is all nodata. One that is not means
     two schemas were mixed, and that must not be papered over."""
-    layer, sch = _band_axis_schema()
+    _layer, sch = _band_axis_schema()
     shape = (6, 8)
     transform = BlockRef(TILE, 0, 0).transform
     a = write_snapshot(tmp_path / "e1", layers={"stack": np.full((*shape, 3), 1.5, np.float32)},

@@ -800,6 +800,14 @@ def plan_run(manifest_path: Path | str, out_dir: Path | str | None = None,
     grid = m.grid_def()
     tiles = m.tiles(grid)
     epochs = m.epochs()
+    partial = m.partial_epochs()
+    if partial:
+        # A ragged window is nearly always an off-by-one in `time.end`, so say so loudly and
+        # carry on rather than refusing: the cost is one epoch at the edge (09 section 5).
+        log.warning("dropped %d partial epoch(s) shorter than %s, which would have voted on "
+                    "less evidence than the rest: %s. Check time.end.",
+                    len(partial), m.time.epoch,
+                    ", ".join(f"{e.start.date()}..{e.end.date()}" for e in partial[:3]))
     periods = m.delivery_periods()
 
     # -- readers (12 section 3), geolocation role (03 section 3)
@@ -919,6 +927,8 @@ def plan_run(manifest_path: Path | str, out_dir: Path | str | None = None,
         "planned_at": iso(planned_at),
         "tiles": [[t.tx, t.ty] for t in tiles],
         "epochs": [epoch_to_doc(e) for e in epochs],
+        "epoch": str(m.time.epoch),
+        "partial_epochs": [f"{e.start.date()}..{e.end.date()}" for e in partial],
         "periods": [period_to_doc(p) for p in periods],
         "index": {"source": str(idx_path), "built": built, "frozen": ws.url(frozen_path),
                   "hash": frozen_hash, "granule_count": len(refs),
@@ -1143,6 +1153,10 @@ def render_report(doc: Mapping[str, Any]) -> str:
                    f"into `{staging['asset_cache']}` - one geometry asset for the sample-asset "
                    "check plus every contributing granule's class-table asset for the vintage "
                    "check; all are cache hits for the run")]
+    if doc.get("partial_epochs"):
+        lines += ["", "> **Dropped partial epoch(s):** " + ", ".join(doc["partial_epochs"])
+                  + f" - shorter than `{doc['epoch']}`, so they would have voted on less "
+                  "evidence than the rest. Check `time.end`.", ""]
     lines += ["", "## Fan-out", "",
               f"- tiles: {c['tiles']}", f"- epochs: {c['epochs']}", f"- periods: {c['periods']}",
               f"- blocks with observations: {c['blocks']}", ""]

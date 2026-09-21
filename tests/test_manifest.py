@@ -177,10 +177,19 @@ def test_missing_classes_file_fails_at_load(tmp_path):
 
 # ------------------------------------------------------------------------------------------ time
 def test_time_rules_are_validated(tmp_path):
-    def bad_multiple(d):
+    # An epoch that does not divide a FIXED window is allowed; the straggler is dropped and
+    # plan reports it (09 section 5). P2M into P13M gives 6 whole epochs over 12 of 13 months.
+    def fixed_window_ragged_epoch(d):
         d["time"].update(epoch="P2M", deliver="P13M")
-    with pytest.raises(ValidationError, match="whole multiple"):
-        loaded(tmp_path, bad_multiple)
+    m = loaded(tmp_path, fixed_window_ragged_epoch)
+    assert len(m.epochs()) * 2 <= 13 * len(m.delivery_periods()) + 2
+
+    # A ROLLING window still needs whole epochs to slide by, and says so.
+    def rolling_ragged_epoch(d):
+        d["time"].update(epoch="P2M", deliver={"every": "P1M", "window": "P13M",
+                                               "align": "center"})
+    with pytest.raises(ValidationError, match="rolling window"):
+        loaded(tmp_path, rolling_ragged_epoch)
 
     def exact_with_wider_window(d):
         d["time"].update(deliver={"every": "P1M", "window": "P13M"})

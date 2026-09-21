@@ -32,7 +32,10 @@ aoi:
 
 time:
   start: 2022-08-01
-  end:   2026-07-31
+  end:   2026-08-01            # exclusive, and deliberately a clean 48 months from start:
+                              #   2026-07-31 would leave a 30-day July that voted on less
+                              #   evidence than the other 47 months, so plan drops it and
+                              #   warns (09 section 5)
   epoch: P1M              # the voting unit - one snapshot per epoch
   deliver: P1Y            # == {every: P1Y, window: P1Y, align: exact}
 
