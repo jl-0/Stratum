@@ -494,3 +494,50 @@ def test_live_stage_from_lpdaac(tmp_path):
     assert handle.path().stat().st_size > 10_000_000
     assert store.credentials_for(LIVE_URL).kind in ("netrc", "bearer")
     assert store.open(LIVE_URL).path() == handle.path()
+
+
+def test_prefetch_reports_every_item_including_hits_and_skips(tmp_path, monkeypatch):
+    """A progress bar is sized on the whole list, so `on_done` must fire for an item that was
+    skipped or already cached as well as one actually fetched - otherwise the bar stalls short
+    of its total and reads as a hang, which is the thing it exists to prevent."""
+    store = AssetStore(asset_cache=tmp_path / "cache")
+    fetched: list[str] = []
+
+    def fake_stage(uri, *, etag=None, checksum=None):
+        fetched.append(uri)
+        target = asset_cache_path(tmp_path / "cache", uri, checksum)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(b"x")
+        return target
+
+    monkeypatch.setattr(store, "_stage_https", fake_stage)
+    monkeypatch.setattr(store, "_session_for", lambda *a, **k: None)
+
+    local = (tmp_path / "already.nc")
+    local.write_bytes(b"y")
+    items = [
+        (f"file://{local}", None),                      # not https - skipped
+        ("https://example.test/a.nc", None),            # fetched
+        ("https://example.test/b.nc", None),            # fetched
+    ]
+    seen = []
+    n = store.prefetch(items, workers=2, on_done=lambda: seen.append(1))
+    assert n == 0 or n >= 0
+    assert len(seen) == len(items), "on_done must fire once per INPUT item"
+    assert len(fetched) == 2
+
+    # second call: both https assets are now cached, so nothing is fetched and every item still
+    # reports - the case that made the bar stall at 0/N on a warm run
+    seen.clear()
+    fetched.clear()
+    store.prefetch(items, workers=2, on_done=lambda: seen.append(1))
+    assert len(seen) == len(items) and fetched == []
+
+
+def test_prefetch_without_a_callback_is_unchanged(tmp_path, monkeypatch):
+    store = AssetStore(asset_cache=tmp_path / "cache")
+    monkeypatch.setattr(store, "_session_for", lambda *a, **k: None)
+    monkeypatch.setattr(store, "_stage_https",
+                        lambda uri, *, etag=None, checksum=None: (
+                            asset_cache_path(tmp_path / "cache", uri, checksum)))
+    assert store.prefetch([], workers=2) == 0

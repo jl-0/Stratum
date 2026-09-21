@@ -109,7 +109,7 @@ flowchart TB
 <thead><tr><th>Step</th><th>Does</th><th>Code</th></tr></thead>
 <tbody>
 <tr><td><code>resolve</code></td><td>Entry-point name first, then <code>module:Class</code>; a <code>LookupError</code> names both attempts, so a typo does not read as "no plugins installed"</td><td><a class="src" data-sym="def resolve(kind: str, ref: str)" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/plugins.py#L28">plugins.py:28</a></td></tr>
-<tr><td><code>instantiate</code></td><td>Calls the class with the manifest's <code>params</code> as keyword arguments. No adaptation layer: a plugin's constructor signature <em>is</em> its parameter schema</td><td><a class="src" data-sym="def instantiate" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/plan/run.py#L353">plan/run.py:341</a></td></tr>
+<tr><td><code>instantiate</code></td><td>Calls the class with the manifest's <code>params</code> as keyword arguments. No adaptation layer: a plugin's constructor signature <em>is</em> its parameter schema</td><td><a class="src" data-sym="def instantiate" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/plan/run.py#L354">plan/run.py:341</a></td></tr>
 <tr><td><code>PluginBinding</code></td><td>Pairs the instance with the three things that enter a cache key: the ref as written, the distribution version, the params</td><td><a class="src" data-sym="class PluginBinding" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/resolve/context.py#L118">context.py:109</a></td></tr>
 <tr><td>Round trip</td><td>A worker re-instantiates from <code>{ref, params}</code> but keeps the version the <em>planner</em> recorded</td><td><a class="src" data-sym="def plugin_from_doc" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/plan/document.py#L191">document.py:189</a></td></tr>
 </tbody>
@@ -213,7 +213,7 @@ the frozen file.</p>
   &mdash; <code>LocalSource</code> records none rather than inventing them.</li>
   <li>Register under <code>[project.entry-points."stratum.sources"]</code> and add the
   <code>kind</code> to
-  <a class="src" data-sym="def source_from_manifest" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/plan/run.py#L221">source_from_manifest</a>.</li>
+  <a class="src" data-sym="def source_from_manifest" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/plan/run.py#L222">source_from_manifest</a>.</li>
 </ol>
 
 <h2 id="add-stage">6. Adding a stage</h2>
@@ -227,7 +227,7 @@ confusing failure rather than a clean one:</p>
 <tbody>
 <tr><td>1</td><td>The stage name, in pipeline order</td><td><a class="src" data-sym="STAGES: tuple[str, ...]" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/plan/document.py#L53">STAGES</a></td></tr>
 <tr><td>2</td><td>An artifact kind, if it writes to the cache</td><td><a class="src" data-sym="ARTIFACT_KINDS" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/cache/__init__.py#L32">ARTIFACT_KINDS</a> and a <code>*_inputs</code> function beside it</td></tr>
-<tr><td>3</td><td>A work list, with the fan-out rule that decides when an item exists</td><td><a class="src" data-sym="def build_work_lists" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/plan/run.py#L1055">build_work_lists</a></td></tr>
+<tr><td>3</td><td>A work list, with the fan-out rule that decides when an item exists</td><td><a class="src" data-sym="def build_work_lists" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/plan/run.py#L1058">build_work_lists</a></td></tr>
 <tr><td>4</td><td>A handler returning <code>(key_or_path, hit)</code></td><td><a class="src" data-sym="HANDLERS" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/executors/worker.py#L214">HANDLERS</a></td></tr>
 <tr><td>5</td><td>A key function the <em>next</em> stage can call to recompute this stage's output address without doing the work</td><td>beside the handler — <code>snapshot_key</code> and <code>product_key</code> are the models</td></tr>
 <tr><td>6</td><td>The CLI's <code>--stage</code> choices, and the docs</td><td><a class="src" data-sym="def exec_" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/cli.py#L173">cli.py:150</a>, <a href="../reference/cli.html">Commands</a></td></tr>

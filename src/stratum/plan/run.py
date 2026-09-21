@@ -26,6 +26,7 @@ import rasterio
 import yaml
 from rasterio.warp import transform_bounds
 
+from stratum import console
 from stratum.access import (
     AssetStore,
     AssetStoreError,
@@ -666,7 +667,9 @@ def inspect_granules(m: Manifest, refs: Mapping[str, GranuleRef], readers: Mappi
             # every contributing granule's class-table asset is needed (the vintage check);
             # against a catalogue source that is one download per granule, so they are staged
             # together through a thread pool rather than one at a time (12 section 7)
-            store.prefetch(_role_assets(refs, order, binding), workers=PLAN_FETCH_WORKERS)
+            assets = _role_assets(refs, order, binding)
+            with console.progress(f"staging {layer.name} class tables", len(assets)) as advance:
+                store.prefetch(assets, workers=PLAN_FETCH_WORKERS, on_done=advance)
             for gid in order:
                 uri = role_uri(refs[gid], binding)
                 assert uri is not None  # needed roles were filtered on asset availability

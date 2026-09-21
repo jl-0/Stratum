@@ -348,18 +348,33 @@ class AssetStore:
         return path
 
     def prefetch(self, items: Iterable[tuple[str, str | None]],
-                 workers: int = PREFETCH_WORKERS) -> int:
+                 workers: int = PREFETCH_WORKERS,
+                 on_done: Callable[[], None] | None = None) -> int:
         """Stage several remote assets at once - `(uri, checksum)` pairs - with a thread pool,
         so the planner's per-granule class-table pass (12 section 7) is not one serial download
         per granule. Local URIs and cache hits cost nothing; the login happens once, before the
         pool starts; the first failure propagates after the pool drains. Returns the number of
-        assets actually fetched."""
+        assets actually fetched.
+
+        `on_done` is called once per INPUT item as it is settled - skipped, already cached, or
+        freshly fetched - so a caller can drive a progress bar sized on the whole list. Without
+        it this is a single blocking call, which on a continental run is tens of minutes of
+        silence: the planner stages every contributing granule's class-table asset, and at ~46 MB
+        each that is the longest step of a plan by a wide margin.
+        """
+        def settled() -> None:
+            if on_done is not None:
+                on_done()
+
         todo: dict[Path, tuple[str, str | None]] = {}
         for uri, checksum in items:
             if scheme_of(uri) != "https":
+                settled()
                 continue
             target = asset_cache_path(self._require_cache(uri), uri, checksum)
-            if not target.is_file():
+            if target.is_file():
+                settled()                       # already staged; done as far as a caller cares
+            else:
                 todo.setdefault(target, (uri, checksum))
         if not todo:
             return 0
@@ -368,8 +383,12 @@ class AssetStore:
         with ThreadPoolExecutor(max_workers=max(1, min(int(workers), len(todo)))) as pool:
             futures = [pool.submit(self._stage_https, uri, etag=None, checksum=checksum)
                        for uri, checksum in todo.values()]
+            # Drained in SUBMISSION order, not completion order, so the first failure is the
+            # first submitted - which is what the docstring promises. Progress is therefore
+            # slightly conservative and always monotonic.
             for fut in futures:
                 fut.result()
+                settled()
         return len(todo)
 
     def credentials_for(self, uri: str) -> Credentials:
