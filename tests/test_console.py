@@ -79,3 +79,48 @@ def test_progress_yields_an_advance_when_styled(monkeypatch):
     with console.progress("regrid", 3) as advance:
         for _ in range(3):
             advance()
+
+
+# ----------------------------------------------------------------------- logging, and the seam
+# Two output systems used to run side by side: `console.*` through rich, and `log.*` through a
+# `logging` that nothing configured. So a styled progress bar was followed by an unstyled
+# warning, the bar erased itself on the way out, and every `log.info` was invisible.
+def test_logging_is_configured_on_the_stratum_logger_and_is_idempotent():
+    import logging
+
+    console.configure_logging(plain=True, verbose=False)
+    root = logging.getLogger("stratum")
+    assert len(root.handlers) == 1
+    assert root.level == logging.WARNING
+    assert not root.propagate, "a dependency's root handler must not also print our records"
+
+    console.configure_logging(plain=True, verbose=True)
+    assert len(root.handlers) == 1, "calling twice must not stack handlers"
+    assert root.level == logging.INFO, "-v surfaces the four log.info calls in the codebase"
+
+
+def test_an_unconfigured_logger_would_have_dropped_info_entirely():
+    """Why -v exists at all. `logging.lastResort` is fixed at WARNING, so before this every
+    `log.info` went nowhere no matter what the user asked for."""
+    import logging
+
+    assert logging.lastResort.level == logging.WARNING
+    assert logging.lastResort.formatter is None, "and unformatted, hence the bare line"
+
+
+def test_the_bar_and_the_log_share_one_console(monkeypatch):
+    """Rich only interleaves a live display with printed output when both go through the SAME
+    console: a warning mid-stage is then drawn ABOVE the bar instead of tearing through it.
+    `_console()` renders to a StringIO and writes nowhere, so handing it to either would have
+    silently swallowed the output."""
+    import io
+    import logging
+
+    assert console.out_console() is console.out_console(), "memoised, so Live can coordinate"
+    assert not isinstance(console.out_console().file, io.StringIO)
+    assert isinstance(console._console().file, io.StringIO)
+
+    monkeypatch.setattr(console, "styled", lambda: True)
+    console.configure_logging(plain=False, verbose=False)
+    handler = logging.getLogger("stratum").handlers[0]
+    assert handler.console is console.out_console()

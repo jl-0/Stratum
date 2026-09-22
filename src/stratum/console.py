@@ -49,9 +49,29 @@ def abbreviate(value: str, keep: int = 12) -> str:
 
 
 def _console(width: int | None = None):
+    """A console that renders to a STRING. Everything in this module that returns `str` uses it;
+    it writes nowhere, so it must never be handed to a log handler or a progress bar."""
     from rich.console import Console
     return Console(file=io.StringIO(), force_terminal=True, width=width or _width(),
                    soft_wrap=False, highlight=False)
+
+
+_OUT = None
+
+
+def out_console():
+    """The one console that actually writes to the terminal, shared by the progress bar and the
+    log handler.
+
+    Sharing matters: rich coordinates a live display with anything printed through the same
+    console, so a warning arriving mid-stage is drawn ABOVE the bar instead of tearing through
+    it. Two consoles - or a log handler on stderr and a bar on stdout - garble each other.
+    """
+    global _OUT
+    if _OUT is None:
+        from rich.console import Console
+        _OUT = Console(width=_width(), soft_wrap=False, highlight=False)
+    return _OUT
 
 
 def _width(default: int = 100) -> int:
@@ -121,11 +141,44 @@ def emphasis(text: str) -> str:
     return _style(text, "bold cyan")
 
 
+def configure_logging(plain: bool = False, verbose: bool = False) -> None:
+    """Give `logging` somewhere to go, so log records look like the rest of the output.
+
+    Without this, nothing configures logging at all and records fall through to
+    `logging.lastResort`: a bare `StreamHandler` on stderr, unformatted, fixed at WARNING. That
+    is why a styled progress bar used to be followed by an unstyled warning - two output systems,
+    one of them unconfigured - and why every `log.info` in the codebase was invisible.
+
+    Handlers go on the `stratum` logger rather than the root, so a dependency's logging (botocore
+    especially) is not adopted along with ours. Idempotent: calling it twice does not double up.
+    """
+    import logging
+
+    root = logging.getLogger("stratum")
+    root.setLevel(logging.INFO if verbose else logging.WARNING)
+    root.propagate = False
+    for existing in list(root.handlers):
+        root.removeHandler(existing)
+    if plain or not styled():
+        handler: logging.Handler = logging.StreamHandler()
+        handler.setFormatter(logging.Formatter("%(levelname)s %(name)s: %(message)s"))
+    else:
+        from rich.logging import RichHandler
+        handler = RichHandler(console=out_console(), show_path=False, show_time=False,
+                              markup=False, rich_tracebacks=True)
+        handler.setFormatter(logging.Formatter("%(message)s"))
+    root.addHandler(handler)
+
+
 def progress(description: str, total: int):
     """A progress bar over one stage's work items, or a no-op when output is plain.
 
     Returns a context manager yielding `advance()`. The executors call it as each item finishes,
     which is the difference between a silent three-minute fan-out and a visible one.
+
+    NOT transient: the finished bar stays on screen. It used to erase itself, which looked like
+    a glitch - pretty output that flashed and vanished, leaving plain text behind - and threw
+    away the one record of how long a stage took and how many items it covered.
     """
     import contextlib
     if not styled() or total <= 0:
@@ -146,7 +199,8 @@ def progress(description: str, total: int):
     @contextlib.contextmanager
     def _bar():
         with Progress(SpinnerColumn(), TextColumn("[bold]{task.description}"), BarColumn(),
-                      MofNCompleteColumn(), TimeElapsedColumn(), transient=True) as prog:
+                      MofNCompleteColumn(), TimeElapsedColumn(), transient=False,
+                      console=out_console()) as prog:
             task = prog.add_task(description, total=total)
             yield lambda: prog.advance(task)
     return _bar()

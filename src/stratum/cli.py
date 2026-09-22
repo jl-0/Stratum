@@ -77,13 +77,16 @@ def main() -> None:
                    "default $STRATUM_ASSET_CACHE, else {root}/assets. Name the same one on run.")
 @click.option("--json", "as_json", is_flag=True, help="Print the plan summary as JSON.")
 @click.option("--plain", is_flag=True, help="Unstyled output. Implied when stdout is not a terminal, or NO_COLOR is set.")
+@click.option("-v", "--verbose", is_flag=True,
+              help="Show INFO log records as well as warnings: which reader opened each role, the Earthdata auth path taken, index reuse.")
 def plan(manifest: str, patch: tuple[str, ...], out: str | None, asset_cache: str | None,
-         as_json: bool, plain: bool) -> None:
+         as_json: bool, plain: bool, verbose: bool) -> None:
     """Resolve a manifest, freeze the granule set, write the work list, report the fan-out."""
     from stratum import console
     from stratum.plan import plan_run
 
     console.set_plain(plain)
+    console.configure_logging(plain, verbose)
     _set_asset_cache(asset_cache)
     result = _guarded(plan_run, manifest, out, patch)
     if as_json:
@@ -112,9 +115,11 @@ def plan(manifest: str, patch: tuple[str, ...], out: str | None, asset_cache: st
                    "default $STRATUM_ASSET_CACHE, else {root}/assets.")
 @click.option("--dry-run", is_flag=True, help="Equivalent to plan.")
 @click.option("--plain", is_flag=True, help="Unstyled output. Implied when stdout is not a terminal, or NO_COLOR is set.")
+@click.option("-v", "--verbose", is_flag=True,
+              help="Show INFO log records as well as warnings: which reader opened each role, the Earthdata auth path taken, index reuse.")
 def run(manifest: str | None, patch: tuple[str, ...], from_provenance: str | None,
         executor: str, workers: int | None, out: str | None, asset_cache: str | None,
-        dry_run: bool, plain: bool) -> None:
+        dry_run: bool, plain: bool, verbose: bool) -> None:
     """Plan and execute every stage."""
     from stratum import console
     from stratum.executors import (
@@ -127,6 +132,7 @@ def run(manifest: str | None, patch: tuple[str, ...], from_provenance: str | Non
     from stratum.plan import BudgetExceeded, plan_run
 
     console.set_plain(plain)
+    console.configure_logging(plain, verbose)
     _set_asset_cache(asset_cache)
     _guarded(executor_available, executor)
     if from_provenance is not None:

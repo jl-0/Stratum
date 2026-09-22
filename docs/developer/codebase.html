@@ -293,7 +293,7 @@ boto3.</td><td><a class="src" data-sym="def run_stage(run_dir: Path | str, stage
 <tr><td><code>executors/awslambda.py</code></td><td>The worker half: the Lambda entrypoint. Credential
 from Secrets Manager, run directory mirrored from the bucket, then the same
 <code>exec_item</code>.</td><td><a class="src" data-sym="def handler(event" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/executors/awslambda.py#L107">handler</a></td></tr>
-<tr><td><code>console.py</code></td><td>Terminal rendering of the plan report, via <code>rich</code>. <code>report.md</code> stays markdown because it is an artifact; only the screen view is rendered, and digests and absolute paths are abbreviated on the way there. Output is plain whenever stdout is not a tty, so pipes, CI and Lambda logs are unchanged.</td><td><a class="src" data-sym="def render_markdown" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/console.py#L68">render_markdown</a></td></tr>
+<tr><td><code>console.py</code></td><td>Terminal rendering of the plan report, via <code>rich</code>. <code>report.md</code> stays markdown because it is an artifact; only the screen view is rendered, and digests and absolute paths are abbreviated on the way there. Output is plain whenever stdout is not a tty, so pipes, CI and Lambda logs are unchanged.</td><td><a class="src" data-sym="def render_markdown" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/console.py#L88">render_markdown</a></td></tr>
 <tr><td><code>preview/</code></td><td>The viewer: a products tree read through its STAC, and a
 web-mercator tile rendered from a published raster. Takes no part in a run and writes nothing
 &mdash; <code>catalog.py</code> is the only module that knows the products layout, and the same
