@@ -24,11 +24,21 @@ pixi run stratum run      -m examples/emit-us-west-2025/manifest-proof.yaml     
 ```
 
 `algorithm.excalidraw` is the whole algorithm on one canvas — the six stages, the four data
-sources, and how scoring and reducing actually decide a cell. Open it at
-[excalidraw.com](https://excalidraw.com) (**Open**, then pick the file) or in the VS Code
-Excalidraw extension. Every box is a hyperlink to the code or the manifest line that implements
-it, pinned to the commit that generated it, because a line number only means something at one
-commit. It is a hand-editable drawing, not a generated artefact: edit it in place.
+sources, and how scoring and reducing actually decide a cell.
+
+**Drag the file onto the canvas** at [excalidraw.com](https://excalidraw.com), or use ☰ →
+**Open**. Do **not** reach for the library sidebar's *Load library*: this file is a *scene*
+(`"type": "excalidraw"`), not a shape library (`"type": "excalidrawlib"`), and that importer's
+file picker accepts `.excalidraw` anyway — its extension filter is commented out to work around
+a WebKit bug — then fails with **"Couldn't load library"**. Drag-and-drop is the safe route
+because `loadFileToCanvas` routes on the `type` field rather than the file extension.
+
+Verified against `@excalidraw/excalidraw` 0.18.1, not by eye: `isValidExcalidrawData` passes and
+`restore()` keeps all 151 elements and all 39 element links.
+
+Every box is a hyperlink to the code or the manifest line that implements it, pinned to the
+commit that generated it, because a line number only means something at one commit. It is a
+hand-editable drawing, not a generated artefact: edit it in place.
 
 ---
 
