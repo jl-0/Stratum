@@ -25,6 +25,7 @@ from stratum.publish import product_dir, publish_period, write_product_block
 from stratum.reduce import band_counts, product_bands, reduce_stack
 from stratum.regrid import REGRID_ALGO_VERSION, regrid_granule_tile
 from stratum.resolve import NullAux, resolve_block, snapshot_key, stack_snapshots
+from stratum.storage import clear_pins
 from stratum.types import BandSpec, BlockRef, EmbeddedGLT, Epoch, LocArray, TileRef
 
 _RUNS: dict[Path, RunPlan] = {}
@@ -227,6 +228,9 @@ def exec_item(run_dir: Path | str, stage: str, index: int) -> dict[str, Any]:
     items = read_work(run.run_dir, stage)
     if not 0 <= index < len(items):
         raise IndexError(f"stage {stage!r} has {len(items)} items; index {index} is out of range")
+    # Release the previous item's claims on this warm execution environment. Done here rather
+    # than by the handler so that one that raised cannot leave the mirror unevictable for good.
+    clear_pins()
     t0 = time.perf_counter()
     result, hit = HANDLERS[stage](items[index], run)
     path = result.path if isinstance(result, CacheKey) else result

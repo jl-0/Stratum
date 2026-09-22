@@ -56,8 +56,9 @@ RETRY_STATUSES = (429, 502, 503, 504)
 #: `stratum.storage.ensure_free` is, and it looks at free space across everything sharing the
 #: filesystem. Sizing a per-directory budget instead is what failed twice: the asset cache and
 #: the storage mirror share one 10 GB `/tmp` on Lambda, so a 5.5 GB asset budget left the mirror
-#: 4.5 GB, and resolve - which writes a ~20 MB snapshot per item into it and pulls every GLT,
-#: aux warp and ortho warp it reads - filled that and died on ENOSPC (12 section 4).
+#: 4.5 GB, and resolve filled that by PULLING - 89.2 GiB of ortho warps across the western run
+#: at ~12 MB each - and died on ENOSPC (12 section 4). The snapshots it writes are ~37 KB on
+#: disk, not the 20.2 MB they occupy in memory: deflate over a mostly-nodata block.
 #:
 #: Worth setting on a shared workstation, where free space is plentiful but a run staging the
 #: whole archive slice is still antisocial: one `plan` over the western states parked 84 GB of

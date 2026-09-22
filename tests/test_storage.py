@@ -11,6 +11,8 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
+import time
 from pathlib import Path
 
 import pytest
@@ -372,3 +374,92 @@ def test_one_walk_buys_many_writes(monkeypatch, tmp_path):
     # low-water 200 would be met by freeing 100; the slab takes it to 500
     freed = ensure_free(0, roots=[d], reserve=200, slab=300, grace=0.0)
     assert freed == 400, "must free to the high-water mark, not the trigger"
+
+
+def test_a_hit_pins_the_artifact_and_its_sidecar_so_a_later_pull_cannot_evict_it(
+        monkeypatch, tmp_path):
+    """The reduce failure, reproduced at the level the property actually lives.
+
+    A reduce item calls `hit()` for every epoch's snapshot and only THEN reads them, and each of
+    those hits may reclaim space to make room for its own pull. Item 3368 of the western run hit
+    for 8 snapshots, and by the time `read_snapshot` opened the first one its `.tif`s were gone:
+
+        FileNotFoundError: no snapshot layers under .../cache/snapshot/<grid>/-111_37/<hash>
+
+    S3 still held all ten layers, so nothing was lost - only the local mirror copy, by eviction.
+    Asserting on `_evict_candidates` rather than on bytes freed, because "a claimed artifact is
+    never a candidate" IS the property; inferring it from a byte count couples the test to file
+    sizes, the reserve and the slab, and that arithmetic is not what is being tested."""
+    from stratum.storage import _evict_candidates, clear_pins
+
+    install(monkeypatch, tmp_path / "bucket")
+    ws = Workspace.for_root("s3://stratum-test/", mirror=tmp_path / "mirror")
+    cache = CacheRoot(ws)
+    clear_pins()
+
+    snap = cache.key("product", GRID.id, TILE, {"artifact_type": "product", "n": 1})
+    cache.write_dir(snap, lambda d: (d / "mineral_1_native.tif").write_bytes(b"x" * 400))
+    unclaimed = cache.key("glt", GRID.id, TILE, {"artifact_type": "glt", "n": 2})
+    cache.write_file(unclaimed, lambda p: p.write_bytes(b"y" * 400))
+    for f in (*snap.path.iterdir(), unclaimed.path, unclaimed.inputs_path):
+        os.utime(f, (time.time() - 9_000, time.time() - 9_000))
+
+    assert cache.hit(snap)
+    names = {p.name for _, _, p in _evict_candidates([ws.path])}
+    assert "mineral_1_native.tif" not in names, "a claimed member must not be a candidate"
+    assert unclaimed.path.name in names, "the unclaimed artifact still is"
+
+
+def test_a_hit_marks_the_artifact_used_even_though_reading_it_would_not(monkeypatch, tmp_path):
+    """`relatime` - the default nearly everywhere, including a Lambda /tmp - only advances access
+    time when it is already older than the modification time, so READING a cached file does not
+    reliably update its atime. Without an explicit touch this LRU silently degrades into a FIFO,
+    and a snapshot resolve wrote hours ago is the coldest thing in the mirror at exactly the
+    moment reduce needs it."""
+    from stratum.storage import _evict_candidates, clear_pins
+
+    install(monkeypatch, tmp_path / "bucket")
+    ws = Workspace.for_root("s3://stratum-test/", mirror=tmp_path / "mirror")
+    cache = CacheRoot(ws)
+    clear_pins()
+
+    key = cache.key("glt", GRID.id, TILE, {"artifact_type": "glt", "n": 5})
+    cache.write_file(key, lambda p: p.write_bytes(b"z" * 400))
+    os.utime(key.path, (time.time() - 9_000, time.time() - 9_000))
+    assert cache.hit(key)
+    clear_pins()          # isolate the touch from the pin
+
+    ages = {p.name: time.time() - a for a, _, p in _evict_candidates([ws.path])}
+    assert ages[key.path.name] < 60, "a hit must advance access time, not leave it at write time"
+
+
+def test_clearing_pins_at_the_item_boundary_releases_the_previous_claim(monkeypatch, tmp_path):
+    """Pins last for one work item, not for the life of a warm execution environment - or a
+    container that has run a few hundred items would have nothing left to evict."""
+    from stratum.storage import _evict_candidates, clear_pins
+
+    install(monkeypatch, tmp_path / "bucket")
+    ws = Workspace.for_root("s3://stratum-test/", mirror=tmp_path / "mirror")
+    cache = CacheRoot(ws)
+    clear_pins()
+
+    key = cache.key("glt", GRID.id, TILE, {"artifact_type": "glt", "n": 3})
+    cache.write_file(key, lambda p: p.write_bytes(b"z" * 400))
+    assert cache.hit(key)
+    assert key.path.name not in {p.name for _, _, p in _evict_candidates([ws.path])}
+    clear_pins()
+    assert key.path.name in {p.name for _, _, p in _evict_candidates([ws.path])}
+
+
+def test_a_local_root_is_neither_touched_nor_pinned(monkeypatch, tmp_path):
+    """On a local root the path IS the artifact, so there is nothing to mirror and nothing that
+    may be evicted. Claiming it would be meaningless, and registering it dangerous."""
+    from stratum.storage import clear_pins, evictable_roots, is_pinned
+
+    clear_pins()
+    cache = CacheRoot(tmp_path / "root")
+    key = cache.key("glt", GRID.id, TILE, {"artifact_type": "glt", "n": 4})
+    cache.write_file(key, lambda p: p.write_bytes(b"local"))
+    assert cache.hit(key)
+    assert not is_pinned(key.path)
+    assert (tmp_path / "root") not in evictable_roots()

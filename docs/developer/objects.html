@@ -60,7 +60,7 @@ dependency makes that dependency universal.</p>
 </div>
 
 <p>The process-lifetime row is worth dwelling on.
-<a class="src" data-sym="def load_cached" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/executors/worker.py#L33">load_cached</a>
+<a class="src" data-sym="def load_cached" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/executors/worker.py#L34">load_cached</a>
 memoises the <code>RunPlan</code> per run directory in a module-level dict, and
 <a class="src" data-sym="def reader_for" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/access/readers.py#L33">reader_for</a>
 memoises one reader instance per <code>(collection, ref)</code>. So parsing

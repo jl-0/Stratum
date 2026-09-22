@@ -9,6 +9,30 @@ import pytest
 ROOT = Path(__file__).resolve().parents[1]
 
 
+@pytest.fixture(autouse=True)
+def _isolate_scratch_reclaim():
+    """Reset the eviction module's process-global state around every test.
+
+    `stratum.storage` keeps two process-wide sets - the roots it may evict from, and the
+    artifacts the CURRENT work item has claimed. Both are correct in production, where one
+    process runs one item at a time (Lambda per invocation, and the local executor's spawn
+    `ProcessPoolExecutor` per worker), and both are cleared at the item boundary by
+    `exec_item`. A test session, though, is one process running hundreds of "items", so
+    without this a pin left by one test can silently decide whether eviction fires in
+    another - an order-dependent flake rather than a real failure.
+    """
+    from stratum import storage
+
+    roots, pins = set(storage._EVICTABLE), set(storage._PINNED)
+    storage._EVICTABLE.clear()
+    storage._PINNED.clear()
+    yield
+    storage._EVICTABLE.clear()
+    storage._EVICTABLE.update(roots)
+    storage._PINNED.clear()
+    storage._PINNED.update(pins)
+
+
 @pytest.fixture(scope="session")
 def trial_data() -> Path:
     """Granules for trial runs: STRATUM_TRIAL_DATA, else ./trial-data. Skips when empty."""

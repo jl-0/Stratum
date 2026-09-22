@@ -405,10 +405,25 @@ plentiful and a run hoarding the archive slice is merely antisocial.
 > **[observed] 2026-09-21, twice, and the second time was self-inflicted.** With nothing bounded,
 > a warm Lambda filled its 10 GB `/tmp` after ~91 L1B OBS assets at 109 MB each: **6,076 of
 > 9,232 regrid items** failed with `ENOSPC`. Capping the asset cache at 5.5 GB fixed regrid and
-> broke resolve — it left the mirror 4.5 GB, and resolve writes a ~20 MB snapshot per item into
-> it on top of every GLT, aux warp and ortho warp it pulls: **52,363 of 59,717 resolve items**
-> failed the same way. A per-directory budget does not bound a shared volume; it only decides
-> which directory runs out first. Hence one free-space policy over both.
+> broke resolve — it left the mirror 4.5 GB, and resolve fills that by **pulling**: **52,363 of
+> 59,717 resolve items** failed the same way. A per-directory budget does not bound a shared
+> volume; it only decides which directory runs out first. Hence one free-space policy over both.
+>
+> What fills the mirror, measured in the bucket after the western run rather than estimated —
+> and the answer is not what it looks like from the code:
+>
+> | artifact | objects | total | each |
+> |---|---|---|---|
+> | `ortho` | 15,122 | **89.2 GiB** | 210 KB – 19.7 MB, ~12 MB typical |
+> | `glt` | 20,404 | 16.6 GiB | ~1.7 MB |
+> | `aux` | 864 | 323 MiB | per tile, warped once |
+> | `snapshot` | — | — | **~37 KB** for all 12 files |
+>
+> The **ortho warps resolve reads dominate by an order of magnitude**, and the snapshots it
+> writes are negligible. A snapshot block is 20.2 MB of `float32` and `uint16` in memory, but it
+> is written `deflate`-compressed over a mostly-nodata 720² window, so the artifact on disk is
+> ~500× smaller. Sizing scratch from the in-memory figure — as the first version of this section
+> did — points at the wrong stage entirely.
 
 #### The asset cache as built
 

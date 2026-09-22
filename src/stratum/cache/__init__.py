@@ -25,7 +25,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from stratum.storage import Workspace, ensure_free, local_workspace
+from stratum.storage import Workspace, ensure_free, local_workspace, pin, touch
 from stratum.types import GridDef, TileRef, canonical_hash
 
 # artifact_type -> kind. A file artifact carries a suffix; a directory artifact is renamed whole.
@@ -106,9 +106,32 @@ class CacheRoot:
         On a remote workspace a local miss is not yet a miss: the sidecar is probed in the bucket
         and, when it is there, the artifact is mirrored and the answer is yes. The sidecar is
         probed *first* for the same reason it is written last - it is the commit."""
-        if self._present(key):
+        if self._present(key) or (self.workspace.remote and self._mirror(key)):
+            self._claim(key)
             return True
-        return self.workspace.remote and self._mirror(key)
+        return False
+
+    def _claim(self, key: CacheKey) -> None:
+        """A hit is a promise to READ, and the read comes after every other hit in the item has
+        been resolved - so the artifact is marked used and pinned until the item ends.
+
+        Both halves are load-bearing on a remote root, where the local copy is an evictable
+        mirror. `touch` because `relatime` does not advance access time on a read, so a snapshot
+        resolve wrote hours ago looks coldest exactly when reduce needs it; `pin` because a
+        reduce item must hold 52 snapshots at once and the pull of the 52nd would otherwise be
+        free to evict the 1st. A local root is neither mirrored nor evictable, so neither
+        applies.
+        """
+        if not self.workspace.remote:
+            return
+        # Both paths, because a FILE artifact keeps its sidecar as a SIBLING
+        # (`{hash16}.inputs.json`) rather than inside itself. Pinning only the artifact leaves
+        # the commit marker evictable, and losing that turns a hit into a miss - harmless but
+        # silly, since it re-downloads bytes that never left. A directory artifact's sidecar is
+        # inside it and is covered already.
+        for path in (key.path, key.inputs_path):
+            touch(path)
+            pin(path)
 
     def _present(self, key: CacheKey) -> bool:
         """The artifact and its commit marker are both here - and, for a directory, every member

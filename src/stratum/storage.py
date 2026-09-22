@@ -59,6 +59,11 @@ DEFAULT_EVICT_SLAB: int | None = None
 EVICT_KEEP_DIRS = frozenset({"runs"})
 
 _EVICTABLE: set[Path] = set()
+#: Artifacts the CURRENT work item has claimed and is about to read. A reduce item stacks 52
+#: weekly snapshots at ~20 MB each - a 1 GB working set that must be resident all at once - and
+#: each of those pulls calls `ensure_free`, so without a pin the pull of the 40th member can
+#: evict the 1st. Cleared at every item boundary by the worker.
+_PINNED: set[Path] = set()
 
 
 class StorageError(RuntimeError):
@@ -80,6 +85,47 @@ def register_evictable(path: Path | str | None) -> None:
 
 def evictable_roots() -> list[Path]:
     return sorted(_EVICTABLE)
+
+
+def pin(path: Path | str) -> None:
+    """Claim an artifact for the current work item: never evict it, or anything under it.
+
+    A cache hit is a promise to read, and the read happens after every other hit in the item has
+    been resolved. Access time alone cannot express that - it protects for a fixed grace window,
+    and an item may take longer than the window - so the claim is explicit.
+    """
+    _PINNED.add(Path(path).absolute())
+
+
+def clear_pins() -> None:
+    """Release the current item's claims. Called at the item boundary, not by the holder: a
+    handler that raises must not leave the mirror permanently unevictable."""
+    _PINNED.clear()
+
+
+def is_pinned(path: Path) -> bool:
+    p = path.absolute()
+    return p in _PINNED or any(parent in _PINNED for parent in p.parents)
+
+
+def touch(path: Path) -> None:
+    """Mark an artifact as used, now.
+
+    Explicit rather than relying on the filesystem, because `relatime` - the default nearly
+    everywhere, including a Lambda `/tmp` - only advances access time when it is already older
+    than the modification time. Reading a cached file therefore does NOT reliably update its
+    atime, which silently degrades this LRU into a FIFO: a snapshot written by resolve hours ago
+    and read by reduce right now looks maximally cold at exactly the wrong moment.
+    """
+    try:
+        if path.is_dir():
+            for child in path.iterdir():
+                if child.is_file():
+                    os.utime(child)
+        elif path.is_file():
+            os.utime(path)
+    except OSError:
+        pass
 
 
 def evict_reserve() -> int:
@@ -112,6 +158,8 @@ def _evict_candidates(roots: Iterable[Path]) -> list[tuple[float, int, Path]]:
             continue
         for path in root.rglob("*"):
             if _is_in_flight(path) or EVICT_KEEP_DIRS & set(path.parts):
+                continue
+            if is_pinned(path):
                 continue
             resolved = path.absolute()
             if resolved in seen:
@@ -397,7 +445,8 @@ def local_workspace(root: Path | str) -> Workspace:
 
 
 __all__ = [
-    "DEFAULT_EVICT_RESERVE", "DEFAULT_EVICT_SLAB", "EVICT_GRACE_SECONDS", "EVICT_RESERVE_ENV", "MIRROR_DIR",
-    "SCRATCH_ENV", "ObjectStore", "StorageError", "Workspace", "ensure_free", "evict_reserve",
-    "evictable_roots", "local_workspace", "parse_s3", "register_evictable", "scratch_dir",
+    "DEFAULT_EVICT_RESERVE", "DEFAULT_EVICT_SLAB", "EVICT_GRACE_SECONDS", "EVICT_RESERVE_ENV",
+    "MIRROR_DIR", "SCRATCH_ENV", "ObjectStore", "StorageError", "Workspace", "clear_pins",
+    "ensure_free", "evict_reserve", "evictable_roots", "is_pinned", "local_workspace",
+    "parse_s3", "pin", "register_evictable", "scratch_dir", "touch",
 ]

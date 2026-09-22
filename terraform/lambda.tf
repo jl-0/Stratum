@@ -45,8 +45,9 @@ resource "aws_lambda_function" "worker" {
       STRATUM_ASSET_CACHE = "/tmp/assets"
 
       # /tmp is 10 GB and BOTH of the things above grow: 109 MB of OBS per regrid item in
-      # /tmp/assets, and a ~20 MB snapshot per resolve item plus every pulled GLT, aux warp and
-      # ortho warp in the mirror. Neither is durable, so the guard is a free-space floor across
+      # /tmp/assets, and in the mirror every artifact a stage pulls - dominated by the ortho
+      # warps resolve reads, 89.2 GiB of them across the western run at ~12 MB each. Neither is
+      # durable, so the guard is a free-space floor across
       # the whole volume rather than a budget per directory - capping one directory only decides
       # which one runs out first, which is how a 5500 MB asset cap starved the mirror and failed
       # 52,363 of 59,717 resolve items on ENOSPC.
