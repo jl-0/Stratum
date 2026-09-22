@@ -412,14 +412,23 @@ class Workspace:
         self.store.get(key, path)  # type: ignore[union-attr]
         return True
 
-    def pull_tree(self, path: Path) -> int:
+    def pull_tree(self, path: Path, *, only: str | None = None) -> int:
         """Fetch every object under a prefix into the mirror. Returns how many were fetched;
-        a file already present is left alone, because the mirror holds only committed bytes."""
+        a file already present is left alone, because the mirror holds only committed bytes.
+
+        `only` restricts the pull to keys with that suffix. Worth reaching for whenever the
+        caller needs a few small objects out of a large tree: Finalize wants each published
+        tile's `item.json` to build the STAC collection, and pulling the whole tree to get them
+        meant **19 GB and two hours** on the western run when the documents themselves are about
+        a megabyte.
+        """
         if not self.remote:
             return 0
         prefix = self.key(path).rstrip("/") + "/"
         fetched = 0
         for key in self.store.list(prefix):  # type: ignore[union-attr]
+            if only is not None and not key.endswith(only):
+                continue
             dest = self.path / key[len(self.prefix) + 1:] if self.prefix else self.path / key
             if dest.is_file():
                 continue

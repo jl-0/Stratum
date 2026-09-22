@@ -463,3 +463,31 @@ def test_a_local_root_is_neither_touched_nor_pinned(monkeypatch, tmp_path):
     assert cache.hit(key)
     assert not is_pinned(key.path)
     assert (tmp_path / "root") not in evictable_roots()
+
+
+def test_finalize_pulls_only_the_item_documents(monkeypatch, tmp_path):
+    """Finalize needs each published tile's `item.json` to build the STAC collection, and
+    `write_stac_collection` never opens a COG. Pulling the whole products tree to get them cost
+    19 GB and about two hours of silence on the western run - after every stage had already
+    succeeded - for roughly a megabyte of JSON."""
+    install(monkeypatch, tmp_path / "bucket")
+    ws = Workspace.for_root("s3://stratum-test/", mirror=tmp_path / "mirror")
+
+    products = ws.path / "products" / "run-1"
+    for tile in ("-119_35", "-118_35"):
+        d = products / tile / "20250101_20251231"
+        d.mkdir(parents=True)
+        (d / "item.json").write_text('{"id": "x"}')
+        (d / "mineral_1_native.tif").write_bytes(b"\0" * 5000)
+        (d / "depth_1.tif").write_bytes(b"\0" * 5000)
+    ws.push_tree(products)
+    for f in products.rglob("*"):
+        if f.is_file():
+            f.unlink()
+
+    pulled = ws.pull_tree(products, only="item.json")
+    assert pulled == 2, "one document per published tile, and nothing else"
+    assert sorted(p.name for p in products.rglob("*") if p.is_file()) == ["item.json"] * 2
+    assert not list(products.rglob("*.tif")), "the COGs must stay in the bucket"
+
+    assert ws.pull_tree(products) == 4, "unfiltered still fetches everything"

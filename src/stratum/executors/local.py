@@ -10,6 +10,7 @@ section 4's tolerated-failure percentage is a later slice). Outcomes go to
 from __future__ import annotations
 
 import json
+import logging
 import multiprocessing
 import os
 import time
@@ -33,6 +34,8 @@ from stratum.plan.document import (
     results_path,
 )
 from stratum.publish import build_provenance, write_provenance, write_stac_collection
+
+log = logging.getLogger(__name__)
 
 
 class ExecutionError(RuntimeError):
@@ -130,10 +133,16 @@ def run_all(run_dir: Path | str, workers: int | None = None, *,
         execution["cache_hits"][stage] = execution["stages"][stage]["hits"]
     finished = datetime.now(UTC)
 
-    # a worker that published elsewhere - a Lambda - wrote its product tree to the bucket and
-    # not to this machine, so Finalize mirrors it before reading the items back
-    run.workspace.pull_tree(run.products_dir)
+    # A worker that published elsewhere - a Lambda - wrote its product tree to the bucket and
+    # not to this machine, so Finalize mirrors what it needs before reading the items back. That
+    # is the item DOCUMENTS and nothing else: `write_stac_collection` reads each item.json for
+    # its bbox and datetimes and never opens a COG. Pulling the whole tree instead cost 19 GB
+    # and about two hours of silence on the western run, serially, for ~1 MB of JSON - and left
+    # the products no more durable, since the bucket is the record and the mirror is disposable.
     if run.outputs.get("stac", True):
+        pulled = run.workspace.pull_tree(run.products_dir, only="item.json")
+        if pulled:
+            log.info("mirrored %d item document(s) for the STAC collection", pulled)
         items = sorted(run.products_dir.glob("*/*/item.json"))
         if items:
             collection = write_stac_collection(run.products_dir, items,

@@ -34,7 +34,9 @@ a WebKit bug — then fails with **"Couldn't load library"**. Drag-and-drop is t
 because `loadFileToCanvas` routes on the `type` field rather than the file extension.
 
 Verified against `@excalidraw/excalidraw` 0.18.1, not by eye: `isValidExcalidrawData` passes and
-`restore()` keeps all 151 elements and all 39 element links.
+`restore()` keeps all 151 elements and all 39 element links. It also loads in the live editor, and you can
+re-check that after any edit: `uv run scripts/check-excalidraw.py examples/emit-us-west-2025/algorithm.excalidraw`
+drops the file onto excalidraw.com in headless Chromium and fails unless the editor holds every element.
 
 Every box is a hyperlink to the code or the manifest line that implements it, pinned to the
 commit that generated it, because a line number only means something at one commit. It is a

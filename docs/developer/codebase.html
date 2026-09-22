@@ -285,7 +285,7 @@ reduces to.</td><td><a class="src" data-sym="def exec_item" href="https://github
 <tr><td><code>executors/local.py</code></td><td>A spawn-context process pool over the work lists,
 the budget gate, and Finalize. <code>run_all</code> lives here and takes the stage runner as a
 parameter, so the stage order and Finalize are shared with every other
-executor.</td><td><a class="src" data-sym="def run_all" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/executors/local.py#L108">run_all</a></td></tr>
+executor.</td><td><a class="src" data-sym="def run_all" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/executors/local.py#L111">run_all</a></td></tr>
 <tr><td><code>executors/aws.py</code></td><td>The dispatch half of the cloud executor: a thread pool
 over <code>lambda:InvokeFunction</code>, writing the same outcome records. Imported only when
 <code>--executor aws</code> is asked for, so a local run never imports
