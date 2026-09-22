@@ -491,3 +491,47 @@ def test_finalize_pulls_only_the_item_documents(monkeypatch, tmp_path):
     assert not list(products.rglob("*.tif")), "the COGs must stay in the bucket"
 
     assert ws.pull_tree(products) == 4, "unfiltered still fetches everything"
+
+
+# ------------------------------------------------------------- what an S3 failure actually says
+def _client_error(status, code, message, op="HeadObject"):
+    from botocore.exceptions import ClientError
+    return ClientError({"Error": {"Code": code, "Message": message},
+                        "ResponseMetadata": {"HTTPStatusCode": status}}, op)
+
+
+def test_an_s3_error_reports_the_status_and_code_not_just_its_class():
+    """It used to re-raise as the bare string `ClientError`, so an expired session and a missing
+    object produced the same unreadable message and the only clue was the chained traceback."""
+    from stratum.storage import _s3_detail
+
+    detail = _s3_detail(_client_error(404, "NoSuchKey", "The specified key does not exist."))
+    assert "HTTP 404" in detail and "NoSuchKey" in detail
+    assert "credentials" not in detail, "a missing object is not a credentials problem"
+
+
+def test_expired_credentials_say_so_and_say_what_to_do():
+    from stratum.storage import _s3_detail
+
+    detail = _s3_detail(_client_error(400, "ExpiredToken", "The provided token has expired."))
+    assert "ExpiredToken" in detail
+    assert "refresh your AWS session" in detail
+
+
+def test_a_naked_400_from_a_head_explains_why_it_is_naked():
+    """The one that bit on the western run: `HeadObject` is a HEAD, so there is no response body
+    for S3 to put an error code in, and botocore reports `400 Bad Request` with nothing else.
+    The same credentials on a GET-based call said `ExpiredToken` outright."""
+    from stratum.storage import _s3_detail
+
+    detail = _s3_detail(_client_error(400, "400", "Bad Request"))
+    assert "HTTP 400" in detail
+    assert "carries no error body" in detail and "Expired credentials" in detail
+
+
+def test_a_real_error_with_a_real_code_is_not_second_guessed():
+    from stratum.storage import _s3_detail
+
+    detail = _s3_detail(_client_error(400, "InvalidRange", "The requested range is not satisfiable"))
+    assert "InvalidRange" in detail
+    assert "carries no error body" not in detail, "do not guess when S3 has told you"

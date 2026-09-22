@@ -206,7 +206,7 @@ granule's raw class table: the lumping from raw keys to product ids.</td><td><a 
 <code>explain</code>/<code>diff</code>.</td><td><a class="src" data-sym="def key(self, artifact: str, grid_id: str, tile: TileRef" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/cache/__init__.py#L91">CacheRoot.key</a></td></tr>
 <tr><td><code>storage.py</code></td><td>The storage root, as one object: a local directory, or an
 <code>s3://</code> prefix with a node-local mirror. Everything above it is handed a real
-<code>pathlib.Path</code>, so no stage handles a URI.</td><td><a class="src" data-sym="class Workspace" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/storage.py#L313">Workspace</a></td></tr>
+<code>pathlib.Path</code>, so no stage handles a URI.</td><td><a class="src" data-sym="class Workspace" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/storage.py#L353">Workspace</a></td></tr>
 <tr><td><code>filters.py</code></td><td>The built-in <code>GranuleFilter</code> predicates and the
 <code>on_missing</code> policy machinery. Runs against the index at plan time, never against
 pixels.</td><td><a class="src" data-sym="def apply_filters" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/filters.py#L220">apply_filters</a></td></tr>

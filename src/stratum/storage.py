@@ -70,6 +70,46 @@ class StorageError(RuntimeError):
     """A remote read or write failed. Carries the bucket and key, never a credential."""
 
 
+#: Error codes that mean "these credentials are no longer usable", as opposed to "that object is
+#: not there". Worth naming, because the two are indistinguishable in the traceback otherwise and
+#: only one of them is fixed by logging in again.
+STALE_CREDENTIAL_CODES = frozenset({
+    "ExpiredToken", "ExpiredTokenException", "RequestExpired", "TokenRefreshRequired",
+    "InvalidToken", "InvalidClientTokenId", "UnrecognizedClientException",
+    "InvalidAccessKeyId", "SignatureDoesNotMatch", "AuthFailure", "AccessDenied",
+})
+
+
+def _s3_detail(e: Any) -> str:
+    """What botocore actually returned, as a readable clause.
+
+    Without this a `ClientError` was re-raised as the bare string `ClientError`, throwing away
+    the status, the code and the message - so an expired session and a missing object produced
+    the same unreadable error. The `HeadObject` case is the one that bit: a HEAD carries no
+    response body, so S3 has nowhere to put an error code and botocore reports a naked
+    `400 Bad Request`. Expired credentials are by far the most common cause, and the same
+    credentials on a GET-based call say `ExpiredToken` plainly.
+    """
+    response = getattr(e, "response", None) or {}
+    err = response.get("Error") or {}
+    status = (response.get("ResponseMetadata") or {}).get("HTTPStatusCode")
+    code = str(err.get("Code") or "")
+    message = str(err.get("Message") or "")
+    # S3 echoes the status back as the "code" when there is no real one, which would render as
+    # "HTTP 400 400 Bad Request".
+    shown_code = "" if code == str(status) else code
+    parts = [p for p in (f"HTTP {status}" if status else "", shown_code, message) if p]
+    detail = " ".join(dict.fromkeys(parts)) or type(e).__name__
+    uninformative = code in ("", str(status), "400", "403") and message in ("", "Bad Request",
+                                                                            "Forbidden")
+    if code in STALE_CREDENTIAL_CODES:
+        detail += " - these credentials are no longer valid; refresh your AWS session"
+    elif uninformative and status in (400, 403):
+        detail += (" - a HEAD request carries no error body, so S3 could not say why. Expired "
+                   "credentials are the usual cause: refresh your AWS session and retry")
+    return detail
+
+
 # --------------------------------------------------------------------------------- reclaiming
 def register_evictable(path: Path | str | None) -> None:
     """Declare a directory whose contents this process may delete to make room.
@@ -261,7 +301,7 @@ class ObjectStore:
         except ClientError as e:
             if e.response.get("Error", {}).get("Code") in ("404", "NoSuchKey", "403"):
                 return False
-            raise StorageError(f"HEAD s3://{self.bucket}/{key}: {type(e).__name__}") from e
+            raise StorageError(f"HEAD s3://{self.bucket}/{key}: {_s3_detail(e)}") from e
         return True
 
     def list(self, prefix: str) -> list[str]:
@@ -295,7 +335,7 @@ class ObjectStore:
             os.replace(tmp, dest)
         except ClientError as e:
             tmp.unlink(missing_ok=True)
-            raise StorageError(f"GET s3://{self.bucket}/{key}: {type(e).__name__}") from e
+            raise StorageError(f"GET s3://{self.bucket}/{key}: {_s3_detail(e)}") from e
         except BaseException:
             tmp.unlink(missing_ok=True)
             raise
@@ -305,7 +345,7 @@ class ObjectStore:
         try:
             self.client.upload_file(str(src), self.bucket, key)
         except ClientError as e:
-            raise StorageError(f"PUT s3://{self.bucket}/{key}: {type(e).__name__}") from e
+            raise StorageError(f"PUT s3://{self.bucket}/{key}: {_s3_detail(e)}") from e
 
 
 # ------------------------------------------------------------------------------- the workspace
