@@ -371,8 +371,44 @@ Easy to conflate, and the two obey different rules:
 | Holds | GLTs, observations, snapshots, products | Local copies of upstream granules |
 | Keyed by | A hash of the inputs that determine it | The catalogue checksum, else a hash of the URI plus the ETag when one is known (as built, below) |
 | Scope | Every run in the deployment | Meant for one node: a directory filled by download-to-temp and atomic rename, so a reader only ever sees a complete file and no lock is needed. A cluster deployment points `STRATUM_ASSET_CACHE` at node scratch (`$SLURM_TMPDIR`), because a shared filesystem gains nothing from the rename discipline and pays for every download twice |
-| Size | **Bounded, and evicts least-recently-used** | `$STRATUM_ASSET_CACHE_BUDGET_BYTES`, else 55 % of the volume; `0` disables eviction. A verbatim copy of an upstream granule is the one artifact always safe to discard — re-staging costs a download, while everything DERIVED from it is content-addressed in the storage root and survives ([06 §2](06-caching.md)). Eviction is by access time, not write time, because one granule is read once per tile it touches (4.78 on the western run) and a FIFO would evict a file about to be read again. `.part-` files and entries younger than 60 s are never candidates, and eviction stops rather than thrashing a cache of genuinely hot files. **[observed] 2026-09-21:** without this, a warm Lambda execution environment filled its 10 GB `/tmp` after ~91 L1B OBS assets at 109 MB each and every later item failed with `ENOSPC` — 6,076 of 9,232 regrid items on the first western run |
-| Deleting it | Costs recomputation | Costs a download |
+| Size | Unbounded where the root is local — there it *is* the record. Where the root is a bucket, its node-local **mirror** is a cache like any other and is evicted with the asset cache, under one policy | Bounded, and evicted least-recently-used |
+| Deleting it | Costs recomputation, or a re-download from the bucket when the root is remote | Costs a download |
+
+##### Reclaiming the scratch volume
+
+One policy governs both, because on a worker they **share one filesystem** — a single 10 GB
+`/tmp` on Lambda — and everything either of them holds is a cache of something durable. A
+verbatim upstream granule re-stages with a download; a mirrored artifact re-pulls from the
+bucket ([06 §2](06-caching.md)). Evicting is therefore a bandwidth trade, never a correctness
+one, and that is the property the whole mechanism rests on.
+
+The guard is **free space on the volume**, not a budget per directory:
+
+- **Trigger and target.** Eviction starts when free space falls below
+  `$STRATUM_SCRATCH_RESERVE_BYTES` (default 1.5 GB) and frees past it by a slab, so one tree
+  walk buys many writes. The free-space probe is cheap and comes first, so the walk never
+  happens on a machine with room — which is every workstation.
+- **Access time, not write time.** A tile's aux warp is read by 25 blocks × 52 epochs and a
+  granule's GLT by every epoch that granule appears in, so both keep being refreshed and stay
+  resident; a snapshot, written once and never re-read by the stage that wrote it, ages out. A
+  FIFO evicts exactly the wrong ones.
+- **Never candidates.** `runs/` (the work lists and `plan.json` an item is reading — losing
+  those fails the item rather than costing a re-fetch), in-flight writes (`.part-*`,
+  `.{hash}-{token}.tmp`), and anything accessed within 60 s. Eviction stops rather than
+  thrashing a scratch volume genuinely full of hot files: the caller is allowed to fail on
+  `ENOSPC`, because pulling a file out from under a reader is worse than the error.
+
+`$STRATUM_ASSET_CACHE_BUDGET_BYTES` still caps the asset cache alone, but it is **off by
+default** and is policy, not safety — worth setting on a shared workstation, where free space is
+plentiful and a run hoarding the archive slice is merely antisocial.
+
+> **[observed] 2026-09-21, twice, and the second time was self-inflicted.** With nothing bounded,
+> a warm Lambda filled its 10 GB `/tmp` after ~91 L1B OBS assets at 109 MB each: **6,076 of
+> 9,232 regrid items** failed with `ENOSPC`. Capping the asset cache at 5.5 GB fixed regrid and
+> broke resolve — it left the mirror 4.5 GB, and resolve writes a ~20 MB snapshot per item into
+> it on top of every GLT, aux warp and ortho warp it pulls: **52,363 of 59,717 resolve items**
+> failed the same way. A per-directory budget does not bound a shared volume; it only decides
+> which directory runs out first. Hence one free-space policy over both.
 
 #### The asset cache as built
 

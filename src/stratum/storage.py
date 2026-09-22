@@ -27,7 +27,10 @@ from __future__ import annotations
 import hashlib
 import os
 import shutil
+import stat
 import tempfile
+import time
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from functools import cached_property
 from pathlib import Path
@@ -37,9 +40,133 @@ from urllib.parse import urlparse
 SCRATCH_ENV = "STRATUM_SCRATCH"
 MIRROR_DIR = "stratum-mirror"
 
+#: Bytes to leave free on the scratch volume after any staged write. Eviction is driven by what
+#: the VOLUME has left rather than by a per-directory budget, because the asset cache, the mirror
+#: and the runtime all share one filesystem - on Lambda a single 10 GB `/tmp` - and any split
+#: between them is a guess that starves whichever side guessed low.
+EVICT_RESERVE_ENV = "STRATUM_SCRATCH_RESERVE_BYTES"
+DEFAULT_EVICT_RESERVE = 1536 * 1024 * 1024
+#: An entry accessed more recently than this is never evicted, so a file another thread just
+#: opened is not pulled out from under it.
+EVICT_GRACE_SECONDS = 60.0
+#: Hysteresis. Eviction TRIGGERS at `reserve` but frees down to `reserve + slab`, so one tree
+#: walk buys many writes. Without it a stage that writes 20 MB per item and sits just under the
+#: reserve would rglob the whole mirror on every single write - correct, but needlessly so.
+#: `None` means "a slab as big as the reserve".
+DEFAULT_EVICT_SLAB: int | None = None
+#: Never evicted: a run directory holds `plan.json` and the work lists every item is reading, it
+#: is kilobytes per item, and losing it fails the item rather than costing a re-fetch.
+EVICT_KEEP_DIRS = frozenset({"runs"})
+
+_EVICTABLE: set[Path] = set()
+
 
 class StorageError(RuntimeError):
     """A remote read or write failed. Carries the bucket and key, never a credential."""
+
+
+# --------------------------------------------------------------------------------- reclaiming
+def register_evictable(path: Path | str | None) -> None:
+    """Declare a directory whose contents this process may delete to make room.
+
+    Only ever a node-local cache of something durable: the asset cache (a verbatim copy of an
+    upstream granule) or a mirror of the storage bucket. Both are re-fetchable by construction -
+    see this module's docstring - so evicting is a bandwidth trade, never a correctness one. A
+    LOCAL storage root is never registered: there the mirror IS the record.
+    """
+    if path is not None:
+        _EVICTABLE.add(Path(path))
+
+
+def evictable_roots() -> list[Path]:
+    return sorted(_EVICTABLE)
+
+
+def evict_reserve() -> int:
+    """Bytes to keep free: `$STRATUM_SCRATCH_RESERVE_BYTES`, else `DEFAULT_EVICT_RESERVE`.
+    `0` disables eviction entirely."""
+    raw = os.environ.get(EVICT_RESERVE_ENV)
+    if raw is not None and raw.strip():
+        return max(0, int(raw))
+    return DEFAULT_EVICT_RESERVE
+
+
+def _is_in_flight(path: Path) -> bool:
+    """A partial download (`.part-*`) or an uncommitted cache write (`.{hash}-{token}.tmp`).
+    Deleting either corrupts a write in progress rather than reclaiming a cached byte."""
+    return ".part-" in path.name or ".tmp" in path.name
+
+
+def _evict_candidates(roots: Iterable[Path]) -> list[tuple[float, int, Path]]:
+    """`(atime, size, path)` for every evictable file under `roots`, oldest access first.
+
+    Access time, not write time, is what makes this an LRU: a tile's aux warp is read by 25
+    blocks x 52 epochs and a granule's GLT by every epoch that granule appears in, so both keep
+    being refreshed and stay resident, while a snapshot - written once and never re-read by the
+    stage that wrote it - ages out. A FIFO would evict exactly the wrong ones.
+    """
+    out: list[tuple[float, int, Path]] = []
+    seen: set[Path] = set()
+    for root in roots:
+        if not root.is_dir():
+            continue
+        for path in root.rglob("*"):
+            if _is_in_flight(path) or EVICT_KEEP_DIRS & set(path.parts):
+                continue
+            resolved = path.absolute()
+            if resolved in seen:
+                continue
+            try:
+                st = path.stat()
+            except OSError:
+                continue
+            if not stat.S_ISREG(st.st_mode):
+                continue
+            seen.add(resolved)
+            out.append((st.st_atime, st.st_size, path))
+    out.sort(key=lambda e: e[0])
+    return out
+
+
+def ensure_free(need: int, *, roots: Sequence[Path] | None = None, reserve: int | None = None,
+                slab: int | None = DEFAULT_EVICT_SLAB,
+                grace: float = EVICT_GRACE_SECONDS) -> int:
+    """Evict least-recently-used cached files when the volume has less than `need + reserve`
+    bytes free, down to `need + reserve + slab`. Returns the bytes reclaimed.
+
+    The free-space probe comes first and is cheap, so the expensive tree walk only happens when
+    the volume is actually tight - which on a workstation is never - and the slab means one walk
+    then buys many writes. Eviction stops when nothing older than `grace` remains, so a scratch
+    volume genuinely full of hot files is left alone and the caller is allowed to fail on ENOSPC
+    rather than thrash: pulling a file out from under a reader is worse than the error.
+    """
+    reserve = evict_reserve() if reserve is None else reserve
+    if reserve <= 0:
+        return 0
+    candidates = evictable_roots() if roots is None else [Path(r) for r in roots]
+    probe = next((r for r in candidates if r.is_dir()), None)
+    if probe is None:
+        return 0
+    try:
+        free = shutil.disk_usage(probe).free
+    except OSError:
+        return 0
+    if free >= need + reserve:               # low-water mark: nothing to do
+        return 0
+    target = need + reserve + (reserve if slab is None else slab)
+    freed = 0
+    now = time.time()
+    for atime, size, path in _evict_candidates(candidates):
+        if free + freed >= target:           # high-water mark: stop, having bought headroom
+            break
+        if now - atime < grace:
+            continue
+        try:
+            path.unlink()
+        except OSError:
+            continue
+        freed += size
+    return freed
 
 
 # ------------------------------------------------------------------------------------ the URI
@@ -167,6 +294,9 @@ class Workspace:
         if mirror is None:
             mirror = scratch_dir() / MIRROR_DIR / hashlib.sha256(uri.encode()).hexdigest()[:16]
         mirror.mkdir(parents=True, exist_ok=True)
+        # A remote root's mirror is disposable by definition, so it may be reclaimed under disk
+        # pressure. A local root is NOT registered: there this path is the record itself.
+        register_evictable(mirror)
         return cls(uri=uri, path=mirror, store=ObjectStore(bucket, client=client), prefix=prefix)
 
     @property
@@ -267,6 +397,7 @@ def local_workspace(root: Path | str) -> Workspace:
 
 
 __all__ = [
-    "MIRROR_DIR", "SCRATCH_ENV", "ObjectStore", "StorageError", "Workspace", "local_workspace",
-    "parse_s3", "scratch_dir",
+    "DEFAULT_EVICT_RESERVE", "DEFAULT_EVICT_SLAB", "EVICT_GRACE_SECONDS", "EVICT_RESERVE_ENV", "MIRROR_DIR",
+    "SCRATCH_ENV", "ObjectStore", "StorageError", "Workspace", "ensure_free", "evict_reserve",
+    "evictable_roots", "local_workspace", "parse_s3", "register_evictable", "scratch_dir",
 ]

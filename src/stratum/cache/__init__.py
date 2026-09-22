@@ -25,7 +25,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from stratum.storage import Workspace, local_workspace
+from stratum.storage import Workspace, ensure_free, local_workspace
 from stratum.types import GridDef, TileRef, canonical_hash
 
 # artifact_type -> kind. A file artifact carries a suffix; a directory artifact is renamed whole.
@@ -128,6 +128,7 @@ class CacheRoot:
         cleared and the stage recomputes."""
         if not self.workspace.exists(key.inputs_path):
             return False
+        ensure_free(0)
         if key.is_dir:
             self.workspace.pull_tree(key.path)
         else:
@@ -145,6 +146,7 @@ class CacheRoot:
         at the key path."""
         if key.is_dir:
             raise ValueError(f"{key.artifact!r} is a directory artifact; use write_dir")
+        ensure_free(0)
         key.path.parent.mkdir(parents=True, exist_ok=True)
         tmp = key.path.with_name(f".{key.hash16}-{secrets.token_hex(4)}.tmp{key.path.suffix}")
         try:
@@ -164,6 +166,7 @@ class CacheRoot:
         raises, the temp directory is removed."""
         if not key.is_dir:
             raise ValueError(f"{key.artifact!r} is a file artifact; use write_file")
+        ensure_free(0)
         key.path.parent.mkdir(parents=True, exist_ok=True)
         tmp = key.path.with_name(f".{key.hash16}-{secrets.token_hex(4)}.tmp")
         try:

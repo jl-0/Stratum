@@ -154,6 +154,10 @@ resource "aws_ecs_task_definition" "viewer" {
     environment = [
       # The mirror lives on the ephemeral volume, which is the only place with room for it.
       { name = "STRATUM_SCRATCH", value = "/tmp" },
+      # This task is long-lived and pulls a product tile into the mirror for every tile it
+      # serves, so the mirror grows for as long as anyone is panning the map. Same free-space
+      # floor as the worker: the mirror is a cache of the bucket and re-pulls what it drops.
+      { name = "STRATUM_SCRATCH_RESERVE_BYTES", value = tostring(var.scratch_reserve_mb * 1024 * 1024) },
     ]
 
     logConfiguration = {

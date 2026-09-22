@@ -43,8 +43,15 @@ resource "aws_lambda_function" "worker" {
       # both live in it; neither is durable and neither needs to be.
       STRATUM_SCRATCH     = "/tmp"
       STRATUM_ASSET_CACHE = "/tmp/assets"
-      # Bounded, because /tmp is 10 GB and one L1B OBS is 109 MB: without this a warm execution
-      # environment fills after ~91 items and every later one fails with ENOSPC.
+
+      # /tmp is 10 GB and BOTH of the things above grow: 109 MB of OBS per regrid item in
+      # /tmp/assets, and a ~20 MB snapshot per resolve item plus every pulled GLT, aux warp and
+      # ortho warp in the mirror. Neither is durable, so the guard is a free-space floor across
+      # the whole volume rather than a budget per directory - capping one directory only decides
+      # which one runs out first, which is how a 5500 MB asset cap starved the mirror and failed
+      # 52,363 of 59,717 resolve items on ENOSPC.
+      STRATUM_SCRATCH_RESERVE_BYTES = tostring(var.scratch_reserve_mb * 1024 * 1024)
+      # Off: the per-directory policy cap is not what bounds this volume (see variables.tf).
       STRATUM_ASSET_CACHE_BUDGET_BYTES = tostring(var.asset_cache_budget_mb * 1024 * 1024)
     }
   }

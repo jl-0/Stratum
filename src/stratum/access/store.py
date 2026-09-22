@@ -22,7 +22,6 @@ from __future__ import annotations
 import contextlib
 import hashlib
 import os
-import shutil
 import stat
 import threading
 import time
@@ -34,6 +33,7 @@ from typing import Any
 from urllib.parse import unquote, urlparse
 from urllib.request import url2pathname
 
+from stratum.storage import ensure_free, register_evictable
 from stratum.types import AssetHandle, Credentials
 
 REMOTE_SCHEMES = ("s3", "https")
@@ -51,18 +51,18 @@ DEFAULT_TIMEOUT: tuple[float, float] = (30.0, 300.0)
 _AUTH_STATUSES = (401, 403)
 #: Transient statuses worth a bounded retry with backoff (08 section 4): rate limit, gateway.
 RETRY_STATUSES = (429, 502, 503, 504)
-#: The asset cache is the only thing on the scratch volume that grows without bound, and on a
-#: Lambda it shares a 10 GB `/tmp` with the storage mirror. 109 MB of OBS per regrid item fills
-#: that in ~91 items, after which every later item in the same warm execution environment fails
-#: with ENOSPC - which is a deterministic crash, not a capacity accident (12 section 4).
+#: An OPTIONAL policy cap on this one directory: "do not hoard more than this many bytes of
+#: staged granules". Off unless set, because it is not what keeps the volume from filling -
+#: `stratum.storage.ensure_free` is, and it looks at free space across everything sharing the
+#: filesystem. Sizing a per-directory budget instead is what failed twice: the asset cache and
+#: the storage mirror share one 10 GB `/tmp` on Lambda, so a 5.5 GB asset budget left the mirror
+#: 4.5 GB, and resolve - which writes a ~20 MB snapshot per item into it and pulls every GLT,
+#: aux warp and ortho warp it reads - filled that and died on ENOSPC (12 section 4).
 #:
-#: So the cache is bounded and evicts least-recently-used. The mirror is deliberately NOT
-#: evicted: it holds `plan.json` and the work lists a worker is reading, and it grows ~3 MB per
-#: item against the asset cache's ~109 MB, so it is neither safe to prune nor worth pruning.
+#: Worth setting on a shared workstation, where free space is plentiful but a run staging the
+#: whole archive slice is still antisocial: one `plan` over the western states parked 84 GB of
+#: granules in `{root}/assets` because nothing capped it and nothing needed to.
 SCRATCH_BUDGET_ENV = "STRATUM_ASSET_CACHE_BUDGET_BYTES"
-#: Fraction of the cache volume the assets may occupy when the budget is not set explicitly.
-#: Leaves room for the mirror, the temp files of an in-flight download, and the runtime itself.
-DEFAULT_BUDGET_FRACTION = 0.55
 #: Reserved before a stage-in whose size is not known yet. EMIT's largest indexed asset is the
 #: 109 MB L1B OBS; this covers one of those plus a companion and headroom.
 DEFAULT_RESERVE_BYTES = 512 * 1024 * 1024
@@ -80,21 +80,18 @@ _BARE_HEX_ALGOS = {128: "sha512", 64: "sha256"}
 
 
 def cache_budget(cache: Path) -> int:
-    """Bytes the asset cache may occupy: `$STRATUM_ASSET_CACHE_BUDGET_BYTES`, else
-    `DEFAULT_BUDGET_FRACTION` of the volume the cache sits on.
+    """Bytes the asset cache may occupy: `$STRATUM_ASSET_CACHE_BUDGET_BYTES`, else `0`.
 
-    Derived from the VOLUME rather than hard-coded, so the same default is sensible on a 10 GB
-    Lambda `/tmp` and on a workstation. `0` disables eviction, which is the right answer for a
-    machine whose disk is larger than the archive slice a run touches.
+    `0` means this cap is off and the cache is bounded only by free space, via
+    `stratum.storage.ensure_free`. The default used to be a FRACTION OF THE VOLUME, which was
+    wrong in a way worth recording: it reserved most of a shared `/tmp` for one of the several
+    directories on it, so the others hit ENOSPC while the budget reported room to spare.
     """
     override = os.environ.get(SCRATCH_BUDGET_ENV)
     if override is not None and override.strip():
         return max(0, int(override))
-    try:
-        total = shutil.disk_usage(cache if cache.is_dir() else cache.parent).total
-    except OSError:
-        return 0
-    return int(total * DEFAULT_BUDGET_FRACTION)
+    _ = cache
+    return 0
 
 
 def _entries(cache: Path) -> list[tuple[float, int, Path]]:
@@ -408,6 +405,9 @@ class AssetStore:
             env = os.environ.get(ASSET_CACHE_ENV)
             asset_cache = env if env else None
         self.asset_cache = Path(asset_cache) if asset_cache is not None else None
+        # A staged asset is a verbatim copy of an upstream granule, so it is always safe to
+        # reclaim: re-staging costs a download and nothing derived from it is lost (06 section 2).
+        register_evictable(self.asset_cache)
         self._auth = auth if auth is not None else _EarthdataAuth()
         self._session_factory = (session_factory if session_factory is not None
                                  else _default_session_factory)
@@ -539,7 +539,14 @@ class AssetStore:
                 os.utime(target)
             return CachedAsset(uri=uri, etag=etag, local=target, checksum=checksum)
         target.parent.mkdir(parents=True, exist_ok=True)
-        freed = ensure_room(cache, self.reserve)
+        # Two independent limits, and both are needed. `ensure_room` is POLICY - do not hoard
+        # more than the budget in this one directory - and defaults to off. `ensure_free` is
+        # SAFETY: the asset cache, the storage mirror and the runtime share one filesystem, so
+        # what matters before a download is what the VOLUME has left, not what this directory
+        # holds. Sizing them against each other is what failed: a 5.5 GB asset budget on a
+        # 10 GB /tmp starved the mirror, and resolve - which writes a ~20 MB snapshot per item
+        # into it - filled the remaining 4.5 GB and died on ENOSPC.
+        freed = ensure_room(cache, self.reserve) + ensure_free(self.reserve)
         if freed:
             self.evicted_bytes += freed
         # the temp name carries the pid AND the thread id: `prefetch` runs several downloads

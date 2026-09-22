@@ -229,3 +229,146 @@ def test_a_worker_rebuilds_the_run_from_the_bucket(monkeypatch, tmp_path: Path) 
     out = exec_item(fresh.path / "runs" / result.run_id, "regrid", 0)
     assert out["ok"] and out["hit"], "a GLT another machine wrote is a hit here"
     clear_cache()
+
+
+# ------------------------------------------------------------------- reclaiming scratch space
+# The asset cache, the storage mirror and the runtime share ONE filesystem - a 10 GB /tmp on
+# Lambda - and everything either of the first two holds is a cache of something durable. These
+# cover the guard that follows from that, and the two failures that produced it: 6,076 regrid
+# items on ENOSPC with an unbounded asset cache, then 52,363 resolve items on ENOSPC with the
+# asset cache capped at 5.5 GB and the mirror taking the rest.
+def _aged(path: Path, size: int, age: float) -> Path:
+    import os
+    import time
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(b"\0" * size)
+    when = time.time() - age
+    os.utime(path, (when, when))
+    return path
+
+
+def _free(monkeypatch, free: int) -> None:
+    """Pin reported free space, so eviction is exercised without filling a real disk."""
+    import shutil as _shutil
+
+    from stratum import storage as _storage
+    real = _shutil.disk_usage
+
+    def fake(path):
+        u = real("/")
+        return type(u)(total=u.total, used=u.total - free, free=free)
+
+    monkeypatch.setattr(_storage.shutil, "disk_usage", fake)
+
+
+def test_plenty_of_free_space_evicts_nothing_and_never_walks_the_tree(monkeypatch, tmp_path):
+    """The common case, and the reason the probe comes before the walk: a workstation must not
+    pay an rglob over an 85 GB mirror on every cache write."""
+    from stratum import storage as _storage
+    from stratum.storage import ensure_free
+
+    cache = tmp_path / "assets"
+    _aged(cache / "old.nc", 1000, age=10_000)
+    _free(monkeypatch, 500 * 1024 * 1024 * 1024)
+    walked = []
+    monkeypatch.setattr(_storage, "_evict_candidates",
+                        lambda roots: walked.append(roots) or [])
+    assert ensure_free(0, roots=[cache], reserve=1024) == 0
+    assert walked == [], "the tree must not be walked when the volume is not tight"
+    assert (cache / "old.nc").exists()
+
+
+def test_eviction_spans_the_asset_cache_and_the_mirror_in_one_lru(monkeypatch, tmp_path):
+    """The fix for the resolve failure. A budget per directory cannot do this: staged granules
+    and mirrored artifacts compete for the same bytes, so they must compete in the same LRU -
+    and the biggest, coldest thing goes first whichever directory it is in."""
+    from stratum.storage import ensure_free
+
+    assets, mirror = tmp_path / "assets", tmp_path / "mirror"
+    cold_asset = _aged(assets / "ab" / "cold_OBS.nc", 400, age=9_000)
+    cold_snap = _aged(mirror / "cache" / "snapshot" / "t" / "cold.tif", 400, age=8_000)
+    hot_glt = _aged(mirror / "cache" / "glt" / "t" / "hot.tif", 400, age=1_000)
+    _free(monkeypatch, 100)
+    freed = ensure_free(0, roots=[assets, mirror], reserve=900, slab=0, grace=0.0)
+    assert freed == 800
+    assert not cold_asset.exists() and not cold_snap.exists()
+    assert hot_glt.exists(), "the most recently READ artifact must survive"
+
+
+def test_a_run_directory_is_never_evicted(monkeypatch, tmp_path):
+    """Work lists and plan.json are what the item is reading. Losing them fails the item
+    instead of costing a re-fetch, which is the one case where eviction is not a bandwidth
+    trade - so `runs/` is excluded by path, not by age."""
+    from stratum.storage import ensure_free
+
+    mirror = tmp_path / "mirror"
+    work = _aged(mirror / "runs" / "r1" / "work" / "resolve.jsonl", 10_000, age=99_999)
+    art = _aged(mirror / "cache" / "glt" / "t" / "a.tif", 100, age=99_999)
+    _free(monkeypatch, 0)
+    ensure_free(0, roots=[mirror], reserve=10_000, grace=0.0)
+    assert work.exists(), "a run directory must survive even when nothing else can be freed"
+    assert not art.exists()
+
+
+def test_an_in_flight_write_is_never_evicted(monkeypatch, tmp_path):
+    """`.part-*` is a download in progress and `.{hash}-{token}.tmp` an uncommitted cache
+    write. Deleting either corrupts a write instead of reclaiming a cached byte."""
+    from stratum.storage import ensure_free
+
+    d = tmp_path / "mirror"
+    part = _aged(d / "assets" / "x.nc.part-123-456", 5_000, age=99_999)
+    tmp = _aged(d / "cache" / "glt" / "t" / ".abc123-dead.tmp", 5_000, age=99_999)
+    done = _aged(d / "cache" / "glt" / "t" / "done.tif", 100, age=99_999)
+    _free(monkeypatch, 0)
+    ensure_free(0, roots=[d], reserve=10_000, grace=0.0)
+    assert part.exists() and tmp.exists()
+    assert not done.exists()
+
+
+def test_eviction_stops_rather_than_thrashing_a_hot_scratch(monkeypatch, tmp_path):
+    """Everything inside the grace window is left alone, and the caller is allowed to fail on
+    ENOSPC. Pulling a file out from under a reader is worse than the error."""
+    from stratum.storage import ensure_free
+
+    d = tmp_path / "mirror"
+    fresh = _aged(d / "cache" / "glt" / "t" / "fresh.tif", 5_000, age=1.0)
+    _free(monkeypatch, 0)
+    assert ensure_free(0, roots=[d], reserve=1_000_000, grace=60.0) == 0
+    assert fresh.exists()
+
+
+def test_reserve_zero_disables_eviction(monkeypatch, tmp_path):
+    from stratum.storage import ensure_free
+
+    d = tmp_path / "mirror"
+    keep = _aged(d / "cache" / "glt" / "t" / "a.tif", 5_000, age=99_999)
+    _free(monkeypatch, 0)
+    assert ensure_free(0, roots=[d], reserve=0, grace=0.0) == 0
+    assert keep.exists()
+
+
+def test_a_remote_root_registers_its_mirror_and_a_local_root_does_not(monkeypatch, tmp_path):
+    """The asymmetry that keeps this safe: a bucket's mirror is disposable, a local root is the
+    record. Registering a local root would make eviction delete the product."""
+    from stratum.storage import Workspace, evictable_roots
+
+    monkeypatch.setenv("STRATUM_SCRATCH", str(tmp_path / "scratch"))
+    local = Workspace.for_root(tmp_path / "out")
+    assert local.path not in evictable_roots()
+    remote = Workspace.for_root("s3://bucket/prefix", client=object())
+    assert remote.path in evictable_roots()
+
+
+def test_one_walk_buys_many_writes(monkeypatch, tmp_path):
+    """Hysteresis. Eviction triggers at the reserve but frees past it, so a stage writing 20 MB
+    an item does not rglob the whole mirror on every write. Without the slab this frees exactly
+    one file and is back under the low-water mark immediately."""
+    from stratum.storage import ensure_free
+
+    d = tmp_path / "mirror"
+    for i in range(6):
+        _aged(d / "cache" / "snapshot" / "t" / f"s{i}.tif", 100, age=9_000 - i)
+    _free(monkeypatch, 100)
+    # low-water 200 would be met by freeing 100; the slab takes it to 500
+    freed = ensure_free(0, roots=[d], reserve=200, slab=300, grace=0.0)
+    assert freed == 400, "must free to the high-water mark, not the trigger"

@@ -59,9 +59,15 @@ variable "ephemeral_storage_mb" {
 }
 
 variable "asset_cache_budget_mb" {
-  description = "Bytes (in MB) the node-local asset cache may occupy on /tmp before it evicts least-recently-used entries. /tmp also holds the storage mirror and any in-flight download temp file, so this must be well under ephemeral_storage_mb. 0 leaves it to the code's default of 55% of the volume; set explicitly here because the failure mode is a deterministic ENOSPC after ~91 items in a warm execution environment, not a gradual slowdown."
+  description = "Optional policy cap (in MB) on the node-local asset cache alone. 0 = off, which is the right answer here: /tmp is shared by the asset cache, the storage mirror and the runtime, so capping one directory does not bound the volume - it only decides which directory runs out first. A 5500 MB cap here left the mirror 4.5 GB of a 10 GB /tmp and resolve filled it. Use scratch_reserve_mb instead; this stays for a shared workstation, where hoarding is the problem rather than capacity."
   type        = number
-  default     = 5500
+  default     = 0
+}
+
+variable "scratch_reserve_mb" {
+  description = "Bytes (in MB) to keep free on /tmp. Everything staged there is a cache of something durable - a verbatim DAAC granule, or a mirror of the bucket - so when free space drops below this the least-recently-used of it is evicted, across the asset cache and the mirror together. Access time, not write time: a tile's aux warp is read by 25 blocks x 52 epochs and must outlive a snapshot that is written once and never re-read. Run directories are never evicted. 0 disables eviction entirely."
+  type        = number
+  default     = 1536
 }
 
 variable "reserved_concurrency" {

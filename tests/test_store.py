@@ -7,7 +7,6 @@ from __future__ import annotations
 
 import hashlib
 import os
-import shutil
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
@@ -17,7 +16,6 @@ import pytest
 
 from stratum.access.store import (
     ASSET_CACHE_ENV,
-    DEFAULT_BUDGET_FRACTION,
     SCRATCH_BUDGET_ENV,
     AssetCacheUnconfigured,
     AssetFetchError,
@@ -558,15 +556,17 @@ def _asset(cache: Path, name: str, size: int, age: float = 0.0) -> Path:
     return p
 
 
-def test_cache_budget_is_a_fraction_of_the_volume_and_overridable(tmp_path, monkeypatch):
+def test_the_asset_budget_is_opt_in_and_never_derived_from_the_volume(tmp_path, monkeypatch):
+    """It used to default to 55 % of the volume, and that is the bug this asserts against: on a
+    shared 10 GB /tmp it reserved most of the disk for ONE of the directories on it, so the
+    storage mirror hit ENOSPC while the budget still reported room. A per-directory cap is
+    policy, so it is off unless asked for; free space is safety, and lives in storage."""
     monkeypatch.delenv(SCRATCH_BUDGET_ENV, raising=False)
-    derived = cache_budget(tmp_path)
-    assert derived > 0
-    assert derived == int(shutil.disk_usage(tmp_path).total * DEFAULT_BUDGET_FRACTION)
+    assert cache_budget(tmp_path) == 0
     monkeypatch.setenv(SCRATCH_BUDGET_ENV, "12345")
     assert cache_budget(tmp_path) == 12345
     monkeypatch.setenv(SCRATCH_BUDGET_ENV, "0")
-    assert cache_budget(tmp_path) == 0          # eviction off
+    assert cache_budget(tmp_path) == 0
 
 
 def test_eviction_is_lru_not_fifo(tmp_path):

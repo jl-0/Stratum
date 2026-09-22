@@ -206,7 +206,7 @@ granule's raw class table: the lumping from raw keys to product ids.</td><td><a 
 <code>explain</code>/<code>diff</code>.</td><td><a class="src" data-sym="def key(self, artifact: str, grid_id: str, tile: TileRef" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/cache/__init__.py#L91">CacheRoot.key</a></td></tr>
 <tr><td><code>storage.py</code></td><td>The storage root, as one object: a local directory, or an
 <code>s3://</code> prefix with a node-local mirror. Everything above it is handed a real
-<code>pathlib.Path</code>, so no stage handles a URI.</td><td><a class="src" data-sym="class Workspace" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/storage.py#L138">Workspace</a></td></tr>
+<code>pathlib.Path</code>, so no stage handles a URI.</td><td><a class="src" data-sym="class Workspace" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/storage.py#L265">Workspace</a></td></tr>
 <tr><td><code>filters.py</code></td><td>The built-in <code>GranuleFilter</code> predicates and the
 <code>on_missing</code> policy machinery. Runs against the index at plan time, never against
 pixels.</td><td><a class="src" data-sym="def apply_filters" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/filters.py#L220">apply_filters</a></td></tr>
@@ -235,7 +235,7 @@ implementations. <code>LocalSource</code> walks a directory and reads each heade
 rows.</td><td><a class="src" data-sym="class CMRSource" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/access/sources.py#L351">CMRSource</a></td></tr>
 <tr><td><code>access/store.py</code></td><td>Every worker's door to bytes: URI schemes, the
 node-local asset cache, checksum verification, retry, and the refusal to send an Earthdata
-session to an untrusted host.</td><td><a class="src" data-sym="class AssetStore" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/access/store.py#L379">AssetStore</a></td></tr>
+session to an untrusted host.</td><td><a class="src" data-sym="class AssetStore" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/access/store.py#L376">AssetStore</a></td></tr>
 <tr><td><code>access/readers.py</code></td><td>The reader registry, keyed on collection, with one
 instance per <code>(collection, ref)</code> per process.</td><td><a class="src" data-sym="def reader_for" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/access/readers.py#L33">reader_for</a></td></tr>
 <tr><td><code>access/auth.py</code></td><td>Earthdata Login, in one place, cached for the
