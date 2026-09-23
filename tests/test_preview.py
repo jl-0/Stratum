@@ -387,3 +387,38 @@ def test_the_range_endpoint_reports_the_stretch_the_tiles_used(server: int,
                                   "/stac/run-a/0_0/20260101_20260201/mineral_1.tif"])
 def test_the_server_refuses_what_is_not_json_inside_the_tree(server: int, path: str) -> None:
     assert get(server, path)[0] in (404, 415)
+
+
+# ------------------------------------------------------- "is it blank, or still drawing?"
+# The viewer has no JS test runner, so these guard the two things about the loading indicator
+# that are easy to break silently and were both wrong once. `STATIC` is the server's own notion
+# of where the page lives, so a move breaks these rather than letting them pass vacuously.
+
+
+def test_the_viewer_reports_whether_it_is_still_drawing():
+    """A blank patch of map is either not-fetched-yet or nothing-published-there, and the two are
+    pixel-identical. The tile endpoint answers a request outside the raster with a TRANSPARENT
+    PNG rather than a 404 (see `test_a_tile_that_misses_the_raster_is_transparent`), which is
+    what makes "drawn" a trustworthy statement: once nothing is outstanding, a gap is real."""
+    html = (STATIC / "index.html").read_text()
+    js = (STATIC / "viewer.js").read_text()
+
+    assert 'id="tilestatus"' in html
+    assert 'aria-live="polite"' in html, "announced, not only seen"
+    for event in ("tileloadstart", "tileload", "tileerror"):
+        assert event in js, f"{event} is how the outstanding count is kept"
+    assert "no data, not a pending load" in js, "the sentence the indicator exists to say"
+    assert "map tile" in js, "'tile' alone means a one-degree product tile in this codebase"
+
+
+def test_the_drawing_indicator_does_not_depend_on_animation_frames():
+    """It first coalesced repaints with `requestAnimationFrame`, which is PAUSED in a background
+    tab - so the pill froze mid-load and was still stale on return, which is exactly when someone
+    checks whether a blank area finished drawing. Observed reading "preparing the layer…" with
+    two map tiles already drawn."""
+    js = (STATIC / "viewer.js").read_text()
+    tracker = js[js.index("const drawing ="):js.index("function paintDrawing")]
+    # The CALL, not the word: the comment above the fix names rAF to explain why it is not used.
+    assert "requestAnimationFrame(" not in tracker, \
+        "coalesce with a timer; rAF does not run in a background tab"
+    assert "setTimeout(" in tracker

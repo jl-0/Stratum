@@ -13,6 +13,10 @@
 
 <div id="map" role="application" aria-label="Product map"></div>
 
+<!-- Over the map, not in the panel: the question "is this blank or still loading?" is
+     asked while looking at the map. aria-live so it is announced rather than just seen. -->
+<div id="tilestatus" role="status" aria-live="polite" hidden></div>
+
 <aside id="panel">
   <header>
     <h1><span class="glyph" aria-hidden="true"></span> Stratum</h1>

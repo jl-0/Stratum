@@ -133,12 +133,104 @@ function fillLayers(items) {
 
 /* ------------------------------------------------------------------ drawing */
 
+/* ------------------------------------------- is it still drawing, or is it actually empty?
+
+   A blank patch of map means one of two things - not fetched yet, or nothing published there -
+   and they are pixel-identical. This tracker is the difference, and it earns its keep because
+   the answer is usually "no data": the tile endpoint returns a TRANSPARENT PNG when a request
+   falls outside the raster rather than a 404, so once the outstanding count reaches zero a gap
+   is real. That is the one sentence the viewer could not say before.
+
+   "map tiles" throughout, never just "tiles": in this product a tile is a one-degree cell, and
+   the panel already has a "Show tile outlines" control for those.
+*/
+const drawing = { pending: 0, drawn: 0, failed: 0, phase: 'idle', settle: 0, frame: 0 };
+
+/** Begin a phase. `preparing` covers the legend and range lookups, which happen before any
+ *  map tile is requested and used to look like a hang. */
+function drawingReset(phase) {
+  drawing.pending = drawing.drawn = drawing.failed = 0;
+  drawing.phase = phase;
+  clearTimeout(drawing.settle);
+  drawing.settle = 0;
+  paintDrawing();
+}
+
+/** Leaflet fires these in bursts of dozens, so coalesce rather than repaint per tile.
+ *
+ * A timer, NOT `requestAnimationFrame`: rAF is paused in a background tab, so a pill updated
+ * that way freezes mid-load and is still wrong when you come back to it - which is precisely
+ * the moment someone checks whether a blank patch has finished drawing. Measured: the pill sat
+ * on "preparing the layer…" with two map tiles already drawn. */
+function drawingTick() {
+  if (drawing.frame) return;
+  drawing.frame = setTimeout(() => { drawing.frame = 0; paintDrawing(); }, 50);
+}
+
+/** Count one map tile in flight, and re-enter `loading` when a pan or zoom asks for more. */
+function watchTiles(layer) {
+  layer.on('tileloadstart', () => {
+    drawing.pending++;
+    if (drawing.phase !== 'loading') { clearTimeout(drawing.settle); drawing.phase = 'loading'; }
+    drawingTick();
+  });
+  layer.on('tileload', () => { drawing.pending--; drawing.drawn++; drawingTick(); });
+  layer.on('tileerror', () => { drawing.pending--; drawing.failed++; drawingTick(); });
+  return layer;
+}
+
+function paintDrawing() {
+  const el = $('tilestatus');
+  if (!el) return;
+  const { pending, drawn, failed, phase } = drawing;
+  if (phase === 'idle') { el.hidden = true; return; }
+  el.hidden = false;
+  el.classList.remove('settled', 'bad');
+
+  if (phase === 'preparing') {
+    el.innerHTML = '<span class="spinner"></span><span>preparing the layer…</span>';
+    return;
+  }
+  if (pending > 0) {
+    el.innerHTML = `<span class="spinner"></span><span>drawing — ${pending} map tile`
+      + `${pending === 1 ? '' : 's'} outstanding</span>`;
+    // Nothing is settled while requests are in flight; the timer is armed only on reaching zero.
+    return;
+  }
+  if (phase === 'loading') {
+    // Wait before declaring it done: Leaflet starts the next batch a beat after finishing one,
+    // and without this the pill flickers between drawing and settled on every pan.
+    if (!drawing.settle) {
+      drawing.settle = setTimeout(() => {
+        drawing.settle = 0;
+        drawing.phase = 'settled';
+        paintDrawing();
+      }, 250);
+    }
+    el.innerHTML = '<span class="spinner"></span><span>drawing…</span>';
+    return;
+  }
+
+  // Settled. This message is the point of the whole thing, so it stays on screen rather than
+  // fading - a pill that disappears leaves the original ambiguity behind.
+  if (failed) {
+    el.classList.add('bad');
+    el.innerHTML = `<span>${failed} map tile${failed === 1 ? '' : 's'} failed to load — `
+      + 'a blank area may be a failed request, not missing data. Reload to retry.</span>';
+    return;
+  }
+  el.classList.add('settled');
+  el.innerHTML = `<span>drawn (${drawn} map tile${drawn === 1 ? '' : 's'}) — `
+    + 'a blank area here is no data, not a pending load</span>';
+}
+
 /** One overlay per item, because one raster per tile is how the products are written. */
 async function drawLayer() {
   for (const l of state.overlays) map.removeLayer(l);
   state.overlays = [];
   const key = state.layer;
-  if (!key) { $('legend').innerHTML = ''; return; }
+  if (!key) { $('legend').innerHTML = ''; drawingReset('idle'); return; }
+  drawingReset('preparing');
 
   const first = state.items.find((i) => i.assets?.[key]);
   const asset = first?.assets[key];
@@ -165,10 +257,16 @@ async function drawLayer() {
     const a = item.assets?.[key];
     if (!a) continue;
     const [w, s, e, n] = item.bbox;
-    const layer = rasterLayer(a.href, { ...opts, bounds: L.latLngBounds([s, w], [n, e]) });
+    const layer = watchTiles(rasterLayer(a.href, { ...opts,
+                                                   bounds: L.latLngBounds([s, w], [n, e]) }));
     layer.addTo(map);
     state.overlays.push(layer);
   }
+  // No overlay means no map tile will ever be requested, so nothing would move it off
+  // `preparing`. Say it plainly instead of spinning for ever.
+  drawing.phase = state.overlays.length ? 'loading' : 'settled';
+  paintDrawing();       // unconditionally: a coalesced repaint may still be in flight, and the
+                        // phase just changed under it
   renderLegend(opts);
 }
 
