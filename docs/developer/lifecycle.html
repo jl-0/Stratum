@@ -57,7 +57,7 @@ sequenceDiagram
 <thead><tr><th></th><th>The planner</th><th>A worker</th></tr></thead>
 <tbody>
 <tr><td><strong>Runs</strong></td><td>Once per run</td><td>Once per work item &mdash; thousands of times</td></tr>
-<tr><td><strong>Entry</strong></td><td><a class="src" data-sym="def plan_run" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/plan/run.py#L777">plan_run</a></td><td><a class="src" data-sym="def exec_item" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/executors/worker.py#L222">exec_item</a></td></tr>
+<tr><td><strong>Entry</strong></td><td><a class="src" data-sym="def plan_run" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/plan/run.py#L777">plan_run</a></td><td><a class="src" data-sym="def exec_item" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/executors/worker.py#L233">exec_item</a></td></tr>
 <tr><td><strong>Reads</strong></td><td>The manifest, the index, and a handful of real granules</td><td><code>plan.json</code>, one work list line, and the assets that line names</td></tr>
 <tr><td><strong>Decides</strong></td><td>Everything: tiles, epochs, granules, plugins, schema, class lumping, fan-out</td><td>Nothing. It executes a decision already recorded</td></tr>
 <tr><td><strong>Writes</strong></td><td>The run directory</td><td>One cache artifact, and one outcome line</td></tr>
@@ -207,10 +207,10 @@ traceback &mdash; so a crashed item is queryable rather than lost.</p>
 <table>
 <thead><tr><th>Handler</th><th>Reads</th><th>Writes</th><th>Code</th></tr></thead>
 <tbody>
-<tr><td><code>regrid_item</code></td><td>The geolocation asset, only on a miss</td><td>One GLT GeoTIFF</td><td><a class="src" data-sym="def regrid_item" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/executors/worker.py#L53">worker.py:52</a></td></tr>
-<tr><td><code>resolve_item</code></td><td>GLT windows, then every contributing granule</td><td>One snapshot directory</td><td><a class="src" data-sym="def resolve_item" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/executors/worker.py#L106">worker.py:105</a></td></tr>
-<tr><td><code>reduce_item</code></td><td>The listed epochs' snapshots</td><td>One product-block directory</td><td><a class="src" data-sym="def reduce_item" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/executors/worker.py#L154">worker.py:153</a></td></tr>
-<tr><td><code>publish_item</code></td><td>Every product block of the tile &times; period</td><td>COGs, RGBA images, legends, a STAC item</td><td><a class="src" data-sym="def publish_item" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/executors/worker.py#L185">worker.py:184</a></td></tr>
+<tr><td><code>regrid_item</code></td><td>The geolocation asset, only on a miss</td><td>One GLT GeoTIFF</td><td><a class="src" data-sym="def regrid_item" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/executors/worker.py#L57">worker.py:52</a></td></tr>
+<tr><td><code>resolve_item</code></td><td>GLT windows, then every contributing granule</td><td>One snapshot directory</td><td><a class="src" data-sym="def resolve_item" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/executors/worker.py#L110">worker.py:105</a></td></tr>
+<tr><td><code>reduce_item</code></td><td>The listed epochs' snapshots</td><td>One product-block directory</td><td><a class="src" data-sym="def reduce_item" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/executors/worker.py#L158">worker.py:153</a></td></tr>
+<tr><td><code>publish_item</code></td><td>Every product block of the tile &times; period</td><td>COGs, RGBA images, legends, a STAC item</td><td><a class="src" data-sym="def publish_item" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/executors/worker.py#L189">worker.py:184</a></td></tr>
 </tbody>
 </table>
 </div>
@@ -254,7 +254,7 @@ flowchart TB
 <tbody>
 <tr><td><code>resolve</code></td><td>Each candidate granule's GLT key</td><td><a class="src" data-sym="def glt_key_for" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/resolve/block.py#L97">glt_key_for</a></td></tr>
 <tr><td><code>reduce</code></td><td>Each listed epoch's snapshot key — candidates, GLT window hit test and all, without resolving anything</td><td><a class="src" data-sym="def snapshot_key" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/resolve/block.py#L323">snapshot_key</a></td></tr>
-<tr><td><code>publish</code></td><td>Each block's product key</td><td><a class="src" data-sym="def product_key" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/executors/worker.py#L115">product_key</a></td></tr>
+<tr><td><code>publish</code></td><td>Each block's product key</td><td><a class="src" data-sym="def product_key" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/executors/worker.py#L119">product_key</a></td></tr>
 </tbody>
 </table>
 </div>
@@ -264,7 +264,7 @@ flowchart TB
 <ul>
   <li><code>regrid_item</code> derives the GLT key itself <em>and</em> compares it against the key
   <code>regrid_granule_tile</code> actually wrote to, raising if they differ &mdash;
-  <a class="src" data-sym="if written.hash != key.hash" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/executors/worker.py#L101">worker.py:100</a>.
+  <a class="src" data-sym="if written.hash != key.hash" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/executors/worker.py#L105">worker.py:100</a>.
   Without it, a drift between the two derivations would look like "resolve never hits the
   cache".</li>
   <li><code>regrid_item</code> also refuses outright when the plan was made under a different

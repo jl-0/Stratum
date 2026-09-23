@@ -535,3 +535,51 @@ def test_a_real_error_with_a_real_code_is_not_second_guessed():
     detail = _s3_detail(_client_error(400, "InvalidRange", "The requested range is not satisfiable"))
     assert "InvalidRange" in detail
     assert "carries no error body" not in detail, "do not guess when S3 has told you"
+
+
+def test_a_head_that_cannot_mean_absent_is_raised_not_swallowed(monkeypatch, tmp_path):
+    """The landmine: `head` is a cache probe, so "no" must mean absent. An expired session
+    answering 403 read as a miss, and a miss makes the stage recompute - resolve rebuilding its
+    ortho warps is 89 GiB of work, so the failure was an expensive silence rather than an error."""
+    import pytest
+    from botocore.exceptions import ClientError
+
+    from stratum.storage import ObjectStore, StorageError
+
+    class Client:
+        def __init__(self, code):
+            self.code = code
+
+        def head_object(self, **kw):
+            raise ClientError({"Error": {"Code": self.code, "Message": "nope"},
+                               "ResponseMetadata": {"HTTPStatusCode": 400}}, "HeadObject")
+
+    store = ObjectStore("b", client=Client("ExpiredToken"))
+    with pytest.raises(StorageError, match="refresh your AWS session"):
+        store.head("cache/glt/x.tif")
+
+    assert ObjectStore("b", client=Client("NoSuchKey")).head("k") is False
+    assert ObjectStore("b", client=Client("404")).head("k") is False
+
+
+def test_an_ambiguous_403_still_means_absent_but_says_so_once(monkeypatch, caplog):
+    """A deployment without ListBucket answers every miss with 403, so that has to keep meaning
+    absent. It is warned about once per process - not once per probe, which would be a line per
+    cache lookup."""
+    import logging
+
+    from botocore.exceptions import ClientError
+
+    from stratum.storage import ObjectStore
+
+    class Client:
+        def head_object(self, **kw):
+            raise ClientError({"Error": {"Code": "403", "Message": "Forbidden"},
+                               "ResponseMetadata": {"HTTPStatusCode": 403}}, "HeadObject")
+
+    monkeypatch.setattr(ObjectStore, "_warned_403", False)
+    store = ObjectStore("b", client=Client())
+    with caplog.at_level(logging.WARNING, logger="stratum.storage"):
+        assert store.head("k1") is False
+        assert store.head("k2") is False
+    assert sum(1 for r in caplog.records if "403" in r.getMessage()) == 1

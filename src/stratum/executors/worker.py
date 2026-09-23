@@ -25,8 +25,12 @@ from stratum.publish import product_dir, publish_period, write_product_block
 from stratum.reduce import band_counts, product_bands, reduce_stack
 from stratum.regrid import REGRID_ALGO_VERSION, regrid_granule_tile
 from stratum.resolve import NullAux, resolve_block, snapshot_key, stack_snapshots
-from stratum.storage import clear_pins
+from stratum.storage import clear_pins, ensure_free
 from stratum.types import BandSpec, BlockRef, EmbeddedGLT, Epoch, LocArray, TileRef
+
+#: Space to reclaim before a publish item writes a tile. A tile of the western product is ~48 MB
+#: of COGs; this leaves room for that, its STAC and class sidecars, and GDAL's temporaries.
+PUBLISH_RESERVE_BYTES = 512 * 1024 * 1024
 
 _RUNS: dict[Path, RunPlan] = {}
 
@@ -201,6 +205,13 @@ def publish_item(item: Mapping[str, Any], run: RunPlan) -> tuple[Path, bool]:
                                     f"{it['tile']}: no product block at {key.path}")
         bx, by = (int(v) for v in it["block"])
         product_dirs.append((BlockRef(tile, bx, by), key.path))
+    # Publish is the largest single write in the run and the only stage that does not go through
+    # `CacheRoot.write_dir`, so nothing else reclaims space for it: it writes a whole tile's COGs
+    # straight into the products mirror. Measured on the western run, a tile's output is ~48 MB
+    # (19 GB over 402 tiles), so PUBLISH_RESERVE_BYTES is generous by design - the cost of asking
+    # for too much is one eviction pass, and the cost of asking for too little is ENOSPC after
+    # every other stage has already succeeded.
+    ensure_free(PUBLISH_RESERVE_BYTES)
     out_dir = product_dir(run.products_dir, tile, period)
     publish_period(out_dir, product_dirs, tile, period, ctx.schema, run.outputs,
                    run_id=run.run_id, manifest_hash=run.manifest_hash,

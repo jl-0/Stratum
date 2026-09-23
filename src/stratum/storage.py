@@ -25,6 +25,7 @@ with an empty one recovers everything it needs from the bucket.
 from __future__ import annotations
 
 import hashlib
+import logging
 import os
 import shutil
 import stat
@@ -36,6 +37,8 @@ from functools import cached_property
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
+
+log = logging.getLogger(__name__)
 
 SCRATCH_ENV = "STRATUM_SCRATCH"
 MIRROR_DIR = "stratum-mirror"
@@ -73,11 +76,18 @@ class StorageError(RuntimeError):
 #: Error codes that mean "these credentials are no longer usable", as opposed to "that object is
 #: not there". Worth naming, because the two are indistinguishable in the traceback otherwise and
 #: only one of them is fixed by logging in again.
-STALE_CREDENTIAL_CODES = frozenset({
+#: Codes that UNAMBIGUOUSLY mean the credentials are bad. `head` must never read one of these
+#: as "the object is not there": that turns an expired session into a cache miss, and a miss
+#: makes the stage recompute. Resolve rebuilding its ortho warps is 89 GiB of work, so the
+#: failure mode is an expensive silence rather than an error.
+EXPIRED_CREDENTIAL_CODES = frozenset({
     "ExpiredToken", "ExpiredTokenException", "RequestExpired", "TokenRefreshRequired",
     "InvalidToken", "InvalidClientTokenId", "UnrecognizedClientException",
-    "InvalidAccessKeyId", "SignatureDoesNotMatch", "AuthFailure", "AccessDenied",
+    "InvalidAccessKeyId", "SignatureDoesNotMatch", "AuthFailure",
 })
+#: The above plus `AccessDenied`, which is genuinely ambiguous - see `head`. Used only to decide
+#: whether an error MESSAGE should suggest logging in again.
+STALE_CREDENTIAL_CODES = EXPIRED_CREDENTIAL_CODES | {"AccessDenied"}
 
 
 def _s3_detail(e: Any) -> str:
@@ -280,6 +290,9 @@ class ObjectStore:
     """The four operations a mirror needs, over one bucket. boto3 is imported lazily so that a
     local run - and every test that never touches S3 - neither imports it nor builds a client."""
 
+    #: Set once the ambiguous-403 warning has been emitted in this process.
+    _warned_403 = False
+
     def __init__(self, bucket: str, *, client: Any | None = None) -> None:
         self.bucket = bucket
         self._client = client
@@ -295,14 +308,42 @@ class ObjectStore:
         return boto3.client("s3")
 
     def head(self, key: str) -> bool:
+        """Is this object there? A cache probe, so "no" must mean absent and nothing else.
+
+        `403` is the awkward one and stays "absent": S3 answers a HEAD for a missing object with
+        `403` rather than `404` when the caller lacks `ListBucket`, which is a legitimate
+        deployment. But expired credentials produce the same `403`, and reading that as a miss
+        makes the stage recompute instead of stopping - so the codes that can only mean bad
+        credentials are raised, and an ambiguous `403` is warned about once per process rather
+        than swallowed silently.
+        """
         from botocore.exceptions import ClientError
         try:
             self.client.head_object(Bucket=self.bucket, Key=key)
         except ClientError as e:
-            if e.response.get("Error", {}).get("Code") in ("404", "NoSuchKey", "403"):
+            code = str((e.response.get("Error") or {}).get("Code") or "")
+            if code in EXPIRED_CREDENTIAL_CODES:
+                raise StorageError(f"HEAD s3://{self.bucket}/{key}: {_s3_detail(e)}") from e
+            if code in ("404", "NoSuchKey"):
+                return False
+            if code in ("403", "AccessDenied"):
+                self._warn_ambiguous_403()
                 return False
             raise StorageError(f"HEAD s3://{self.bucket}/{key}: {_s3_detail(e)}") from e
         return True
+
+    def _warn_ambiguous_403(self) -> None:
+        """Once per process, not once per probe: a deployment without `ListBucket` answers every
+        miss this way and would otherwise emit one line per cache probe."""
+        if ObjectStore._warned_403:
+            return
+        ObjectStore._warned_403 = True
+        log.warning(
+            "s3://%s answered a HEAD with 403, which is being read as 'object absent'. That is "
+            "correct for a deployment without ListBucket, but expired or denied credentials look "
+            "identical - and then every cache probe misses and the stage recomputes. If this run "
+            "is slower or more expensive than expected, check your AWS session first.",
+            self.bucket)
 
     def list(self, prefix: str) -> list[str]:
         keys: list[str] = []
@@ -495,7 +536,8 @@ def local_workspace(root: Path | str) -> Workspace:
 
 __all__ = [
     "DEFAULT_EVICT_RESERVE", "DEFAULT_EVICT_SLAB", "EVICT_GRACE_SECONDS", "EVICT_RESERVE_ENV",
-    "MIRROR_DIR", "SCRATCH_ENV", "ObjectStore", "StorageError", "Workspace", "clear_pins",
-    "ensure_free", "evict_reserve", "evictable_roots", "is_pinned", "local_workspace",
-    "parse_s3", "pin", "register_evictable", "scratch_dir", "touch",
+    "EXPIRED_CREDENTIAL_CODES", "MIRROR_DIR", "SCRATCH_ENV", "STALE_CREDENTIAL_CODES",
+    "ObjectStore", "StorageError", "Workspace", "clear_pins", "ensure_free", "evict_reserve",
+    "evictable_roots", "is_pinned", "local_workspace", "parse_s3", "pin", "register_evictable",
+    "scratch_dir", "touch",
 ]
