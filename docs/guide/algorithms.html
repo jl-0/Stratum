@@ -464,7 +464,8 @@ filtered; where both are low, it was rarely seen at all.</p>
   <code>where(vals == k &amp; counted, score, 0).sum(axis=0)</code> instead, so each epoch votes
   with its winning score.</li>
   <li>The winner is suppressed to nodata where fewer than <code>min_count</code> epochs agree on
-  it, or its tally is below <code>min_weight</code>.</li>
+  it (waived where one of them scored at least <code>min_count_unless_score</code>), or its tally
+  is below <code>min_weight</code>.</li>
   <li>Ties are broken by <code>tie_break</code>: <code>earliest</code> / <code>latest</code> by
   epoch order, <code>highest_score</code> by the best score any tied class holds, or
   <code>nodata</code> to refuse. Equal keys fall to the lowest class id, so the result is
@@ -484,7 +485,7 @@ runner_up = second mode, same tie rule</code></pre>
 
 <p>Each method is nan-aware, so a non-finite value inside a selected epoch is skipped by the
 statistic but still counted in <code>&lt;layer&gt;_n</code>.
-<a class="src" data-sym="continuous" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/reduce/builtin.py#L268">builtin.py:268</a></p>
+<a class="src" data-sym="continuous" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/reduce/builtin.py#L275">builtin.py:275</a></p>
 
 <div class="tw">
 <table>
@@ -581,7 +582,7 @@ then:</p>
 <tr>
   <td>Mode through time, agreement, runner-up, continuous statistics</td>
   <td>Stratum, over numpy reductions</td>
-  <td><a class="src" data-sym="vote" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/reduce/builtin.py#L172">vote</a>, <a class="src" data-sym="continuous" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/reduce/builtin.py#L268">continuous</a></td>
+  <td><a class="src" data-sym="vote" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/reduce/builtin.py#L172">vote</a>, <a class="src" data-sym="continuous" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/reduce/builtin.py#L275">continuous</a></td>
 </tr>
 </tbody>
 </table>

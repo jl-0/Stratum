@@ -174,7 +174,7 @@ the manifest. A `Reducer` plugin ([04 §5](04-cost-functions.md)) is for what th
 
 | `method` | Parameters | Delivers |
 |---|---|---|
-| `vote` | `min_count`, `ignore` (class names), `tie_break: earliest \| latest \| highest_score \| nodata`, `weight: count \| score`, `min_weight` | `<layer>`, `<layer>_agreement`, `<layer>_runner_up` |
+| `vote` | `min_count`, `ignore` (class names), `tie_break: earliest \| latest \| highest_score \| nodata`, `weight: count \| score`, `min_weight`, `min_count_unless_score` | `<layer>`, `<layer>_agreement`, `<layer>_runner_up` |
 | `best` | — | `<layer>` from the epoch with the highest `score` |
 | `none` | — | Nothing. Carried for a custom reducer. A `none` categorical layer has no winner, so it **cannot** be the target of `conditional_on` — that needs `vote` or `best` |
 
@@ -191,6 +191,7 @@ silent:
 | `tie_break` | `nodata` when omitted: refuse to choose unless the schema says how. Among tied classes with equal tie keys the lowest product id wins, so the result is deterministic |
 | `weight` | `count` when omitted: one epoch, one vote. `score` sums each epoch's winning score per class instead, and refuses a negative or NaN score on a valid epoch rather than rescaling it: unlike `score_weighted`, the absolute score is the point, since a graded-down epoch must stay graded down |
 | `min_weight` | `0` when omitted, which never suppresses. `min_count` still counts agreeing *epochs* under `weight: score` |
+| `min_count_unless_score` | Absent when omitted: `min_count` binds every winner. Set, a winner holding any epoch scoring at least this is exempt, so the threshold is in the scorer's units — for a bare-earth scorer, the score a look at the floor gets |
 | `agreement` | `modal_count / n_epochs` (under `weight: score`, the winner's summed score over the summed score of every valid epoch, ignored classes included), reported even where the layer is suppressed by `min_count` or a refused tie — it describes the tally, not the decision. `NaN` where `n_epochs == 0`; `0.0` where every valid epoch was ignored (the layer is then nodata) |
 | `runner_up` | The second-most-frequent class under the same `tie_break`; nodata wherever the layer is nodata |
 | `ignore` with one epoch | Every observed cell whose only class is ignored delivers **nodata**, with `agreement 0` and `n_epochs 1`: literal step 4 of [04 §5](04-cost-functions.md), and exactly the `0`-vs-nodata conflation [11 §2](11-types.md) warns about, surfacing at the product. On the trial tile that is 73 % of observed cells. Only `n_epochs` then separates "observed, nothing identified" from "never observed". Single-epoch products should say `ignore: []` — question 5 |

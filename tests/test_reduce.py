@@ -494,3 +494,25 @@ def test_n_observed_counts_the_footprint_not_the_survivors():
 def test_a_stack_built_without_a_footprint_reports_its_valid_cells():
     out = reduce_stack(stack({"m": column(1, 2)}, valid=np.asarray([True, False])[:, None, None]))
     assert out["n_observed"][0, 0] == out["n_epochs"][0, 0] == 1
+
+
+# ---------------------------------------------------------------- min_count_unless_score
+def test_min_count_binds_only_a_winner_with_no_good_look_behind_it():
+    """One bare week stands on its own; a class seen only through vegetation needs corroborating.
+    Cell 0: one bare week (0.9) -> kept. Cell 1: two vegetated weeks (0.05) -> suppressed.
+    Cell 2: three vegetated weeks agree -> kept."""
+    vals = np.asarray([[[2, 1, 3]], [[0, 1, 3]], [[0, 0, 3]]], dtype=np.uint16)
+    score = np.asarray([[[0.9, 0.05, 0.05]], [[0.05, 0.05, 0.05]], [[0.05, 0.05, 0.05]]],
+                       dtype=np.float32)
+    valid = np.asarray([[[True, True, True]], [[False, True, True]], [[False, False, True]]])
+    spec = cat("m", weight="score", ignore=["none"], min_count=3, min_count_unless_score=0.6)
+    out = reduce_stack(stack({"m": vals}, valid=valid, score=score, specs=[spec]))
+    assert out["m"][0].tolist() == [2, ND, 3]
+    plain = cat("m", weight="score", ignore=["none"], min_count=3)
+    out = reduce_stack(stack({"m": vals}, valid=valid, score=score, specs=[plain]))
+    assert out["m"][0].tolist() == [ND, ND, 3], "without the waiver min_count binds everyone"
+
+
+def test_min_count_unless_score_must_be_a_number():
+    with pytest.raises(SchemaError, match="min_count_unless_score"):
+        validate_schema(SnapshotSchema(name="t", layers=[cat("m", min_count_unless_score="x")]))

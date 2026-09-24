@@ -231,6 +231,8 @@
     'weight': { cat: 'schema', short: 'What one epoch is worth in the vote.',
       body: '<p><code>count</code> (the default): one epoch, one vote. <code>score</code>: each epoch votes with its winning score, so a scorer that grades a poor observation down still lets the good ones decide. <code>agreement</code> becomes the winner\u2019s share of the total score.</p>',
       gotcha: 'Needs a non-negative score on every valid epoch. min_view_zenith scores are negative and are refused, not rescaled.' },
+    'min_count_unless_score': { cat: 'schema', short: 'Waive min_count for a winner with one good look.',
+      body: '<p>A winning class holding at least one epoch that scored this high is kept whatever its count; one resting only on lower-scoring epochs still needs <code>min_count</code> of them. In the scorer\u2019s units.</p>' },
     'min_weight': { cat: 'schema', short: 'The least summed score a winner may have.',
       body: '<p>Suppresses a cell whose winning class carries less weight than this. <code>min_count</code> still counts agreeing epochs alongside it.</p>' },
     'classes': { cat: 'schema', short: 'The enumeration a categorical layer resolves into.',

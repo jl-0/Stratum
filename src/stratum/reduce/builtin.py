@@ -181,7 +181,9 @@ def vote(layer: LayerSpec, vals: np.ndarray, valid: np.ndarray, score: np.ndarra
        point: a scorer can grade an observation instead of vetoing it and the vote still hears
        the grade.
     4. It is suppressed to nodata where fewer than `min_count` epochs agree on it, or where its
-       tally is below `min_weight`.
+       tally is below `min_weight`. `min_count_unless_score` waives `min_count` for a winner
+       that holds at least one epoch scoring that high: one good look stands on its own, and
+       only a winner resting entirely on poorer looks needs corroborating.
     5. Ties fall to `tie_break`: earliest / latest by epoch order, highest_score by the single
        highest score any tied class holds, nodata refuses.
 
@@ -214,12 +216,14 @@ def vote(layer: LayerSpec, vals: np.ndarray, valid: np.ndarray, score: np.ndarra
 
     counts = np.zeros((c, h, w), dtype=np.uint16)
     weights = np.zeros((c, h, w), dtype=np.float32) if weighted else None
+    top_score = np.full((c, h, w), -np.inf, dtype=np.float32)
     keys = np.zeros((c, h, w), dtype=np.float32)
     epoch_idx = np.arange(n, dtype=np.float32)[:, None, None]
     score_key = np.where(counted & ~np.isnan(score), score, -np.inf).astype(np.float32)
     for i, cls in enumerate(class_ids):
         hit = counted & (vals == cls)
         counts[i] = hit.sum(axis=0)
+        top_score[i] = np.where(hit, score_key, -np.inf).max(axis=0)
         if weights is not None:
             weights[i] = np.where(hit, score, 0.0).sum(axis=0)
         if params.tie_break == "earliest":
@@ -232,9 +236,12 @@ def vote(layer: LayerSpec, vals: np.ndarray, valid: np.ndarray, score: np.ndarra
     tally = weights if weights is not None else counts
     modal = tally.max(axis=0) if c else np.zeros((h, w), dtype=tally.dtype)
     winner = _pick(tally, keys, modal, class_ids, params.tie_break)
-    behind = np.where(class_ids[:, None, None] == winner[None].astype(np.int64), counts, 0)
-    agreeing = behind.max(axis=0) if c else np.zeros((h, w), dtype=np.uint16)
-    winner[agreeing < params.min_count] = _NODATA
+    won = class_ids[:, None, None] == winner[None].astype(np.int64)
+    agreeing = np.where(won, counts, 0).max(axis=0) if c else np.zeros((h, w), dtype=np.uint16)
+    thin = agreeing < params.min_count
+    if params.min_count_unless_score is not None and c:
+        thin &= np.where(won, top_score, -np.inf).max(axis=0) < params.min_count_unless_score
+    winner[thin] = _NODATA
     if params.min_weight > 0:
         winner[modal < params.min_weight] = _NODATA
 

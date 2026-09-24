@@ -423,7 +423,7 @@ built-in reducer runs it when the manifest has no <code>reducer</code> block:</p
 <table>
 <thead><tr><th>Layer kind</th><th><code>method</code></th><th>Delivers</th></tr></thead>
 <tbody>
-<tr><td>categorical</td><td><code>vote</code> — with <code>min_count</code>, <code>ignore</code> (class names), <code>tie_break</code>, <code>weight</code>, <code>min_weight</code></td><td><code>&lt;layer&gt;</code>, <code>&lt;layer&gt;_agreement</code>, <code>&lt;layer&gt;_runner_up</code></td></tr>
+<tr><td>categorical</td><td><code>vote</code> — with <code>min_count</code>, <code>ignore</code> (class names), <code>tie_break</code>, <code>weight</code>, <code>min_weight</code>, <code>min_count_unless_score</code></td><td><code>&lt;layer&gt;</code>, <code>&lt;layer&gt;_agreement</code>, <code>&lt;layer&gt;_runner_up</code></td></tr>
 <tr><td>categorical</td><td><code>best</code></td><td>The class from the highest-scoring epoch</td></tr>
 <tr><td>continuous</td><td><code>median</code> &middot; <code>mean</code> &middot; <code>min</code> &middot; <code>max</code> &middot; <code>percentile</code> &middot; <code>score_weighted</code> &middot; <code>inverse_variance</code> &middot; <code>best</code></td><td><code>&lt;layer&gt;</code>, <code>&lt;layer&gt;_n</code>; <code>&lt;layer&gt;_spread</code> if asked</td></tr>
 <tr><td>either</td><td><code>none</code></td><td>Nothing — carried for another layer, or for a plugin</td></tr>
@@ -577,6 +577,15 @@ confidence: a class resting only on graded-down epochs has a low one.</p>
 ordering, such as <code>min_view_zenith</code> (negative), is refused rather than rescaled.
 <code>min_weight</code> suppresses a winner whose summed score is below it;
 <code>min_count</code> still counts agreeing epochs.</p>
+
+<p><code>min_count_unless_score</code> makes <code>min_count</code> conditional. A winner holding
+at least one epoch that scored this high is kept whatever its count; one resting only on
+lower-scoring epochs still needs <code>min_count</code> of them to agree. With a bare-earth scorer
+that reads as "one look at ground is enough; a class seen only through vegetation needs three
+weeks":</p>
+
+<pre><code>aggregate: {method: vote, weight: score, min_count: 3, min_count_unless_score: 0.6,
+            ignore: [none], tie_break: highest_score}</code></pre>
 
 <h4 id="ties">Ties</h4>
 

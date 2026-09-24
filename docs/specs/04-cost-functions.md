@@ -510,6 +510,7 @@ Parameters follow AMD's `stack:` block, which is the only working precedent:
 | `tie_break` | `earliest` \| `latest` \| `highest_score` \| `nodata` | *(absent)* |
 | `weight` | `count` (default): each epoch adds 1 to its class. `score`: each epoch adds its winning score | *(absent)* |
 | `min_weight` | Suppress pixels whose winning tally is below this. Meaningful under `weight: score` | *(absent)* |
+| `min_count_unless_score` | Waive `min_count` for a winner holding at least one epoch that scored this high | *(absent)* |
 
 ### Decision order for `vote`, normatively
 
@@ -524,8 +525,10 @@ given the per-epoch value, `valid` and `score`:
 3. **Tally** the remaining values; take the class with the largest tally. Under `weight: count`
    each epoch adds 1; under `weight: score` it adds its winning `score`, which must be
    non-negative on every valid epoch or the reduction is refused.
-4. **Suppress** to nodata if fewer than `min_count` epochs agree on the winner, or its tally is
-   below `min_weight`.
+4. **Suppress** to nodata if fewer than `min_count` epochs agree on the winner — unless one of
+   them scored at least `min_count_unless_score` — or its tally is below `min_weight`. The
+   waiver is what lets one good look stand on its own while a winner resting only on poor
+   looks (vegetated weeks, graded down by the scorer) needs corroborating.
 5. **On a tie**, apply `tie_break`:
    - `earliest` / `latest` — the tied class appearing in the earliest / latest epoch;
    - `highest_score` — the tied class holding the single highest `score` across its epochs;

@@ -422,7 +422,7 @@ on a mineral and take a median of its depth in the same breath.</p>
 <table>
 <thead><tr><th>method</th><th>layer kind</th><th>what it does</th><th>requires</th><th>also takes</th></tr></thead>
 <tbody>
-<tr><td><code>vote</code></td><td>categorical</td><td>The modal class across epochs. The mineral-map default.</td><td>&mdash;</td><td><code>ignore</code> <code>min_count</code> <code>min_weight</code> <code>tie_break</code> <code>weight</code></td></tr>
+<tr><td><code>vote</code></td><td>categorical</td><td>The modal class across epochs. The mineral-map default.</td><td>&mdash;</td><td><code>ignore</code> <code>min_count</code> <code>min_count_unless_score</code> <code>min_weight</code> <code>tie_break</code> <code>weight</code></td></tr>
 <tr><td><code>best</code></td><td>categorical / continuous</td><td>The value from the single highest-scoring epoch.</td><td>&mdash;</td><td><code>conditional_on</code> <code>spread</code></td></tr>
 <tr><td><code>none</code></td><td>categorical / continuous</td><td>Carried in the snapshot, never delivered as a product band.</td><td>&mdash;</td><td>&mdash;</td></tr>
 <tr><td><code>inverse_variance</code></td><td>continuous</td><td>A mean weighted by 1/uncertainty&sup2;, from the layer <code>unc</code> names.</td><td><code>unc</code></td><td><code>conditional_on</code> <code>spread</code></td></tr>

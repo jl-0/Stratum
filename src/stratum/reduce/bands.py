@@ -33,7 +33,8 @@ SPREADS = ("std", "iqr")
 DEFAULT_MIN_COUNT = 1             # a single vote counts; the single-epoch identity needs this
 DEFAULT_TIE_BREAK = "nodata"      # refuse to choose unless the schema says how
 
-_VOTE_PARAMS = frozenset({"min_count", "ignore", "tie_break", "weight", "min_weight"})
+_VOTE_PARAMS = frozenset({"min_count", "ignore", "tie_break", "weight", "min_weight",
+                          "min_count_unless_score"})
 _CONTINUOUS_PARAMS = frozenset({"conditional_on", "spread"})
 
 
@@ -51,6 +52,8 @@ class VoteParams:
     tie_break: str = DEFAULT_TIE_BREAK
     weight: str = "count"           # `score`: each epoch votes with its winning score, not 1
     min_weight: float = 0.0         # the winner's summed weight must reach this; 0 = no floor
+    min_count_unless_score: float | None = None   # a winner holding an epoch scoring >= this is
+                                                  # exempt from min_count; None = never exempt
 
 
 @dataclass(frozen=True)
@@ -143,8 +146,12 @@ def _parse_categorical(layer: LayerSpec) -> LayerParams | None:
     min_weight = params.get("min_weight", 0.0)
     if isinstance(min_weight, bool) or not isinstance(min_weight, (int, float)) or min_weight < 0:
         raise SchemaError(f"layer {layer.name!r}: min_weight must be a non-negative number")
+    unless = params.get("min_count_unless_score")
+    if unless is not None and (isinstance(unless, bool) or not isinstance(unless, (int, float))):
+        raise SchemaError(f"layer {layer.name!r}: min_count_unless_score must be a number")
     return VoteParams(min_count=min_count, ignore=tuple(ignore), tie_break=tie_break,
-                      weight=weight, min_weight=float(min_weight))
+                      weight=weight, min_weight=float(min_weight),
+                      min_count_unless_score=None if unless is None else float(unless))
 
 
 def _parse_continuous(layer: LayerSpec, schema: SnapshotSchema) -> ContinuousParams | None:
