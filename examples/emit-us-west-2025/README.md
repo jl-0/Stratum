@@ -24,7 +24,10 @@ pixi run stratum run      -m examples/emit-us-west-2025/manifest-proof.yaml     
 ```
 
 `algorithm.excalidraw` is the whole algorithm on one canvas — the six stages, the four data
-sources, and how scoring and reducing actually decide a cell.
+sources, and how scoring and reducing actually decide a cell, the scoring and voting as
+flowcharts. It shows the 24 September 2026 algorithm: bare earth as PV <= 0.40, vegetated looks
+graded rather than refused, the score-weighted vote with "three weeks unless bare", and
+`n_observed`.
 
 **Drag the file onto the canvas** at [excalidraw.com](https://excalidraw.com), or use ☰ →
 **Open**. Do **not** reach for the library sidebar's *Load library*: this file is a *scene*
@@ -33,14 +36,15 @@ file picker accepts `.excalidraw` anyway — its extension filter is commented o
 a WebKit bug — then fails with **"Couldn't load library"**. Drag-and-drop is the safe route
 because `loadFileToCanvas` routes on the `type` field rather than the file extension.
 
-Verified against `@excalidraw/excalidraw` 0.18.1, not by eye: `isValidExcalidrawData` passes and
-`restore()` keeps all 151 elements and all 39 element links. It also loads in the live editor, and you can
-re-check that after any edit: `uv run scripts/check-excalidraw.py examples/emit-us-west-2025/algorithm.excalidraw`
+Verified, not by eye: it loads in the live editor at excalidraw.com holding all 373 of 373
+elements, with 39 element links. Re-check that after any edit: `uv run scripts/check-excalidraw.py examples/emit-us-west-2025/algorithm.excalidraw`
 drops the file onto excalidraw.com in headless Chromium and fails unless the editor holds every element.
 
-Every box is a hyperlink to the code or the manifest line that implements it, pinned to the
-commit that generated it, because a line number only means something at one commit. It is a
-hand-editable drawing, not a generated artefact: edit it in place.
+Every box is a hyperlink to the code or the manifest line that implements it, pinned to one
+commit (`5688e8d`, the one that carries the 24 Sep algorithm), because a line number only means
+something at one commit. The flowcharts were drawn with `scripts/mermaid-to-excalidraw.py`, which
+turns a Mermaid flowchart into native, editable Excalidraw shapes. It is still a hand-editable
+drawing, not a generated artefact: edit it in place.
 
 ---
 
