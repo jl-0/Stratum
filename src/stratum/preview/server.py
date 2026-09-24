@@ -12,7 +12,7 @@ It serves four things:
 | `/` and `/<file>`         | the viewer, which is the same files a deployed one gets |
 | `/api/config`             | where the products are, and the colour ramps the page draws legends with |
 | `/api/runs`               | the run directories under the products root |
-| `/api/range`              | a continuous band's measured stretch, so the legend can print it |
+| `/api/range`              | one continuous layer's stretch, pooled over the run's tiles |
 | `/api/value`              | every named asset sampled at one point - what a click asks |
 | `/stac/<path>`            | any JSON in the products tree - collections, items, legends |
 | `/tiles/<path>/z/x/y.png` | one asset, one web-mercator tile |
@@ -27,6 +27,7 @@ import json
 import re
 import threading
 from collections import OrderedDict
+from concurrent.futures import ThreadPoolExecutor
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
@@ -40,9 +41,18 @@ STATIC = Path(__file__).parent / "static"
 #: `/tiles/<asset path within the products tree>/<z>/<x>/<y>.png`
 TILE_ROUTE = re.compile(r"^/tiles/(?P<asset>.+)/(?P<z>\d+)/(?P<x>\d+)/(?P<y>\d+)\.png$")
 
+#: How many product tiles a layer's stretch is measured over, and at what decimated size each.
+#: 64 x 128^2 is a million cells: plenty for two percentiles, and small enough to hold at once.
+MEASURE_TILES = 64
+MEASURE_SIZE = 128
+
 MEDIA = {".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8",
          ".css": "text/css; charset=utf-8", ".json": "application/json",
          ".svg": "image/svg+xml", ".png": "image/png"}
+
+
+class BadRequest(ValueError):
+    """The request is well-formed HTTP but asks for something the page must say and did not."""
 
 
 class _LRU(OrderedDict):
@@ -101,11 +111,9 @@ class PreviewHandler(BaseHTTPRequestHandler):
             if route == "/api/runs":
                 return self._json({"runs": self.products.run_ids()})
             if route == "/api/range":
-                # The stretch the tiles actually used. Without this the legend would print a
-                # range the image was never scaled to, which is worse than no legend.
-                asset = query["asset"][0]
-                span = self.ranges.take(asset) or self.ranges.give(
-                    asset, render.measure(self.products.materialise(asset)))
+                # One stretch for a whole layer. The page sends it back on every map-tile
+                # request and prints it on the legend, so the legend and every tile agree.
+                span = self._layer_range(query["run"][0], query["layer"][0])
                 return self._json({"vmin": span[0], "vmax": span[1]})
             if route.startswith("/stac/"):
                 return self._stac(route[len("/stac/"):])
@@ -123,6 +131,8 @@ class PreviewHandler(BaseHTTPRequestHandler):
             self._error(404, "no such route")
         except CatalogError as e:
             self._error(404, str(e))
+        except BadRequest as e:
+            self._error(400, str(e))
         except (BrokenPipeError, ConnectionResetError):          # the map moved on; not an error
             pass
         except Exception as e:                                  # noqa: BLE001 - a tile must not
@@ -159,11 +169,33 @@ class PreviewHandler(BaseHTTPRequestHandler):
             return None
 
     # -- the style -------------------------------------------------------------------------
-    def _style(self, asset: str, query: dict[str, list[str]]) -> render.Style:
-        """What the page asked for, with the raster's own range measured if it did not say.
+    def _layer_range(self, run: str, layer: str) -> tuple[float, float]:
+        """The stretch for one layer of one run, pooled over its product tiles.
 
-        The measurement is cached per asset: it is a decimated read of the whole band, which is
-        far too expensive to repeat for each of the tiles on screen.
+        At most `MEASURE_TILES` of them, evenly spaced through the run: each is pulled into the
+        mirror whole, and a layer like `geometry_stack` is ~28 MB a tile, so measuring all 402
+        tiles of US West would be an 11 GB wait before the first pixel. Cached per layer.
+        """
+        key = (run, layer)
+        cached = self.ranges.take(key)
+        if cached is not None:
+            return cached
+        hrefs = [item["assets"][layer]["href"] for item in self.products.items(run)
+                 if layer in item.get("assets", {})]
+        if not hrefs:
+            raise CatalogError(f"no tile in {run!r} has a {layer!r} asset")
+        sample = hrefs[::-(-len(hrefs) // MEASURE_TILES)]
+        with ThreadPoolExecutor(max_workers=16) as pool:
+            paths = list(pool.map(self.products.materialise, sample))
+        return self.ranges.give(key, render.measure(*paths, size=MEASURE_SIZE))
+
+    def _style(self, asset: str, query: dict[str, list[str]]) -> render.Style:
+        """What the page asked for.
+
+        A continuous tile MUST carry `vmin` and `vmax`. The server used to measure each asset
+        itself when they were missing, which is one stretch per product tile, and that drew tile
+        edges into a layer that has none. There is no per-tile fallback now: the range comes
+        from `/api/range` for the whole layer.
         """
         one = {k: v[0] for k, v in query.items()}
         kind = one.get("kind", "continuous")
@@ -172,11 +204,10 @@ class PreviewHandler(BaseHTTPRequestHandler):
         if kind == "categorical":
             legend = json.loads(self.products.materialise(one["legend"]).read_text())
             return render.style_for("", ["data"], legend)
-        if "vmin" in one and "vmax" in one:
-            span = (float(one["vmin"]), float(one["vmax"]))
-        else:
-            span = self.ranges.take(asset) or self.ranges.give(
-                asset, render.measure(self.products.materialise(asset)))
+        if "vmin" not in one or "vmax" not in one:
+            raise BadRequest("a continuous tile needs vmin and vmax - one stretch per layer, "
+                             "from /api/range?run=&layer=")
+        span = (float(one["vmin"]), float(one["vmax"]))
         return render.Style(kind="continuous", vmin=span[0], vmax=span[1],
                             ramp=one.get("ramp", "viridis"))
 
@@ -209,4 +240,4 @@ def serve(products: Products, *, host: str = "127.0.0.1", port: int = 8787,
     return ThreadingHTTPServer((host, port), bound)
 
 
-__all__ = ["STATIC", "PreviewHandler", "serve"]
+__all__ = ["STATIC", "BadRequest", "PreviewHandler", "serve"]

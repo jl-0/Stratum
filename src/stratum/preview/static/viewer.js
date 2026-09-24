@@ -16,12 +16,16 @@ const state = { products: '', runs: [], run: null, items: [], layer: null, legen
                 overlays: [], grid: null, ramps: {}, legends: {} };
 
 /** The raster layer for one asset: an XYZ layer over the server's tile endpoint. The style
- *  travels in the query string, so the server holds no session. */
+ *  travels in the query string, so the server holds no session.
+ *
+ *  A continuous layer sends the SAME vmin/vmax for every product tile - the layer's range, not
+ *  the tile's. Without them the server used to stretch each one-degree tile to its own range,
+ *  and the tile grid showed through as boxes in a layer that has no tile edges. */
 function rasterLayer(asset, opts) {
   const query = new URLSearchParams(
     opts.kind === 'categorical' ? { kind: 'categorical', legend: opts.legendHref }
     : opts.kind === 'rgba' ? { kind: 'rgba' }
-    : { kind: 'continuous', ramp: opts.ramp });
+    : { kind: 'continuous', ramp: opts.ramp, vmin: opts.vmin, vmax: opts.vmax });
   return L.tileLayer(`tiles/${asset}/{z}/{x}/{y}.png?${query}`,
                      { opacity: opts.opacity, bounds: opts.bounds, maxNativeZoom: 16 });
 }
@@ -244,10 +248,11 @@ async function drawLayer() {
     const legend = await legendFor(first, key);
     if (legend?.kind === 'categorical') {
       Object.assign(opts, { kind: 'categorical', entries: legend.entries,
-                            legendHref: first.assets[`${key}_legend`].href });
+                            legendHref: first.assets[`${key}_legend`].href,
+                            present: presentClasses(key) });
     } else {
       opts.kind = 'continuous';
-      Object.assign(opts, await measure(asset.href));
+      Object.assign(opts, await measure(state.run, key));
     }
     state.legend = legend;
   }
@@ -270,25 +275,49 @@ async function drawLayer() {
   renderLegend(opts);
 }
 
-/** A continuous layer's range: the same stretch the tiles are rendered with. The server measures
- *  it once and caches it, so this costs nothing after the first layer change. Falling back to
- *  0..1 keeps a layer drawing rather than vanishing when the measurement fails. */
-async function measure(href) {
+/** A continuous layer's range, measured once over the run's tiles and used for all of them. The
+ *  server caches it per layer, so this costs nothing after the first time a layer is drawn.
+ *  Falling back to 0..1 keeps a layer drawing rather than vanishing when the measurement fails -
+ *  still one range for every tile, so still no tile edges. */
+async function measure(run, layer) {
   try {
-    return await fetchJSON(`api/range?asset=${encodeURIComponent(href)}`);
+    const query = new URLSearchParams({ run, layer });
+    return await fetchJSON(`api/range?${query}`);
   } catch {
     return { vmin: 0, vmax: 1 };
   }
 }
 
+/** The class ids a layer actually holds anywhere in the run, or `null` when the run cannot say.
+ *
+ *  Publish writes a per-tile `count` on every `classification:classes` entry, so this is a union
+ *  over the items already loaded - no raster is read. A run published before counts existed has
+ *  none, and then the whole table is shown rather than an empty legend. */
+function presentClasses(key) {
+  const present = new Set();
+  let counted = false;
+  for (const item of state.items) {
+    for (const c of classesOf(item, key) || []) {
+      if (c.count === undefined) continue;
+      counted = true;
+      if (c.count > 0) present.add(c.value);
+    }
+  }
+  return counted ? present : null;
+}
+
 function renderLegend(opts) {
   const el = $('legend');
   if (opts.kind === 'categorical' && state.legend) {
-    const rows = state.legend.entries.filter((e) => e.id !== 0);
+    const all = state.legend.entries.filter((e) => e.id !== 0);
+    const rows = opts.present ? all.filter((e) => opts.present.has(e.id)) : all;
+    const scope = opts.present
+      ? `Only the ${rows.length} of ${all.length} classes that occur in this run.`
+      : 'Every class in the table - this run was published without per-class counts.';
     el.innerHTML = `<h2>${state.layer} — ${rows.length} classes</h2>` +
       '<input id="legendfilter" type="search" placeholder="filter classes" ' +
       'aria-label="Filter classes">' +
-      '<p class="muted">Or click the map: it reads every band at that point.</p><ul>' +
+      `<p class="muted">${scope} Or click the map: it reads every band at that point.</p><ul>` +
       rows.map((e) =>
         `<li data-name="${escapeHTML(e.name.toLowerCase())}">` +
         `<span class="sw" style="background:rgb(${e.color.join(',')})"></span>` +
@@ -309,7 +338,8 @@ function renderLegend(opts) {
     el.innerHTML = `<h2>${state.layer}</h2>` +
       (stops ? `<div class="bar" style="background:linear-gradient(to right,${stops})"></div>` : '') +
       `<div class="ticks"><span>${fmt(lo)}</span><span>${fmt(hi)}</span></div>` +
-      '<p class="muted">Stretched to the 2nd–98th percentile of the band.</p>';
+      '<p class="muted">Stretched to the 2nd–98th percentile of the layer across the run — ' +
+      'one scale for every tile.</p>';
   } else {
     el.innerHTML = `<h2>${state.layer}</h2><p class="muted">A published rendering: its colours ` +
       'are the ones publish wrote into the image.</p>';

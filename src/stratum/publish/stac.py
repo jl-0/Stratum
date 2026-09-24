@@ -16,6 +16,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+import numpy as np
 from rasterio.crs import CRS
 from rasterio.warp import transform_bounds
 
@@ -23,6 +24,7 @@ from stratum import __version__
 from stratum.publish.cogs import is_categorical, media_type
 from stratum.publish.colors import hex_color, resolve_class_colors, table_ids_names
 from stratum.publish.provenance import PROVENANCE_NAME, iso_utc
+from stratum.reduce import CATEGORICAL_NODATA
 from stratum.types import BandSpec, BandStack, ClassTable, Epoch, TileRef
 
 STAC_VERSION = "1.0.0"
@@ -74,17 +76,31 @@ def raster_bands(spec: BandSpec) -> list[dict[str, Any]]:
 
 
 def classification_classes(table: ClassTable,
-                           colors: Mapping[str, Sequence[int]] | None = None) -> list[dict[str, Any]]:
+                           colors: Mapping[str, Sequence[int]] | None = None,
+                           band: np.ndarray | None = None) -> list[dict[str, Any]]:
     """`classification:classes`: value, name and a `color_hint` for every class that renders
-    opaque - an uncoloured class, or a transparent one such as the default `none`, gets none."""
+    opaque - an uncoloured class, or a transparent one such as the default `none`, gets none.
+
+    With `band` given, every class also carries `count`: the cells of this tile holding it, 0
+    where none do. The whole table is still listed - it is what the values MEAN - and `count` is
+    what a reader uses to show only the classes the product actually contains: 294 source classes,
+    of which one group's layer can only ever hold a fraction. `count` is the Classification
+    extension's own field from v2.0.0; v1.1.0, which the item declares, permits it as an extra
+    property."""
     colours = resolve_class_colors(table, colors, on_unmapped="fail")
     ids, names = table_ids_names(table)
+    counts = None
+    if band is not None:
+        observed = band[band != CATEGORICAL_NODATA]
+        counts = np.bincount(observed.ravel(), minlength=max(ids, default=0) + 1)
     out = []
     for cid, name in zip(ids, names, strict=True):
         entry: dict[str, Any] = {"value": cid, "name": name}
         rgba = colours[cid]
         if rgba is not None and rgba[3] > 0:
             entry["color_hint"] = hex_color(rgba)
+        if counts is not None:
+            entry["count"] = int(counts[cid])
         out.append(entry)
     return out
 
@@ -168,7 +184,7 @@ def build_stac_item(*, run_id: str, manifest_hash: str, tile: TileRef, period: E
         table = tables_by_layer.get(spec.name, class_table)
         if is_categorical(spec) and table is not None:
             asset["classification:classes"] = classification_classes(
-                table, (colors_by_band or {}).get(spec.name, colors))
+                table, (colors_by_band or {}).get(spec.name, colors), stack[spec.name])
         assets[spec.name] = asset
     for name, p in (images or {}).items():
         assets[f"{name}_rgba"] = {"href": href(p, f"./{name}_rgba.tif"), "type": media_type(fmt),

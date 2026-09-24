@@ -374,13 +374,69 @@ def test_the_server_renders_a_tile(server: int) -> None:
     assert read_png(body).shape == (render.TILE, render.TILE, 4)
 
 
-def test_the_range_endpoint_reports_the_stretch_the_tiles_used(server: int,
-                                                              products: Products) -> None:
-    """Otherwise the page's legend prints a range the image was never scaled to."""
-    asset = "run-a/0_0/20260101_20260201/depth_1.tif"
-    span = json.loads(get(server, f"/api/range?asset={asset}")[1])
-    vmin, vmax = render.measure(products.resolve(asset))
-    assert (span["vmin"], span["vmax"]) == pytest.approx((vmin, vmax))
+def test_measure_pools_every_raster_it_is_given(tmp_path: Path) -> None:
+    """Two rasters, one stretch - wider than either tile's own."""
+    import rasterio
+
+    write_products(tmp_path)
+    base = tmp_path / "products" / "run-a"
+    a, b = (base / f"{t}/20260101_20260201/depth_1.tif" for t in ("0_0", "1_0"))
+    with rasterio.open(b, "r+") as dst:
+        dst.write(dst.read(1) * 10, 1)
+    lo, hi = render.measure(a, b)
+    assert hi > render.measure(a)[1], "the busier tile must widen the shared range"
+    assert lo < render.measure(b)[0], "and the quieter one must lower it"
+
+
+def test_the_range_endpoint_measures_the_layer_not_one_tile(tmp_path: Path) -> None:
+    """One answer for the layer, pooled over its tiles, so every tile is drawn on it.
+
+    Each tile used to be stretched to its own 2nd-98th percentile. Over US West 2025 that put
+    `n_epochs` on anything from 0..1 to 0..10 per tile, and the tile grid showed through the map
+    as solid boxes in a layer that has no tile edges.
+    """
+    import rasterio
+
+    from stratum.preview.server import MEASURE_SIZE
+
+    write_products(tmp_path)
+    base = tmp_path / "products" / "run-a"
+    paths = [base / f"{t}/20260101_20260201/depth_1.tif" for t in ("0_0", "1_0")]
+    with rasterio.open(paths[1], "r+") as dst:
+        dst.write(dst.read(1) * 10, 1)
+
+    httpd = serve(Products.open(tmp_path), port=0)
+    threading.Thread(target=httpd.serve_forever, daemon=True).start()
+    try:
+        port = httpd.server_address[1]
+        span = json.loads(get(port, "/api/range?run=run-a&layer=depth_1")[1])
+        missing = get(port, "/api/range?run=run-a&layer=no_such_layer")[0]
+    finally:
+        httpd.shutdown()
+        httpd.server_close()
+    assert (span["vmin"], span["vmax"]) == pytest.approx(
+        render.measure(*paths, size=MEASURE_SIZE))
+    assert span["vmax"] > render.measure(paths[0])[1], "not the first tile's own range"
+    assert missing == 404
+
+
+def test_a_continuous_tile_without_a_stretch_is_refused(server: int) -> None:
+    """There is no per-tile fallback to fall into: the page must send the layer's range."""
+    base = "run-a/0_0/20260101_20260201"
+    status, body, _ = get(server, f"/tiles/{base}/depth_1.tif/6/32/31.png?kind=continuous")
+    assert status == 400 and b"vmin" in body
+    status, _, content_type = get(
+        server, f"/tiles/{base}/depth_1.tif/6/32/31.png?kind=continuous&vmin=0&vmax=1")
+    assert status == 200 and content_type == "image/png"
+
+
+def test_the_page_sends_one_stretch_for_every_tile_of_a_layer() -> None:
+    """The range is measured per LAYER and travels in every continuous map-tile request."""
+    js = (STATIC / "viewer.js").read_text()
+    layer = js[js.index("function rasterLayer"):js.index("function rampLUT")]
+    assert "vmin: opts.vmin" in layer and "vmax: opts.vmax" in layer
+    assert "measure(state.run, key)" in js, "measured for the layer, not for the first asset"
+    assert "api/range?asset=" not in js
 
 
 @pytest.mark.parametrize("path", ["/stac/%2e%2e%2fsecret.json", "/stac/nope/collection.json",
@@ -422,3 +478,13 @@ def test_the_drawing_indicator_does_not_depend_on_animation_frames():
     assert "requestAnimationFrame(" not in tracker, \
         "coalesce with a timer; rAF does not run in a background tab"
     assert "setTimeout(" in tracker
+
+
+def test_the_legend_lists_only_the_classes_the_run_contains() -> None:
+    """A 294-class source table, of which one group's layer holds a fraction. The per-tile
+    `count` publish writes is unioned over the items; a run without counts shows everything."""
+    js = (STATIC / "viewer.js").read_text()
+    union = js[js.index("function presentClasses"):js.index("function renderLegend")]
+    assert "c.count > 0" in union and "return counted ? present : null" in union
+    assert "present: presentClasses(key)" in js
+

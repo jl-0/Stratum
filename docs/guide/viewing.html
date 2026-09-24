@@ -69,6 +69,11 @@ Classification extension, and each categorical band declares its own
 <code>classification:classes</code> &mdash; so <code>mineral_1_runner_up</code> is named and
 <code>mineral_1_agreement</code>, which merely shares a prefix, is not.</p>
 
+<p>The legend lists only the classes that occur somewhere in the run, not the whole class table.
+Publish records a per-tile <code>count</code> on every <code>classification:classes</code> entry,
+and the viewer shows the classes whose count is above zero in any tile. A run published before
+counts existed shows the full table, and the legend says so.</p>
+
 <p>The legend also takes a filter, for when you want to go the other way and find a class you can
 name.</p>
 
@@ -83,8 +88,11 @@ ones publish wrote into the image; the viewer chooses nothing.</td></tr>
 <tr><td><code>data</code>, with a <code>legend</code> asset beside it</td><td>Each value looked up
 in that legend. Resampled <strong>nearest</strong>, always — averaging class ids would invent
 classes nothing identified.</td></tr>
-<tr><td><code>data</code>, continuous</td><td>Stretched between the band's 2nd and 98th percentile
-through a colour ramp. Averaged when zoomed out, which is what makes a whole tile readable.</td></tr>
+<tr><td><code>data</code>, continuous</td><td>Stretched between the layer's 2nd and 98th
+percentile through a colour ramp. The range is measured <strong>once for the whole layer</strong>,
+pooled over up to 64 of the run's tiles, and every tile is drawn on it, so a value is the same
+colour on either side of a tile edge. Averaged when zoomed out, which is what makes a whole tile
+readable.</td></tr>
 </tbody>
 </table>
 </div>

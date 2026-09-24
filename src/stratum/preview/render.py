@@ -136,19 +136,27 @@ def tile_bounds(z: int, x: int, y: int) -> tuple[float, float, float, float]:
     return west, north - span, west + span, north
 
 
-def measure(path: Path, *, band: int = 1, size: int = 512) -> tuple[float, float]:
-    """The 2nd and 98th percentile of a raster, from a decimated read.
+def measure(*paths: Path, band: int = 1, size: int = 512) -> tuple[float, float]:
+    """The 2nd and 98th percentile of one or more rasters, pooled, from decimated reads.
 
     A stretch has to come from somewhere, and reading the whole band per tile is not it. The
     percentiles clip the outliers that otherwise flatten every continuous layer to one colour.
+
+    Given several rasters it is ONE stretch over all of them, not one each. A layer is drawn from
+    one raster per product tile, and stretching each tile to its own range made the same value a
+    different colour on either side of a tile edge: over US West 2025, `n_epochs` measured
+    anywhere from 0..1 to 0..10 per tile, so a sparse tile lit up as a solid box.
     """
     import rasterio
 
-    with rasterio.open(path) as src:
-        shape = (min(size, src.height), min(size, src.width))
-        data = src.read(band, out_shape=shape, masked=True).astype("float64")
-    valid = data.compressed()
-    valid = valid[np.isfinite(valid)]
+    pooled = []
+    for path in paths:
+        with rasterio.open(path) as src:
+            shape = (min(size, src.height), min(size, src.width))
+            data = src.read(band, out_shape=shape, masked=True).astype("float64")
+        valid = data.compressed()
+        pooled.append(valid[np.isfinite(valid)])
+    valid = np.concatenate(pooled) if pooled else np.empty(0)
     if valid.size == 0:
         return 0.0, 1.0
     lo, hi = (float(v) for v in np.percentile(valid, (2, 98)))

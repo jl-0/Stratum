@@ -417,6 +417,10 @@ def test_publish_period_writes_everything_and_stac_item_is_well_formed(tmp_path,
     assert [(c["value"], c["name"]) for c in classes] == \
         [(0, "none"), (1, "goethite"), (2, "hematite"), (3, "pyrite")]
     assert classes[3]["color_hint"] == "dc050c" and "color_hint" not in classes[0]
+    with rasterio.open(pub.data["m"]) as src:                # `count` is this tile's cells, exactly
+        band = src.read(1)
+    assert [c["count"] for c in classes] == [int((band == c["value"]).sum()) for c in classes]
+    assert sum(c["count"] for c in classes) == int((band != ND).sum()), "nodata is not a class"
     assert assets["m"]["raster:bands"] == [{"data_type": "uint16", "unit": "unitless", "nodata": ND}]
     assert assets["m_agreement"]["raster:bands"][0]["nodata"] == "nan"
     assert len(assets["d"]["raster:bands"]) == 2

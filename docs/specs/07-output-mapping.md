@@ -57,7 +57,12 @@ Publish writes both, from the same block, in the same run:
 | **Class table** | `classes.json` when one table covers every categorical layer; `classes.{layer}.json` per layer when they carry different enumerations, with a per-band colour table and a per-asset `classification:classes` ([13 §3](13-snapshot-schema.md)) | analysis, joining a class id to a name |
 
 The legend is authoritative in the STAC item's `classification` extension; the COG's colour table
-and the JSON sidecar are derived from it. That single requirement is what stops us
+and the JSON sidecar are derived from it. Every class entry also carries `count`, the tile's cells
+holding that class (0 where none do), so a reader can show only the classes a product contains
+without reading a raster. The table is still listed in full, because it defines what the values
+mean. `count` is the extension's own field from v2.0.0; v1.1.0, which items declare, permits it as
+an extra property. v2.0.0 itself is not adopted: its `name` pattern refuses the spaces in
+Tetracorder class names. That single requirement is what stops us
 recreating a situation where the only record of what a colour means lives in a config file on
 someone's cluster account.
 
