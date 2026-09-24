@@ -39,7 +39,7 @@ time:
   deliver: P1Y
 
 inputs:
-  index_location: ../emit-cmr-cuprite/index     # built already; nothing is queried
+  index_location: ./index-proof   # its own: the Cuprite index lists no FRCOVPV, and is shared
   source:
     kind: cmr
     provider: LPCLOUD
@@ -50,7 +50,7 @@ inputs:
       EMITL1BRAD:
         OBS: "EMIT_L1B_OBS_001_*.nc"
       EMITL2BFRCOV:
-        FRCOVBARE: "EMIT_L2B_FRCOVBARE_001_*.tif"
+        FRCOVPV: "EMIT_L2B_FRCOVPV_001_*.tif"
   roles:
     geometry: {collection: EMITL1BRAD, asset: OBS, var: obs}
     mineral_1:
@@ -65,10 +65,10 @@ inputs:
       class_table: {source: embedded, path: /mineral_metadata, key: index,
                     attributes: [name, record, library, group, url]}
     depth_2: {collection: EMITL2BMIN, var: group_2_band_depth}
-    frcov:
+    pv:                           # fill wherever FRCOVQC flags cloud/urban/water/snow: the snow mask
       collection: EMITL2BFRCOV
-      asset: FRCOVBARE
-      var: EMIT_L2B_FRCOVBARE
+      asset: FRCOVPV
+      var: EMIT_L2B_FRCOVPV
       resampling: bilinear
   band_aliases:
     view_zenith:  {role: geometry, band: 2}
@@ -93,9 +93,9 @@ pixel_mask:
   - {ref: landcover, exclude: [water, built-up]}
 
 scorer:
-  ref: bare_earth_nadir
-  params: {hard_floor: 0.65, below_floor_weight: 0.1, min_soil: 0.80, sun_weight: 0.25,
-           nadir_weight: 0.10}        # as manifest.yaml: vegetation graded, not masked
+  ref: low_vegetation_nadir
+  params: {max_pv: 0.40, vegetated_weight: 0.1, sun_weight: 0.25, nadir_weight: 0.10}
+                                  # as manifest.yaml: bare = PV <= 0.40, greener looks graded
 
 snapshot:
   name: us-west-2025-grouping-v1
@@ -104,27 +104,32 @@ snapshot:
       kind: categorical
       source: mineral_1
       classes: source
-      aggregate: {method: vote, weight: score, ignore: [none], tie_break: highest_score}
+      aggregate: {method: vote, weight: score, min_count: 3, min_count_unless_score: 0.6,
+                  ignore: [none], tie_break: highest_score}
     mineral_2_native:
       kind: categorical
       source: mineral_2
       classes: source
-      aggregate: {method: vote, weight: score, ignore: [none], tie_break: highest_score}
+      aggregate: {method: vote, weight: score, min_count: 3, min_count_unless_score: 0.6,
+                  ignore: [none], tie_break: highest_score}
     iron_oxide:
       kind: categorical
       source: mineral_1
       classes: "@ref:classes/iron-oxide-v1.yaml"
-      aggregate: {method: vote, weight: score, ignore: [none], tie_break: highest_score}
+      aggregate: {method: vote, weight: score, min_count: 3, min_count_unless_score: 0.6,
+                  ignore: [none], tie_break: highest_score}
     alteration:
       kind: categorical
       source: mineral_2
       classes: "@ref:classes/alteration-v1.yaml"
-      aggregate: {method: vote, weight: score, ignore: [none], tie_break: highest_score}
+      aggregate: {method: vote, weight: score, min_count: 3, min_count_unless_score: 0.6,
+                  ignore: [none], tie_break: highest_score}
     mineral_family:
       kind: categorical
       source: mineral_2
       classes: "@ref:classes/mineral-family-v1.yaml"
-      aggregate: {method: vote, weight: score, ignore: [none], tie_break: highest_score}
+      aggregate: {method: vote, weight: score, min_count: 3, min_count_unless_score: 0.6,
+                  ignore: [none], tie_break: highest_score}
     depth_1:
       kind: continuous
       source: depth_1

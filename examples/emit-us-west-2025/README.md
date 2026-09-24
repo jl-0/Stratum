@@ -92,20 +92,33 @@ sparse everywhere but the desert southwest. Measured on 60 random granules of th
 **17.5 %** of observed pixels clear 0.65 — median granule 8 %, forested scenes under 3 %. So the
 manifest now:
 
-| | before | now |
+| | before (22 Sep run) | now |
 |---|---|---|
+| what "bare earth" means | bare-soil fraction >= 0.65 (`1 - PV - NPV`) | **PV <= 0.40**, NPV ignored — `low_vegetation_nadir` |
 | `soil_fraction` mask | 0.65 | removed |
-| look below `hard_floor` | NaN: may not occupy the cell | scored at `below_floor_weight: 0.1` of its value |
-| categorical `vote` | one week, one vote; `min_count: 3` | `weight: score`: a week votes with its score; no `min_count` |
+| a look that is not bare | NaN: may not occupy the cell | scored at `vegetated_weight: 0.1` of its value |
+| categorical `vote` | one week, one vote; `min_count: 3` | `weight: score`; `min_count: 3` **unless** a bare week backs the winner (`min_count_unless_score: 0.6`) |
 | `*_agreement` | modal weeks / valid weeks | winner's share of the total score — a confidence |
 | `depth_*` | `median` of concordant weeks | `score_weighted`, so the barest looks dominate |
 | coverage bands | `n_epochs` only | `n_epochs` and `n_observed` (weeks any granule reached the cell, before masks) |
+| snow | (unexamined) | excluded, as it always was: FRCOV is fill wherever FRCOVQC = 4 (NDSI > 0.4), and fill invalidates the look |
+
+The 24 Sep science tag-up set the PV rule (NPV is not reliable enough) and the "report a
+non-bare class only if enough weeks agree" rule. One-tile proof at Cuprite (desert, so both rules
+barely bind there — the vegetated west is where they matter):
+
+| run | cells with a valid week | group 1 classified | group 2 classified | group 1 label = 22 Sep |
+|---|---:|---:|---:|---:|
+| 22 Sep settings | 67.4 % | 39.8 % | 34.8 % | — |
+| bare graded, no `min_count` | 98.9 % | 96.1 % | 98.2 % | 99.3 % |
+| **PV <= 0.40, 3 weeks unless bare** | 98.9 % | 96.1 % | 98.0 % | 98.7 % |
 
 Within a week the barest look still wins. Across the year a bare week outvotes about ten
-vegetated ones, and a cell that never shows ground still gets its best answer, with a low
-agreement. The cost: the snapshot key changed, so resolve reruns in full. **Not yet measured**:
-how much coverage this recovers, how often labels change where the old run had one, and whether
-FRCOV reads winter snow as bare soil — no product in the pipeline flags snow.
+vegetated ones. A cell that never shows ground still gets an answer if three weeks agree on it,
+with a low agreement; one backed by a single bare week needs no corroboration. The cost: the snapshot key changed, so resolve reruns in full. **Not yet measured**:
+how much coverage this recovers over the vegetated west, and how often labels change there. The
+science tag-up also noted that 2023 was a good year for bare earth in the west; a 2023 run is one
+`time:` edit away.
 
 ---
 
