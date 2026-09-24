@@ -299,6 +299,7 @@ lives, and `stratum plugins list` is the authority for the installed environment
 | `max_band_depth` | `MaxBandDepth` | `mineral_depth` | The deepest absorption feature. A trial scorer, not a product one — it is the wrong bias for a base map, and it exists because a directory of L2B granules with no OBS beside them is the common local case. |
 | `prefer_bare_earth` | `PreferBareEarth` | `frcov`, `solar_zenith` | The best-exposed, best-lit look. **No view-zenith term.** |
 | `bare_earth_nadir` | `BareEarthNadir` | `frcov`, `solar_zenith`, `view_zenith` | The same, plus a nadir term. `nadir_weight: 0` reproduces `prefer_bare_earth`. |
+| `low_vegetation_nadir` | `LowVegetationNadir` | `pv`, `solar_zenith`, `view_zenith` | Bare earth defined as green vegetation at most `max_pv` (0.40), ignoring NPV. Cover is `1 - PV`; same tie-breakers as `bare_earth_nadir`; `vegetated_weight` grades a greener look instead of refusing it. |
 | `cleanest_nadir` | `CleanestNadir` | `geometry`, **aux** `slope` + `snow` | Nadir-preferring, penalised for steep terrain, rejecting snow. **Cannot run yet**: it calls `aux.raster("snow", date=…)` and `temporal` date-keying is refused ([05 §2](05-ancillary-data.md)). |
 
 ### Worked examples
@@ -391,6 +392,14 @@ retrieval "completely falls apart" below it; `min_soil=0.80` is the higher bar r
 mosaicking. Keeping them separate lets the scorer *rank* between 0.65 and 0.80 rather than
 discarding that range outright — which is the "don't destroy information" principle applied at the
 smallest possible scale.
+
+**Bare by PV alone: `low_vegetation_nadir`.** The science team's current position (24 Sep 2026)
+is that NPV is not reliable enough to lean on, so bare-soil fraction — `1 - PV - NPV` in the
+three-component unmixing — inherits an unreliable term. `LowVegetationNadir` tests photosynthetic
+vegetation alone: a look is bare when PV is at most `max_pv` (0.40), and it ranks on `1 - PV`.
+Above `max_pv` it is NaN, or graded by `vegetated_weight` exactly as `below_floor_weight` grades
+here, with the same refusal of a weight that would let a green look outrank a bare one. A bare
+look scores at least `1 - max_pv`, which is the value to give a vote's `min_count_unless_score`.
 
 **Below the floor: veto or grade.** By default a look under `hard_floor` is NaN: it may not occupy
 the cell. `below_floor_weight: w` keeps it instead, scored `w x` what it would otherwise have

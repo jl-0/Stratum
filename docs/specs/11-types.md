@@ -53,6 +53,7 @@ it. **[observed]** unless noted.
 | `location/glt_y` | `int32` | `0` | 1-based downtrack index; observed range 1–1664, **no negatives** |
 | Stratum GLT band 3 | `int32` | `0` | Granule index, 1-based |
 | Stratum GLT bands 1–2 | `int32` | `0` | **Negative = interpolated** (SpectralUtil convention; *not* used in delivered granules) |
+| L2B FRCOV fractions (`FRCOVBARE`, `FRCOVPV`, `FRCOVNPV`) | `float64` | `-9999` | Outside the swath, **or flagged by `FRCOVQC`**: every fraction is fill wherever the QC band is non-zero (1 cloud, 2 urban, 3 water, 4 snow/ice at NDSI > 0.4). Verified on all five codes of one January Colorado Plateau scene, 2026-09-24. So any role read from FRCOV already removes snow, cloud, urban and water, with no mask of its own |
 | `Scorer.score` | `float32` | `NaN` | This observation may not occupy this cell |
 | Reducer outputs | per `BandSpec` | declared | |
 

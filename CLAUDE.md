@@ -140,6 +140,12 @@ Established by reading code and data. Do not re-derive; do not assume the opposi
   bare-soil fraction is **0.53** at Cuprite, so `hard_floor: 0.65` admits only 29.6 % of covered
   cells and drops the vote rate from 62.4 % to 19.7 %. That is the tag-up's "NPV
   false-positive happy" caveat in numbers, not a bug &mdash; open with the science team.
+- **FRCOV already masks snow.** Every FRCOV fraction is fill wherever `FRCOVQC` is non-zero -
+  1 cloud, 2 urban, 3 water, **4 snow/ice** (NDSI > 0.4, per the emit-sds-frcov ATBD section 4.6) -
+  and fill in an ortho role makes the observation invalid. So a run reading `frcov` or `pv` never
+  lets a snow pixel vote; no snow mask is needed. Verified on all five codes, 2026-09-24
+  ([11 §2](docs/specs/11-types.md)). The L2A mask has no snow flag, and L2B discards
+  Tetracorder's own snow detections.
 - **Aux is `raster()` only, and the planner warps it.** Static `https://`/`file://` sources, one
   URI or a LIST of them (a global raster ships as a tile set, so any AOI wider than one tile needs
   several composited later-over-earlier; the digest is over the parts in order, so reordering is a

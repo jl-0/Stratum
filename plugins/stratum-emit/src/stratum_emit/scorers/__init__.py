@@ -208,6 +208,68 @@ class BareEarthNadir:
         return s
 
 
+class LowVegetationNadir:
+    """Bare earth defined by what is NOT there: green vegetation below `max_pv`.
+
+    `BareEarthNadir` ranks on the bare-soil fraction, which is `1 - PV - NPV` in a three-component
+    unmixing - so it inherits the NPV estimate, and the current FRCOV reads some bare soil as
+    NPV (the caveat on `PreferBareEarth`). The science team's current position is that NPV is
+    not reliable enough to lean on, and that the test is photosynthetic vegetation alone: a look
+    is bare earth when PV is at most `max_pv` (0.40). This scorer is that rule, with the same
+    illumination and nadir tie-breakers as `BareEarthNadir`.
+
+    **Cover** is `1 - PV`, so among bare looks the least green wins. A look above `max_pv` is
+    NaN by default; with `vegetated_weight` it is graded instead - scored at that fraction, so
+    it ranks after every bare look within an epoch and, under a `vote` with `weight: score`,
+    votes across epochs at that fraction of a bare look's strength. Pair it with
+    `min_count_unless_score` at `1 - max_pv` and a class seen only through vegetation needs
+    `min_count` agreeing epochs while one bare look stands on its own.
+
+    Snow, cloud, urban and water need no term here: FRCOV writes fill into every fraction
+    wherever its QC band flags them (FRCOVQC 1-4; 4 is snow/ice at NDSI > 0.4), and fill makes
+    the observation invalid before any scorer runs.
+    """
+
+    capability = "streaming"
+    halo = 0
+    required_roles = ("pv", "solar_zenith", "view_zenith")
+    required_aux: tuple[str, ...] = ()
+
+    def __init__(self, max_pv: float = 0.40, vegetated_weight: float | None = None,
+                 sun_weight: float = 0.25, nadir_weight: float = 0.10,
+                 max_solar_zenith: float = 80.0, max_view_zenith: float = 90.0) -> None:
+        if not 0.0 <= max_pv < 1.0:
+            raise ValueError(f"LowVegetationNadir: max_pv must be in [0, 1); got {max_pv}")
+        if sun_weight < 0 or nadir_weight < 0:
+            raise ValueError("LowVegetationNadir: sun_weight and nadir_weight must not be negative")
+        if sun_weight + nadir_weight > 1.0:
+            raise ValueError("LowVegetationNadir: sun_weight + nadir_weight must not exceed 1, or "
+                             "the tie-breakers outrank cover")
+        floor = 1.0 - max_pv
+        _check_below_floor_weight("LowVegetationNadir", vegetated_weight, floor,
+                                  floor + sun_weight + nadir_weight)
+        self.max_pv = max_pv
+        self.vegetated_weight = vegetated_weight
+        self.sun_weight = sun_weight
+        self.nadir_weight = nadir_weight
+        self.max_solar_zenith = max_solar_zenith
+        self.max_view_zenith = max_view_zenith
+
+    def score(self, obs: ObsWindow, aux: AuxAccessor) -> np.ndarray:
+        pv = np.clip(np.ma.filled(obs["pv"], np.nan).astype("float32"), 0.0, 1.0)
+        sun = np.ma.filled(obs["solar_zenith"], np.nan).astype("float32")
+        view = np.ma.filled(obs["view_zenith"], np.nan).astype("float32")
+        illumination = np.clip(np.cos(np.radians(np.clip(sun, 0.0, 90.0))), 0.0, 1.0)
+        nadir = 1.0 - np.clip(np.abs(view) / BareEarthNadir.VIEW_ZENITH_SCALE, 0.0, 1.0)
+        cover = 1.0 - pv
+        s = cover + self.sun_weight * illumination + self.nadir_weight * nadir
+        # "above max_pv" is "cover below 1 - max_pv"; the helper takes the floor on cover
+        _below_floor(s, cover, 1.0 - self.max_pv, self.vegetated_weight)
+        s[sun > self.max_solar_zenith] = np.nan
+        s[np.abs(view) > self.max_view_zenith] = np.nan
+        return s
+
+
 class MaxBandDepth:
     """The strongest absorption feature wins.
 
@@ -226,5 +288,5 @@ class MaxBandDepth:
         return obs["mineral_depth"].astype("float32", copy=False)
 
 
-__all__ = ["BareEarthNadir", "CleanestNadir", "MaxBandDepth", "MinViewZenith",
-           "PreferBareEarth"]
+__all__ = ["BareEarthNadir", "CleanestNadir", "LowVegetationNadir", "MaxBandDepth",
+           "MinViewZenith", "PreferBareEarth"]

@@ -33,6 +33,7 @@ min_view_zenith   = "stratum_emit.scorers:MinViewZenith"
 cleanest_nadir    = "stratum_emit.scorers:CleanestNadir"
 prefer_bare_earth = "stratum_emit.scorers:PreferBareEarth"
 bare_earth_nadir  = "stratum_emit.scorers:BareEarthNadir"
+low_vegetation_nadir = "stratum_emit.scorers:LowVegetationNadir"
 max_band_depth    = "stratum_emit.scorers:MaxBandDepth"
 
 [project.entry-points."stratum.reducers"]

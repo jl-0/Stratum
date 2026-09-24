@@ -381,6 +381,7 @@ what you write; <code>stratum plugins list</code> prints what your environment p
 <tr><td><code>max_band_depth</code></td><td><code>mineral_depth</code></td><td>The deepest absorption feature. A trial scorer &mdash; the wrong bias for a base map, but it runs over L2B granules with no OBS beside them.</td></tr>
 <tr><td><code>prefer_bare_earth</code></td><td><code>frcov</code>, <code>solar_zenith</code></td><td>The best-exposed, best-lit look. No view-zenith term.</td></tr>
 <tr><td><code>bare_earth_nadir</code></td><td><code>frcov</code>, <code>solar_zenith</code>, <code>view_zenith</code></td><td>The same, plus a nadir term. <code>nadir_weight: 0</code> reproduces the one above.</td></tr>
+<tr><td><code>low_vegetation_nadir</code></td><td><code>pv</code>, <code>solar_zenith</code>, <code>view_zenith</code></td><td>Bare earth as green vegetation at most <code>max_pv</code> (0.40), NPV ignored; ranks on <code>1 - PV</code>. <code>vegetated_weight</code> grades a greener look rather than refusing it.</td></tr>
 <tr><td><code>cleanest_nadir</code></td><td><code>geometry</code>, aux <code>slope</code> + <code>snow</code></td><td>Nadir-preferring, terrain-penalised, snow-rejecting. <strong>Cannot run yet</strong> &mdash; it needs date-keyed aux, which is refused.</td></tr>
 </tbody>
 </table></div>

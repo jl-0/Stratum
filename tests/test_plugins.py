@@ -224,3 +224,40 @@ def test_bare_earth_refuses_a_below_floor_weight_that_reaches_the_floor():
         PreferBareEarth(below_floor_weight=0.8)                      # 0.8 x 0.9 >= 0.65
     with pytest.raises(ValueError, match=r"\(0, 1\]"):
         BareEarthNadir(below_floor_weight=0.0)
+
+
+# --------------------------------------------------------------------- LowVegetationNadir
+class _PvObs:
+    def __init__(self, pv, sun, view):
+        import numpy as np
+        self.b = {"pv": np.asarray(pv, "float32"), "solar_zenith": np.asarray(sun, "float32"),
+                  "view_zenith": np.asarray(view, "float32")}
+
+    def __getitem__(self, k):
+        return self.b[k]
+
+
+def test_low_vegetation_is_bare_earth_by_pv_alone():
+    """PV at most 0.40 is bare, whatever NPV says; the least green bare look wins; above 0.40 a
+    look is refused by default and graded with `vegetated_weight`, never outranking a bare one."""
+    import numpy as np
+    from stratum_emit.scorers import LowVegetationNadir
+
+    obs = _PvObs([0.05, 0.39, 0.41, 0.90], [0.0] * 4, [0.0] * 4)
+    vetoed = LowVegetationNadir().score(obs, None)
+    assert np.isfinite(vetoed[:2]).all() and np.isnan(vetoed[2:]).all()
+    assert vetoed[0] > vetoed[1], "among bare looks, the least green wins"
+    graded = LowVegetationNadir(vegetated_weight=0.1).score(obs, None)
+    assert np.isfinite(graded).all() and graded[1] > graded[2] > graded[3] > 0
+    assert graded[1] >= 0.6, "a bare look scores at least 1 - max_pv: the waiver threshold"
+    assert LowVegetationNadir.required_roles == ("pv", "solar_zenith", "view_zenith")
+
+
+def test_low_vegetation_refuses_a_weight_that_lets_green_outrank_bare():
+    from stratum_emit.scorers import LowVegetationNadir
+
+    LowVegetationNadir(vegetated_weight=0.6)                  # 0.95 x 0.6 < 0.60
+    with pytest.raises(ValueError, match="reaches a look at the floor"):
+        LowVegetationNadir(vegetated_weight=0.7)
+    with pytest.raises(ValueError, match="max_pv"):
+        LowVegetationNadir(max_pv=1.0)
