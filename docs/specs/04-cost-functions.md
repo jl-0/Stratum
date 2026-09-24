@@ -392,6 +392,15 @@ mosaicking. Keeping them separate lets the scorer *rank* between 0.65 and 0.80 r
 discarding that range outright — which is the "don't destroy information" principle applied at the
 smallest possible scale.
 
+**Below the floor: veto or grade.** By default a look under `hard_floor` is NaN: it may not occupy
+the cell. `below_floor_weight: w` keeps it instead, scored `w x` what it would otherwise have
+scored, so it still ranks within the epoch and, under a `vote` with `weight: score`, still votes
+across epochs at that fraction of a bare look's strength. `w` must satisfy
+`(hard_floor + sun_weight + nadir_weight) x w < hard_floor`, so any look at or above the floor
+still outranks any graded-down one; a larger `w` is refused. **[observed] 2026-09-24**: over
+60 random granules of the US West 2025 run, only 17.5 % of observed pixels clear the 0.65 floor
+(median granule 8 %, forested scenes under 3 %), so the veto is what made that map sparse.
+
 > **Caveat to carry, now measured.** The current FRCOV is NPV-false-positive-prone — it reads some
 > bare soil as non-photosynthetic vegetation — so this scorer is conservative in a way that will
 > improve when FRCOV does. **[observed] 2026-09-15**, over the Cuprite 2 × 3 tile set: the median

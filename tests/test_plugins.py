@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import pytest
 from stratum_emit.scorers import MinViewZenith
 
 from stratum.plugins import resolve
@@ -189,3 +190,37 @@ def test_landcover_nodata_is_kept_or_rejected_but_never_a_class():
         == [[True, False, True]]
     assert Landcover(exclude=("water",), on_missing="reject").valid(None, cover).tolist() \
         == [[False, False, True]]
+
+
+# ------------------------------------------------------------------------ below_floor_weight
+def test_bare_earth_grades_a_look_below_the_floor_instead_of_vetoing_it():
+    """With `below_floor_weight` a vegetated look keeps a scaled score - it can still win a cell
+    nothing better reaches, and still vote under `weight: score` - but never outranks ground."""
+    import numpy as np
+    from stratum_emit.scorers import BareEarthNadir, PreferBareEarth
+
+    obs = _Obs([0.30, 0.66, 0.64], [0.0, 60.0, 0.0], [0.0, 12.0, 0.0])
+    vetoed = BareEarthNadir().score(obs, None)
+    graded = BareEarthNadir(below_floor_weight=0.1).score(obs, None)
+    assert np.isnan(vetoed[0]) and np.isnan(vetoed[2]), "the default is unchanged"
+    assert np.isfinite(graded).all() and (graded >= 0).all()
+    assert graded[0] == pytest.approx(0.1 * (0.30 + 0.25 + 0.10))
+    assert graded[1] == vetoed[1], "a look at ground is not touched"
+    assert graded[1] > graded[2], "ground seen badly still beats vegetation seen perfectly"
+
+    p = PreferBareEarth(below_floor_weight=0.1).score(obs, None)
+    assert np.isfinite(p[0]) and p[1] > p[2]
+
+
+def test_bare_earth_refuses_a_below_floor_weight_that_reaches_the_floor():
+    """Past hard_floor / (hard_floor + tie-breaker weights) a graded-down look could outrank a
+    look at ground, and the floor would stop meaning anything."""
+    from stratum_emit.scorers import BareEarthNadir, PreferBareEarth
+
+    BareEarthNadir(below_floor_weight=0.64)                          # 0.64 x 1.0 < 0.65
+    with pytest.raises(ValueError, match="reaches a look at the floor"):
+        BareEarthNadir(below_floor_weight=0.65)
+    with pytest.raises(ValueError, match="reaches a look at the floor"):
+        PreferBareEarth(below_floor_weight=0.8)                      # 0.8 x 0.9 >= 0.65
+    with pytest.raises(ValueError, match=r"\(0, 1\]"):
+        BareEarthNadir(below_floor_weight=0.0)

@@ -37,6 +37,35 @@ class CleanestNadir:
         return s
 
 
+def _below_floor(s: np.ndarray, soil: np.ndarray, hard_floor: float,
+                 below_floor_weight: float | None) -> None:
+    """Apply the cover floor to a score in place: NaN below it, or - with `below_floor_weight` -
+    the score scaled down so it still ranks and still votes, but only as a fraction of a look at
+    ground. The caller has already checked the weight is small enough that no graded-down look
+    can outrank any look at or above the floor."""
+    under = soil < hard_floor
+    if below_floor_weight is None:
+        s[under] = np.nan
+    else:
+        s[under] *= below_floor_weight
+
+
+def _check_below_floor_weight(name: str, weight: float | None, hard_floor: float,
+                              ceiling: float) -> None:
+    """A graded-down look scores at most `ceiling * weight`; a look at the floor at least
+    `hard_floor`. The first must stay below the second or the floor stops meaning anything."""
+    if weight is None:
+        return
+    if not 0.0 < weight <= 1.0:
+        raise ValueError(f"{name}: below_floor_weight must be in (0, 1]; got {weight}")
+    if ceiling * weight >= hard_floor:
+        raise ValueError(
+            f"{name}: below_floor_weight {weight} lets a look below hard_floor score up to "
+            f"{ceiling * weight:.3g}, which reaches a look at the floor ({hard_floor}); it must "
+            f"be below {hard_floor / ceiling:.3g} so any look at ground still beats any look "
+            "through vegetation")
+
+
 class PreferBareEarth:
     """Prefer the observation that actually sees ground, under usable illumination.
 
@@ -59,6 +88,13 @@ class PreferBareEarth:
     still does not see the rock, so cover decides and illumination breaks ties among comparable
     looks. `sun_weight` is the knob; 0 reproduces the pure cover ranking.
 
+    **Below the floor: veto or grade.** By default an observation under `hard_floor` is NaN and
+    cannot occupy the cell. With `below_floor_weight` it keeps its score scaled by that factor
+    instead, so it still ranks within the epoch (after every look at ground) and, under a
+    `vote` with `weight: score`, still votes across epochs at that fraction of a bare look's
+    strength. That is the difference between "we never saw ground here" and "we have no answer
+    here": measured over US West 2025, the veto removed 82.5 % of observed pixels.
+
     Caveat to carry: the current FRCOV is NPV-false-positive-prone - it reads some bare soil as
     non-photosynthetic vegetation - so this scorer is conservative in a way that will improve
     when FRCOV does. Values are also not clamped to [0, 1]: small negative unmixing residuals
@@ -71,16 +107,20 @@ class PreferBareEarth:
     required_aux: tuple[str, ...] = ()
 
     def __init__(self, min_soil: float = 0.80, hard_floor: float = 0.65,
-                 sun_weight: float = 0.25, max_solar_zenith: float = 80.0) -> None:
+                 sun_weight: float = 0.25, max_solar_zenith: float = 80.0,
+                 below_floor_weight: float | None = None) -> None:
         if not 0.0 <= hard_floor <= min_soil <= 1.0:
             raise ValueError("PreferBareEarth needs 0 <= hard_floor <= min_soil <= 1; got "
                              f"hard_floor={hard_floor}, min_soil={min_soil}")
         if sun_weight < 0:
             raise ValueError("PreferBareEarth: sun_weight must not be negative")
+        _check_below_floor_weight("PreferBareEarth", below_floor_weight, hard_floor,
+                                  hard_floor + sun_weight)
         self.min_soil = min_soil
         self.hard_floor = hard_floor
         self.sun_weight = sun_weight
         self.max_solar_zenith = max_solar_zenith
+        self.below_floor_weight = below_floor_weight
 
     def score(self, obs: ObsWindow, aux: AuxAccessor) -> np.ndarray:
         soil = np.clip(np.ma.filled(obs["frcov"], np.nan).astype("float32"), 0.0, 1.0)
@@ -89,9 +129,9 @@ class PreferBareEarth:
         # band 4); anything past 90 is below the horizon and cannot light the surface.
         illumination = np.clip(np.cos(np.radians(np.clip(sun, 0.0, 90.0))), 0.0, 1.0)
         s = soil + self.sun_weight * illumination
-        # NaN is "this observation may not occupy this cell" (04 section 4), not a low score:
-        # below the floor the retrieval is not merely worse, it is unusable
-        s[soil < self.hard_floor] = np.nan
+        # NaN is "this observation may not occupy this cell" (04 section 4), not a low score.
+        # Below the cover floor that is the default; `below_floor_weight` grades instead.
+        _below_floor(s, soil, self.hard_floor, self.below_floor_weight)
         s[sun > self.max_solar_zenith] = np.nan
         return s
 
@@ -117,7 +157,8 @@ class BareEarthNadir:
 
     It exists so the trade is explicit rather than implied by which plugin you named. Cover
     decides; illumination and nadir break ties among comparable ground. `nadir_weight: 0`
-    reproduces `PreferBareEarth` exactly.
+    reproduces `PreferBareEarth` exactly. `below_floor_weight` grades a look below
+    `hard_floor` instead of vetoing it, exactly as it does there.
     """
 
     capability = "streaming"
@@ -131,7 +172,8 @@ class BareEarthNadir:
 
     def __init__(self, min_soil: float = 0.80, hard_floor: float = 0.65,
                  sun_weight: float = 0.25, nadir_weight: float = 0.10,
-                 max_solar_zenith: float = 80.0, max_view_zenith: float = 90.0) -> None:
+                 max_solar_zenith: float = 80.0, max_view_zenith: float = 90.0,
+                 below_floor_weight: float | None = None) -> None:
         if not 0.0 <= hard_floor <= min_soil <= 1.0:
             raise ValueError("BareEarthNadir needs 0 <= hard_floor <= min_soil <= 1; got "
                              f"hard_floor={hard_floor}, min_soil={min_soil}")
@@ -147,6 +189,9 @@ class BareEarthNadir:
         self.nadir_weight = nadir_weight
         self.max_solar_zenith = max_solar_zenith
         self.max_view_zenith = max_view_zenith
+        _check_below_floor_weight("BareEarthNadir", below_floor_weight, hard_floor,
+                                  hard_floor + sun_weight + nadir_weight)
+        self.below_floor_weight = below_floor_weight
 
     def score(self, obs: ObsWindow, aux: AuxAccessor) -> np.ndarray:
         soil = np.clip(np.ma.filled(obs["frcov"], np.nan).astype("float32"), 0.0, 1.0)
@@ -156,7 +201,8 @@ class BareEarthNadir:
         nadir = 1.0 - np.clip(np.abs(view) / self.VIEW_ZENITH_SCALE, 0.0, 1.0)
         s = soil + self.sun_weight * illumination + self.nadir_weight * nadir
         # NaN is "this observation may not occupy this cell" (04 section 4), not a low score.
-        s[soil < self.hard_floor] = np.nan
+        # Below the cover floor that is the default; `below_floor_weight` grades instead.
+        _below_floor(s, soil, self.hard_floor, self.below_floor_weight)
         s[sun > self.max_solar_zenith] = np.nan
         s[np.abs(view) > self.max_view_zenith] = np.nan
         return s

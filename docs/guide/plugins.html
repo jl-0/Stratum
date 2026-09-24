@@ -233,6 +233,17 @@ rejected outright; between <code>hard_floor</code> and <code>min_soil</code> it 
 <em>ranks</em>, so a marginal observation can win a cell where nothing better exists. Collapsing
 them into a single cutoff throws that range away.</p>
 
+<p>The shipped <code>prefer_bare_earth</code> and <code>bare_earth_nadir</code> also take
+<code>below_floor_weight</code>. Set it and a look below <code>hard_floor</code> is graded instead
+of rejected: its score is multiplied by the weight, so it ranks after every look at ground but can
+still win a cell nothing better reaches. Paired with a <code>vote</code> using
+<code>weight: score</code>, it also votes across epochs at that fraction of a bare look's
+strength. A weight large enough to let a graded-down look outrank one at the floor is refused.</p>
+
+<pre><code>scorer:
+  ref: bare_earth_nadir
+  params: {hard_floor: 0.65, below_floor_weight: 0.1}</code></pre>
+
 <p>Constructor arguments come from the manifest:</p>
 
 <pre><code>scorer:
