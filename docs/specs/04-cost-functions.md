@@ -498,6 +498,8 @@ Parameters follow AMD's `stack:` block, which is the only working precedent:
 | `min_count` | Suppress pixels whose modal class has fewer votes | `stack.mincount: 3` |
 | `ignore` | Classes excluded from the tally, **by name** — `none` is the reserved "observed, nothing identified" class | `stack.ignore: [0, -4]` |
 | `tie_break` | `earliest` \| `latest` \| `highest_score` \| `nodata` | *(absent)* |
+| `weight` | `count` (default): each epoch adds 1 to its class. `score`: each epoch adds its winning score | *(absent)* |
+| `min_weight` | Suppress pixels whose winning tally is below this. Meaningful under `weight: score` | *(absent)* |
 
 ### Decision order for `vote`, normatively
 
@@ -509,8 +511,11 @@ given the per-epoch value, `valid` and `score`:
 2. **Exclude** classes named in `ignore` from the tally. They stay counted in `n_epochs` —
    "observed, nothing identified" is evidence of observation, and conflating it with "never
    observed" fabricates agreement ([11 §2](11-types.md)).
-3. **Tally** the remaining values; take the modal class.
-4. **Suppress** to nodata if the modal count is below `min_count`.
+3. **Tally** the remaining values; take the class with the largest tally. Under `weight: count`
+   each epoch adds 1; under `weight: score` it adds its winning `score`, which must be
+   non-negative on every valid epoch or the reduction is refused.
+4. **Suppress** to nodata if fewer than `min_count` epochs agree on the winner, or its tally is
+   below `min_weight`.
 5. **On a tie**, apply `tie_break`:
    - `earliest` / `latest` — the tied class appearing in the earliest / latest epoch;
    - `highest_score` — the tied class holding the single highest `score` across its epochs;
@@ -518,7 +523,15 @@ given the per-epoch value, `valid` and `score`:
 
 `agreement` is `modal_count / n_epochs`, so ignored-but-observed epochs lower it. That is
 deliberate: goethite five times out of ten looks is less certain than goethite five times out of
-five.
+five. Under `weight: score` it is the winner's tally over the summed score of every valid epoch,
+ignored ones included, for the same reason.
+
+**Why `weight: score` exists.** A scorer that vetoes (NaN) removes an observation from every
+epoch it would have decided; one that grades lets the vote hear it at reduced strength. With
+`bare_earth_nadir` grading vegetated looks down by `below_floor_weight` instead of refusing them,
+one bare week outvotes several vegetated weeks, and a cell seen only through vegetation still
+gets an answer, with an `agreement` that says how little it rests on. A count cannot express
+that, because it treats a vegetated week and a bare one as equal evidence.
 
 Note the asymmetry with `Scorer`. A scorer **ranks** and takes an argmax — one observation beats the
 rest. A reducer **aggregates**; for a `vote` layer that is a tally, and no single epoch "wins". A

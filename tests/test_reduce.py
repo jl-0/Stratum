@@ -413,3 +413,63 @@ def test_output_names_match_delivered_bands():
 def test_epoch_count_mismatch_refused():
     with pytest.raises(ValueError, match="epochs"):
         reduce_stack(stack({"m": column(1, 1)}, valid=np.ones((2, 1, 1), bool), eps=epochs(3)))
+
+
+# ----------------------------------------------------------------------------- weighted vote
+def test_weighted_vote_lets_one_well_scored_epoch_outvote_several_poor_ones():
+    """The bare-earth case: three vegetated weeks agree on `a` at a penalised score, one bare
+    week says `b` at a full score. A count elects `a`; a score-weighted vote elects `b`."""
+    vals = column(1, 1, 1, 2)
+    score = np.asarray([0.08, 0.08, 0.08, 1.1], dtype=np.float32)[:, None, None]
+    valid = np.ones(vals.shape, bool)
+    by_count = reduce_stack(stack({"m": vals}, valid=valid, score=score,
+                                  specs=[cat("m", tie_break="nodata")]))
+    by_score = reduce_stack(stack({"m": vals}, valid=valid, score=score,
+                                  specs=[cat("m", weight="score", tie_break="nodata")]))
+    assert by_count["m"][0, 0] == 1 and by_score["m"][0, 0] == 2
+    assert by_score["m_runner_up"][0, 0] == 1
+    assert by_score["m_agreement"][0, 0] == pytest.approx(1.1 / 1.34)
+    assert by_count["m_agreement"][0, 0] == pytest.approx(0.75), "count mode is unchanged"
+    assert by_score["n_epochs"][0, 0] == 4, "n_epochs still counts epochs, not weight"
+
+
+def test_weighted_vote_ignored_epochs_dilute_agreement_but_never_win():
+    """`none` carries weight into the total, as it carries a count into n_epochs."""
+    vals = column(0, 2)
+    score = np.asarray([3.0, 1.0], dtype=np.float32)[:, None, None]
+    out = reduce_stack(stack({"m": vals}, valid=np.ones(vals.shape, bool), score=score,
+                             specs=[cat("m", weight="score", ignore=["none"])]))
+    assert out["m"][0, 0] == 2
+    assert out["m_agreement"][0, 0] == pytest.approx(0.25)
+
+
+def test_weighted_vote_min_weight_and_min_count_both_suppress():
+    vals = column(2, 2)
+    score = np.asarray([0.1, 0.1], dtype=np.float32)[:, None, None]
+    valid = np.ones(vals.shape, bool)
+
+    def run(**params):
+        return reduce_stack(stack({"m": vals}, valid=valid, score=score,
+                                  specs=[cat("m", weight="score", **params)]))["m"][0, 0]
+
+    assert run() == 2
+    assert run(min_weight=0.5) == ND, "0.2 of weight is below the floor"
+    assert run(min_count=3) == ND, "min_count still counts agreeing epochs, not weight"
+
+
+def test_weighted_vote_refuses_a_score_that_is_only_an_ordering():
+    """`min_view_zenith` scores are negative; summing them is meaningless, so it is refused."""
+    vals = column(1, 1)
+    score = np.asarray([-5.0, -3.0], dtype=np.float32)[:, None, None]
+    with pytest.raises(ValueError, match="non-negative score"):
+        reduce_stack(stack({"m": vals}, valid=np.ones(vals.shape, bool), score=score,
+                           specs=[cat("m", weight="score")]))
+
+
+@pytest.mark.parametrize("params, message", [
+    ({"weight": "mean"}, "weight"),
+    ({"min_weight": -1}, "min_weight"),
+])
+def test_weighted_vote_parameters_are_validated(params, message):
+    with pytest.raises(SchemaError, match=message):
+        validate_schema(SnapshotSchema(name="t", layers=[cat("m", **params)]))

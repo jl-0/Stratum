@@ -168,30 +168,53 @@ def vote(layer: LayerSpec, vals: np.ndarray, valid: np.ndarray, score: np.ndarra
 
     1. Invalid epochs are discarded; the remainder is `n_epochs` (computed by the caller).
     2. Ignored classes (by name, `none` = 0) leave the tally but stay in `n_epochs`.
-    3. The modal class is taken.
-    4. It is suppressed to nodata where its count is below `min_count`.
+    3. The class with the largest tally is taken. Under `weight: count` an epoch adds 1 to its
+       class; under `weight: score` it adds its winning score, so one epoch the scorer rated
+       highly can outvote several it rated poorly. A plain count cannot say that, which is the
+       point: a scorer can grade an observation instead of vetoing it and the vote still hears
+       the grade.
+    4. It is suppressed to nodata where fewer than `min_count` epochs agree on it, or where its
+       tally is below `min_weight`.
     5. Ties fall to `tie_break`: earliest / latest by epoch order, highest_score by the single
        highest score any tied class holds, nodata refuses.
 
-    `agreement` = modal count / n_epochs (NaN where n_epochs is 0; 0.0 where every valid epoch was
-    ignored, in which case the layer is nodata). It is reported even where the layer is suppressed
-    by `min_count` or a refused tie, because it describes the tally, not the decision.
-    `runner_up` is the second-most-frequent class under the same tie rule, nodata where the layer
-    is nodata or no second class exists.
+    `agreement` = the winner's tally / the tally of every valid epoch, ignored classes included:
+    modal count / n_epochs under `count`, the winner's share of the total score under `score`.
+    NaN where nothing is valid; 0.0 where every valid epoch was ignored, in which case the layer
+    is nodata. It is reported even where the layer is suppressed by `min_count`, `min_weight` or
+    a refused tie, because it describes the tally, not the decision. `runner_up` is the class
+    with the second-largest tally under the same tie rule, nodata where the layer is nodata or no
+    second class exists.
+
+    `weight: score` needs a non-negative score on every valid epoch. A score is in general only
+    an ordering - `min_view_zenith` scores are negative - and an ordering is not a weight, so a
+    scorer that is not built to grade is refused rather than silently rescaled.
     """
     n, h, w = vals.shape
+    weighted = params.weight == "score"
+    if weighted:
+        bad = valid & ~(score >= 0)                                  # NaN fails this too
+        if bad.any():
+            raise ValueError(
+                f"layer {layer.name!r}: weight: score needs a non-negative score on every valid "
+                f"epoch; {int(bad.sum())} valid cell-epoch(s) score below 0 or NaN (lowest "
+                f"{float(np.nanmin(np.where(bad, score, np.nan))):.4g}). Use weight: count with "
+                "a scorer that only orders observations (04 section 5)")
     ignore_ids = resolve_class_names(layer.classes, params.ignore)
     counted = valid & ~np.isin(vals, ignore_ids)
     class_ids = np.unique(vals[counted])
     c = class_ids.shape[0]
 
     counts = np.zeros((c, h, w), dtype=np.uint16)
+    weights = np.zeros((c, h, w), dtype=np.float32) if weighted else None
     keys = np.zeros((c, h, w), dtype=np.float32)
     epoch_idx = np.arange(n, dtype=np.float32)[:, None, None]
     score_key = np.where(counted & ~np.isnan(score), score, -np.inf).astype(np.float32)
     for i, cls in enumerate(class_ids):
         hit = counted & (vals == cls)
         counts[i] = hit.sum(axis=0)
+        if weights is not None:
+            weights[i] = np.where(hit, score, 0.0).sum(axis=0)
         if params.tie_break == "earliest":
             keys[i] = -np.where(hit, epoch_idx, n).min(axis=0)      # earliest epoch ranks highest
         elif params.tie_break == "latest":
@@ -199,16 +222,25 @@ def vote(layer: LayerSpec, vals: np.ndarray, valid: np.ndarray, score: np.ndarra
         elif params.tie_break == "highest_score":
             keys[i] = np.where(hit, score_key, -np.inf).max(axis=0)
 
-    modal = counts.max(axis=0) if c else np.zeros((h, w), dtype=np.uint16)
-    winner = _pick(counts, keys, modal, class_ids, params.tie_break)
-    winner[modal < params.min_count] = _NODATA
+    tally = weights if weights is not None else counts
+    modal = tally.max(axis=0) if c else np.zeros((h, w), dtype=tally.dtype)
+    winner = _pick(tally, keys, modal, class_ids, params.tie_break)
+    behind = np.where(class_ids[:, None, None] == winner[None].astype(np.int64), counts, 0)
+    agreeing = behind.max(axis=0) if c else np.zeros((h, w), dtype=np.uint16)
+    winner[agreeing < params.min_count] = _NODATA
+    if params.min_weight > 0:
+        winner[modal < params.min_weight] = _NODATA
 
+    total = (np.where(valid, score, 0.0).sum(axis=0) if weighted
+             else n_epochs.astype(np.float64))
     with np.errstate(divide="ignore", invalid="ignore"):
-        agreement = np.where(n_epochs > 0, modal / n_epochs, np.nan).astype(np.float32)
+        agreement = np.where(n_epochs > 0,
+                             np.where(total > 0, modal / np.where(total > 0, total, 1), 0.0),
+                             np.nan).astype(np.float32)
 
     is_winner = class_ids[:, None, None] == winner[None].astype(np.int64)
-    rest = np.where(is_winner, 0, counts)
-    second = rest.max(axis=0) if c else np.zeros((h, w), dtype=np.uint16)
+    rest = np.where(is_winner, 0, tally)
+    second = rest.max(axis=0) if c else np.zeros((h, w), dtype=tally.dtype)
     runner_up = _pick(rest, keys, second, class_ids, params.tie_break)
     runner_up[winner == _NODATA] = _NODATA
 

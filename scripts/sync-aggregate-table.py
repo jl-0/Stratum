@@ -32,6 +32,8 @@ CANDIDATES: dict[str, Any] = {
     "min_count": 2,
     "ignore": ["none"],
     "tie_break": "earliest",
+    "weight": "score",
+    "min_weight": 0.5,
     "p": 50.0,
     "unc": "other_layer",
     "conditional_on": "other_layer",

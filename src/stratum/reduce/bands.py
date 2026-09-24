@@ -27,12 +27,13 @@ CATEGORICAL_METHODS = ("vote", "best", "none")
 CONTINUOUS_METHODS = ("median", "mean", "min", "max", "percentile", "score_weighted",
                       "inverse_variance", "best", "none")
 TIE_BREAKS = ("earliest", "latest", "highest_score", "nodata")
+VOTE_WEIGHTS = ("count", "score")
 SPREADS = ("std", "iqr")
 
 DEFAULT_MIN_COUNT = 1             # a single vote counts; the single-epoch identity needs this
 DEFAULT_TIE_BREAK = "nodata"      # refuse to choose unless the schema says how
 
-_VOTE_PARAMS = frozenset({"min_count", "ignore", "tie_break"})
+_VOTE_PARAMS = frozenset({"min_count", "ignore", "tie_break", "weight", "min_weight"})
 _CONTINUOUS_PARAMS = frozenset({"conditional_on", "spread"})
 
 
@@ -48,6 +49,8 @@ class VoteParams:
     min_count: int = DEFAULT_MIN_COUNT
     ignore: tuple[str, ...] = ()
     tie_break: str = DEFAULT_TIE_BREAK
+    weight: str = "count"           # `score`: each epoch votes with its winning score, not 1
+    min_weight: float = 0.0         # the winner's summed weight must reach this; 0 = no floor
 
 
 @dataclass(frozen=True)
@@ -122,7 +125,14 @@ def _parse_categorical(layer: LayerSpec) -> LayerParams | None:
     tie_break = params.get("tie_break", DEFAULT_TIE_BREAK)
     if tie_break not in TIE_BREAKS:
         raise SchemaError(f"layer {layer.name!r}: tie_break {tie_break!r} is not one of {TIE_BREAKS}")
-    return VoteParams(min_count=min_count, ignore=tuple(ignore), tie_break=tie_break)
+    weight = params.get("weight", "count")
+    if weight not in VOTE_WEIGHTS:
+        raise SchemaError(f"layer {layer.name!r}: weight {weight!r} is not one of {VOTE_WEIGHTS}")
+    min_weight = params.get("min_weight", 0.0)
+    if isinstance(min_weight, bool) or not isinstance(min_weight, (int, float)) or min_weight < 0:
+        raise SchemaError(f"layer {layer.name!r}: min_weight must be a non-negative number")
+    return VoteParams(min_count=min_count, ignore=tuple(ignore), tie_break=tie_break,
+                      weight=weight, min_weight=float(min_weight))
 
 
 def _parse_continuous(layer: LayerSpec, schema: SnapshotSchema) -> ContinuousParams | None:
@@ -242,8 +252,10 @@ def delivered_bands(schema: SnapshotSchema, *,
                                 f"{layer.name}: {layer.aggregate.method} over epochs; product ids",
                                 nodata=CATEGORICAL_NODATA))
             if isinstance(params, VoteParams):
+                share = ("winning weight / total weight of valid epochs"
+                         if params.weight == "score" else "modal count / n_epochs")
                 out.append(BandSpec(f"{layer.name}_agreement", CONTINUOUS_DTYPE,
-                                    f"{layer.name}: modal count / n_epochs", units="fraction",
+                                    f"{layer.name}: {share}", units="fraction",
                                     nodata=float("nan")))
                 out.append(BandSpec(f"{layer.name}_runner_up", CATEGORICAL_DTYPE,
                                     f"{layer.name}: second-most-frequent class",

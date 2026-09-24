@@ -228,6 +228,11 @@
       gotcha: 'By name, never by integer. -9999 is "not observed" and 0 is "observed, nothing identified"; conflating them fabricates agreement.' },
     'tie_break': { cat: 'schema', short: 'What happens when votes tie.',
       body: '<p><code>earliest</code>, <code>latest</code>, <code>highest_score</code> or <code>nodata</code>.</p>' },
+    'weight': { cat: 'schema', short: 'What one epoch is worth in the vote.',
+      body: '<p><code>count</code> (the default): one epoch, one vote. <code>score</code>: each epoch votes with its winning score, so a scorer that grades a poor observation down still lets the good ones decide. <code>agreement</code> becomes the winner\u2019s share of the total score.</p>',
+      gotcha: 'Needs a non-negative score on every valid epoch. min_view_zenith scores are negative and are refused, not rescaled.' },
+    'min_weight': { cat: 'schema', short: 'The least summed score a winner may have.',
+      body: '<p>Suppresses a cell whose winning class carries less weight than this. <code>min_count</code> still counts agreeing epochs alongside it.</p>' },
     'classes': { cat: 'schema', short: 'The enumeration a categorical layer resolves into.',
       body: '<p><code>source</code> uses the granules’ own table. A <code>@ref:</code> points at a curated enumeration - the product’s vocabulary, and its legend.</p>' },
 

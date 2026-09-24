@@ -469,8 +469,8 @@ independent of observation count. Storage is the real limit, not memory.
 
 `SnapshotStack.valid` is what keeps `min_count` honest: an epoch with no observation over a pixel
 must not count toward agreement. `score` is always populated, so an aggregation may weight by
-confidence — `tie_break: highest_score`, `score_weighted` and `best` all depend on it
-([13 §4](13-snapshot-schema.md)).
+confidence — `tie_break: highest_score`, `score_weighted`, `vote` with `weight: score` and `best`
+all depend on it ([13 §4](13-snapshot-schema.md)).
 
 **Every snapshot in a run shares one `SnapshotSchema`**, and its `layers_hash` is in every
 snapshot's cache key ([06 §2](06-caching.md)). A `Reducer` plugin receives the schema through

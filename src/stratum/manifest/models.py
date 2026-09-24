@@ -21,6 +21,7 @@ from pydantic import (
     BeforeValidator,
     ConfigDict,
     Field,
+    NonNegativeFloat,
     PlainSerializer,
     PositiveFloat,
     PositiveInt,
@@ -402,6 +403,8 @@ class AggregateSpec(Strict):
     min_count: PositiveInt | None = None
     ignore: list[str] | None = None
     tie_break: Literal["earliest", "latest", "highest_score", "nodata"] | None = None
+    weight: Literal["count", "score"] | None = None
+    min_weight: NonNegativeFloat | None = None
     p: float | None = None
     unc: str | None = None
     conditional_on: str | None = None
@@ -437,7 +440,8 @@ class LayerModel(Strict):
                                  f"got {self.classes!r}")
             if self.bands is not None:
                 raise ValueError("categorical layers are single-band (13 section 2)")
-            allowed = {"min_count", "ignore", "tie_break"} if m == "vote" else set()
+            allowed = ({"min_count", "ignore", "tie_break", "weight", "min_weight"}
+                       if m == "vote" else set())
         else:
             if m not in CONTINUOUS_METHODS:
                 raise ValueError(f"continuous aggregate {m!r}; choose {sorted(CONTINUOUS_METHODS)}")
