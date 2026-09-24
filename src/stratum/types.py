@@ -472,12 +472,14 @@ class SnapshotStack:
     """Reducer input. Epoch-major. Every epoch was written under `schema` (13 section 5)."""
 
     def __init__(self, *, schema: SnapshotSchema, epochs: Sequence[Epoch],
-                 layers: Mapping[str, np.ndarray], valid: np.ndarray, score: np.ndarray) -> None:
+                 layers: Mapping[str, np.ndarray], valid: np.ndarray, score: np.ndarray,
+                 observed: np.ndarray | None = None) -> None:
         self.schema = schema
         self.epochs = tuple(epochs)
         self._layers = dict(layers)
         self._valid = valid
         self._score = score
+        self._observed = observed
 
     def __getitem__(self, layer: str) -> np.ndarray:
         return self._layers[layer]
@@ -489,6 +491,12 @@ class SnapshotStack:
     @property
     def score(self) -> np.ndarray:
         return self._score
+
+    @property
+    def observed(self) -> np.ndarray:
+        """(n_epochs, H, W) bool: an observation reached the cell, before any pixel mask or the
+        scorer. A stack built without it reports `valid` - the only cells it can vouch for."""
+        return self._valid if self._observed is None else self._observed
 
 
 class BandStack:

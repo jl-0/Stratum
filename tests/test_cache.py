@@ -92,8 +92,8 @@ def test_input_builders_carry_exactly_the_spec_fields() -> None:
     assert set(g["grid_def"]) == {"crs", "resolution", "origin", "tile_size"}
     s = snapshot_inputs(["sha256:o"], ["sha256:x"], "r", "v", {"b": 2, "a": 1}, "sha256:l",
                         ("2026-06-01T00:00:00+00:00", "2026-07-01T00:00:00+00:00"))
-    assert set(s) == {"artifact_type", "obs_keys", "aux_keys", "scorer_ref", "scorer_version",
-                      "scorer_params", "layers_hash", "epoch_bounds"}
+    assert set(s) == {"artifact_type", "snapshot_format", "obs_keys", "aux_keys", "scorer_ref",
+                      "scorer_version", "scorer_params", "layers_hash", "epoch_bounds"}
     assert s["epoch_bounds"] == ["2026-06-01T00:00:00+00:00", "2026-07-01T00:00:00+00:00"]
     p = product_inputs(["sha256:s"], [], "sha256:agg", {"ref": "r", "version": "1", "params": {}})
     assert set(p) == {"artifact_type", "snapshot_keys", "aux_keys", "aggregate_hash", "reducer"}

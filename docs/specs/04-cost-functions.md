@@ -473,6 +473,7 @@ delivers, and those are different questions.
 |---|---|
 | `outputs` | Required and non-empty, all `BandSpec`, names unique. They are the contract: publish stitches exactly these, so there is no schema to fall back on |
 | `n_epochs` | Appended by the framework when a plugin does not declare it ([13 §4](13-snapshot-schema.md)). It is `snaps.valid.sum(axis=0)` — framework-knowable — so a plugin is not asked to remember it, and one that declares its own keeps it |
+| `n_observed` | Always appended and computed by the framework from `snaps.observed`; a plugin that declares it is refused ([13 §4](13-snapshot-schema.md)) |
 | `halo` | **Refused unless 0.** Snapshots are written at their block's *core* extent and their key excludes the halo ([06 §2](06-caching.md)), so a reducer needing neighbouring cells would have to read and stitch the surrounding blocks. Not built |
 | `aux` | **Not built.** `reduce()` receives `NullAux`. Note the protocol declares no `required_aux`, so unlike a `Scorer` there is no channel to declare one, and `PlanContext.aux_to_read()` could not learn about it |
 | Rendering | A plugin's bands **cannot** be rendered: `outputs.render` names a *schema layer* and a plugin output is not one. The data COG and the STAC asset are written, so the band is viewable, but there is no RGBA image for it ([07 §3](07-output-mapping.md)) |

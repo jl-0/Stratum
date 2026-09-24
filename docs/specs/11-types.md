@@ -434,6 +434,8 @@ class SnapshotStack:
     def valid(self) -> np.ndarray:                    # (n_epochs, H, W) bool
     @property
     def score(self) -> np.ndarray:                    # (n_epochs, H, W) float32
+    @property
+    def observed(self) -> np.ndarray:                 # (n_epochs, H, W) bool; defaults to valid
 
 class BandStack:
     """OutputMapper input. Finished bands for one tile."""
@@ -466,6 +468,14 @@ A snapshot is an **internal artifact** — nothing renders it and nothing outsid
 it — so its width is a design choice rather than a product constraint. Carrying geometry,
 acquisition time or per-candidate evidence costs `O(block × n_layers)` in a streaming worker,
 independent of observation count. Storage is the real limit, not memory.
+
+`SnapshotStack.observed` is where any observation *reached* the cell in that epoch — a GLT hit
+from a granule that passed the granule filters — before fill, pixel masks and the scorer.
+`valid` implies `observed`, never the reverse, and the difference is what those removed. It is
+what lets a product say "never looked at" apart from "looked at, nothing survived", which
+`valid` alone cannot: without it a cell that clouds, a land-cover mask or a bare-soil floor
+emptied looks exactly like one no orbit crossed. A stack built without it (a hand-built test
+stack) reports `valid`, the only cells it can vouch for. **[design]**
 
 `SnapshotStack.valid` is what keeps `min_count` honest: an epoch with no observation over a pixel
 must not count toward agreement. `score` is always populated, so an aggregation may weight by

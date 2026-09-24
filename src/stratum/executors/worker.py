@@ -22,7 +22,7 @@ from stratum.plan.document import (
     read_work,
 )
 from stratum.publish import product_dir, publish_period, write_product_block
-from stratum.reduce import band_counts, product_bands, reduce_stack
+from stratum.reduce import band_counts, n_observed, product_bands, reduce_stack
 from stratum.regrid import REGRID_ALGO_VERSION, regrid_granule_tile
 from stratum.resolve import NullAux, resolve_block, snapshot_key, stack_snapshots
 from stratum.storage import clear_pins, ensure_free
@@ -176,6 +176,8 @@ def reduce_item(item: Mapping[str, Any], run: RunPlan) -> tuple[CacheKey, bool]:
     arrays = reducer.reduce(stack, NullAux()) if reducer is not None else reduce_stack(stack)
     bands = product_bands(ctx.schema, reducer, band_counts=band_counts(stack))
     if reducer is not None:
+        # the framework's band, never the plugin's: product_bands refuses a plugin declaring it
+        arrays = {**arrays, "n_observed": n_observed(stack)}
         _check_plugin_output(ctx.reducer.ref, arrays, bands)
     tile = _tile(run, item)
     bx, by = (int(v) for v in item["block"])

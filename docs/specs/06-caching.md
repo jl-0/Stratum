@@ -29,7 +29,7 @@ a full rebuild into a re-read.
 | **Masked observation**<br>granule × tile × block | `glt_key`, `asset_roles` (per role read: the collection/asset/variable binding **and** the asset's catalogue checksum, `null` when the source has none), `pixel_mask_spec`, `mask_plugin_version`, `remaps` (per categorical layer: the raw table's fingerprint and a hash of the resolved lookup) | No |
 | **Aux warp**<br>source × tile | `alias`, `source_digest`, `grid_def`, `resampling`, `warp_algo_version` | No |
 | **Ortho role warp**<br>granule × role × tile | `granule_id`, `role`, `asset_checksum`, `var`, `grid_def`, `resampling`, `warp_algo_version` | No |
-| **Epoch snapshot**<br>tile × epoch × block | `obs_keys[]` (sorted), `aux_keys[]`, `scorer_ref`, `scorer_version`, `scorer_params`, `schema.layers_hash`, `epoch_bounds`, `window` | **Yes** |
+| **Epoch snapshot**<br>tile × epoch × block | `snapshot_format`, `obs_keys[]` (sorted), `aux_keys[]`, `scorer_ref`, `scorer_version`, `scorer_params`, `schema.layers_hash`, `epoch_bounds`, `window` | **Yes** |
 | **Product block**<br>tile × block | `snapshot_keys[]`, `aux_keys[]`, `schema.aggregate_hash`; plus `reducer` — `{ref, version, params}`, one nested key rather than three flat ones — when a plugin is named, else `null` | Yes |
 | **Rendered image**<br>tile | `product_keys[]`, `aux_keys[]`, `mapper_ref`, `mapper_version`, `mapper_params` | No — see [07](07-output-mapping.md) |
 
@@ -91,8 +91,11 @@ inputs can never share a hash (`stratum/cache/__init__.py`, the `*_inputs` build
 source of truth for what enters each key).
 
 **Directory artifacts.** A GLT is one file. A snapshot and a product block are **directories** of
-single-band GeoTIFFs (`{layer}.tif`, `score.tif`, `valid.tif`; the delivered band names for a
-product block), because layers have distinct dtypes and nodata. A directory artifact's sidecar is
+single-band GeoTIFFs (`{layer}.tif`, `score.tif`, `valid.tif`, `observed.tif`; the delivered
+band names for a product block), because layers have distinct dtypes and nodata. That file set is
+versioned by `snapshot_format` (`SNAPSHOT_FORMAT` in `stratum/cache/__init__.py`, in every
+snapshot key): format 2 added `observed.tif`, so a snapshot written before it is a miss rather than
+a hit `stack_snapshots` cannot read. Bump it whenever the set changes. A directory artifact's sidecar is
 `{hash16}/.inputs.json` *inside* it; a file artifact's is `{hash16}.inputs.json` beside it. Nothing
 else may be written into a snapshot directory: `read_snapshot` discovers layers by globbing
 `*.tif`. The plan note ([§4](../notes/2026-09-02-first-slice-plan.md)) fixes the layout.

@@ -318,7 +318,7 @@ falling back, since a silent fallback would mix two derivations under one cache 
   <td>The bounding box of the sensor pixels this GLT window names:
       <code>[min|gy|-1, max|gy|) × [min|gx|-1, max|gx|)</code>. This is the only part of the
       granule that is read</td>
-  <td><a class="src" data-sym="covering" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/types.py#L533">types.py:533</a></td>
+  <td><a class="src" data-sym="covering" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/types.py#L541">types.py:541</a></td>
 </tr>
 <tr>
   <td class="num">4</td>
@@ -376,7 +376,7 @@ falling back, since a silent fallback would mix two derivations under one cache 
   <td class="num">9</td>
   <td>Score and keep</td>
   <td>The scorer runs on the block; the running best is updated — see below</td>
-  <td><a class="src" data-sym="resolve_window" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/resolve/block.py#L194">block.py:154</a></td>
+  <td><a class="src" data-sym="resolve_window" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/resolve/block.py#L195">block.py:154</a></td>
 </tr>
 </tbody>
 </table>
@@ -430,7 +430,7 @@ the frozen granule set rather than by whatever the filesystem returned
 
 <p>What lands on disk is the snapshot: each schema layer's winning value, the winning
 <code>score</code>, and <code>valid</code>.
-<a class="src" data-sym="write_snapshot" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/resolve/snapshot.py#L66">snapshot.py:66</a></p>
+<a class="src" data-sym="write_snapshot" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/resolve/snapshot.py#L72">snapshot.py:72</a></p>
 
 <h2 id="reduce">6. Reduce — combining epochs</h2>
 
@@ -441,12 +441,18 @@ and over the class ids actually present.
 
 <p>The support count is the starting point for everything else:</p>
 
-<pre><code>n_epochs = valid.sum(axis=0)          <span class="c"># how many epochs had anything to say here</span></code></pre>
+<pre><code>n_epochs   = valid.sum(axis=0)        <span class="c"># how many epochs had anything to say here</span>
+n_observed = observed.sum(axis=0)     <span class="c"># how many epochs any granule reached it at all</span></code></pre>
+
+<p><code>observed</code> is recorded by resolve from the GLT windows it already holds: a cell is
+observed in an epoch if any granule's GLT reaches it, before fill, pixel masks and the scorer.
+Where <code>n_observed</code> is high and <code>n_epochs</code> low, the cell was seen and
+filtered; where both are low, it was rarely seen at all.</p>
 
 <h3 id="vote">Categorical: mode through time</h3>
 
 <p>The default for a class layer, in this decision order
-(<a class="src" data-sym="vote" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/reduce/builtin.py#L165">builtin.py:165</a>):</p>
+(<a class="src" data-sym="vote" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/reduce/builtin.py#L172">builtin.py:172</a>):</p>
 
 <ol>
   <li>Invalid epochs are discarded. What remains is <code>n_epochs</code>.</li>
@@ -463,7 +469,7 @@ and over the class ids actually present.
   epoch order, <code>highest_score</code> by the best score any tied class holds, or
   <code>nodata</code> to refuse. Equal keys fall to the lowest class id, so the result is
   deterministic either way.
-  <a class="src" data-sym="_pick" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/reduce/builtin.py#L143">builtin.py:143</a></li>
+  <a class="src" data-sym="_pick" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/reduce/builtin.py#L150">builtin.py:150</a></li>
 </ol>
 
 <p>Two companion bands come out of the same tally:</p>
@@ -478,7 +484,7 @@ runner_up = second mode, same tie rule</code></pre>
 
 <p>Each method is nan-aware, so a non-finite value inside a selected epoch is skipped by the
 statistic but still counted in <code>&lt;layer&gt;_n</code>.
-<a class="src" data-sym="continuous" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/reduce/builtin.py#L261">builtin.py:261</a></p>
+<a class="src" data-sym="continuous" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/reduce/builtin.py#L268">builtin.py:268</a></p>
 
 <div class="tw">
 <table>
@@ -570,12 +576,12 @@ then:</p>
 <tr>
   <td>Per-cell winner within an epoch</td>
   <td>Stratum — the point of the framework; the rule itself is a plugin</td>
-  <td><a class="src" data-sym="resolve_window" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/resolve/block.py#L194">resolve_window</a></td>
+  <td><a class="src" data-sym="resolve_window" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/resolve/block.py#L195">resolve_window</a></td>
 </tr>
 <tr>
   <td>Mode through time, agreement, runner-up, continuous statistics</td>
   <td>Stratum, over numpy reductions</td>
-  <td><a class="src" data-sym="vote" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/reduce/builtin.py#L165">vote</a>, <a class="src" data-sym="continuous" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/reduce/builtin.py#L261">continuous</a></td>
+  <td><a class="src" data-sym="vote" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/reduce/builtin.py#L172">vote</a>, <a class="src" data-sym="continuous" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/reduce/builtin.py#L268">continuous</a></td>
 </tr>
 </tbody>
 </table>

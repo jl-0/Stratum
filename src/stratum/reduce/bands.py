@@ -77,6 +77,14 @@ LayerParams = VoteParams | BestParams | ContinuousParams
 #: so a plugin is not asked to remember it, and a plugin that declares its own wins.
 N_EPOCHS = BandSpec("n_epochs", COUNT_DTYPE, "epochs with valid true", units="count")
 
+#: Its companion: epochs in which ANY observation reached the cell, before pixel masks and the
+#: scorer - the granule footprints that passed the granule filters. Always >= n_epochs; the gap
+#: is what the masks and the scorer removed. Framework-computed from `snaps.observed`, and
+#: appended for a plugin too, which never has to deliver it.
+N_OBSERVED = BandSpec("n_observed", COUNT_DTYPE,
+                      "epochs any observation reached, before pixel masks and the scorer",
+                      units="count")
+
 
 def product_bands(schema: SnapshotSchema, reducer: Any | None = None, *,
                   band_counts: Mapping[str, int] | None = None) -> tuple[BandSpec, ...]:
@@ -91,14 +99,18 @@ def product_bands(schema: SnapshotSchema, reducer: Any | None = None, *,
     the schema alone cannot know a `bands: None` source's width (13 section 4).
 
     `n_epochs` is appended when a plugin does not declare it. Every consumer may rely on it being
-    there, and it costs the plugin nothing to omit.
+    there, and it costs the plugin nothing to omit. `n_observed` is always appended, last: the
+    framework computes it, and a plugin may not declare it.
     """
     if reducer is None:
         return delivered_bands(schema, band_counts=band_counts)
     declared = tuple(getattr(reducer, "outputs", ()) or ())
-    if any(b.name == N_EPOCHS.name for b in declared):
-        return declared
-    return (*declared, N_EPOCHS)
+    if any(b.name == N_OBSERVED.name for b in declared):
+        raise SchemaError(f"reducer declares {N_OBSERVED.name!r}, which the framework computes "
+                          "from the snapshots' footprints; drop it from `outputs`")
+    if not any(b.name == N_EPOCHS.name for b in declared):
+        declared = (*declared, N_EPOCHS)
+    return (*declared, N_OBSERVED)
 
 
 def _parse_categorical(layer: LayerSpec) -> LayerParams | None:
@@ -237,8 +249,8 @@ def delivered_bands(schema: SnapshotSchema, *,
 
     Per layer: a categorical `vote` layer L delivers L, L_agreement, L_runner_up; `best` delivers
     L; `none` delivers nothing. A continuous layer with any method other than `none` delivers L
-    (keeping its band axis) and L_n, plus L_spread when `spread` is set. `n_epochs` is delivered
-    once, last, whatever the schema says. `band_counts` overrides the per-layer band count for
+    (keeping its band axis) and L_n, plus L_spread when `spread` is set. `n_epochs` and then
+    `n_observed` are delivered once, last, whatever the schema says. `band_counts` overrides the per-layer band count for
     layers whose width the schema alone cannot state (multi-band source, `bands: None`).
     """
     parsed = parse_schema(schema)
@@ -276,6 +288,7 @@ def delivered_bands(schema: SnapshotSchema, *,
                                 f"{layer.name}: {params.spread} over the same epochs",
                                 nodata=float("nan"), bands=nb))
     out.append(N_EPOCHS)
+    out.append(N_OBSERVED)
     return tuple(out)
 
 

@@ -339,6 +339,12 @@ def ortho_inputs(granule_id: str, role: str, asset_checksum: str | None, var: st
     }
 
 
+#: What a snapshot directory holds. 2 added `observed.tif` (cells any observation reached, before
+#: masks) beside `score.tif` and `valid.tif`. Bump it whenever that file set changes: a snapshot
+#: written under another format would otherwise be a cache hit that `stack_snapshots` cannot read.
+SNAPSHOT_FORMAT = 2
+
+
 def snapshot_inputs(obs_keys: Sequence[CacheKey | str], aux_keys: Sequence[CacheKey | str],
                     scorer_ref: str, scorer_version: str, scorer_params: Mapping[str, Any],
                     layers_hash: str, epoch_bounds: Sequence[str]) -> dict[str, Any]:
@@ -349,6 +355,7 @@ def snapshot_inputs(obs_keys: Sequence[CacheKey | str], aux_keys: Sequence[Cache
     observations get the same key however they were enumerated (06 section 3, rule 1)."""
     return {
         "artifact_type": "snapshot",
+        "snapshot_format": SNAPSHOT_FORMAT,
         "obs_keys": [_key_str(k) for k in obs_keys],
         "aux_keys": [_key_str(k) for k in aux_keys],
         "scorer_ref": scorer_ref,
@@ -373,6 +380,7 @@ def product_inputs(snapshot_keys: Sequence[CacheKey | str], aux_keys: Sequence[C
 
 
 __all__ = [
-    "ARTIFACT_KINDS", "INPUTS_NAME", "MEMBERS_NAME", "CacheKey", "CacheRoot", "aux_inputs",
+    "ARTIFACT_KINDS", "INPUTS_NAME", "MEMBERS_NAME", "SNAPSHOT_FORMAT", "CacheKey", "CacheRoot",
+    "aux_inputs",
     "glt_inputs", "grid_def_fields", "ortho_inputs", "product_inputs", "snapshot_inputs",
 ]

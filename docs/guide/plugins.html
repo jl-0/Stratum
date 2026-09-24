@@ -434,7 +434,8 @@ built-in reducer runs it when the manifest has no <code>reducer</code> block:</p
 <p><code>conditional_on: &lt;categorical layer&gt;</code> restricts a continuous aggregation to the
 epochs that agreed with that layer's winner — a band depth is the depth <em>of a mineral's
 feature</em>, and averaging it across epochs that found different minerals means nothing.
-<code>n_epochs</code> is delivered once per block regardless. The full vocabulary is in
+<code>n_epochs</code> and <code>n_observed</code> are delivered once per block regardless. The
+full vocabulary is in
 <a href="../specs/13-snapshot-schema.md">spec 13</a>.</p>
 
 <p>Write a <code>Reducer</code> plugin only for what that vocabulary cannot say — a vote that pools
@@ -502,7 +503,8 @@ what <code>aggregate: vote</code> would have delivered for that layer alone.</p>
 
 <pre><code>snaps[<span class="k">"mineral_1"</span>]      <span class="c"># (n_epochs, H, W) — the winning value per epoch, as product classes</span>
 snaps.schema             <span class="c"># what every layer is — kind, enumeration, declared aggregation</span>
-snaps.valid              <span class="c"># (n_epochs, H, W) bool — was there an observation at all</span>
+snaps.valid              <span class="c"># (n_epochs, H, W) bool — did an observation win the cell</span>
+snaps.observed           <span class="c"># (n_epochs, H, W) bool — did one reach it, before masks and the scorer</span>
 snaps.score              <span class="c"># (n_epochs, H, W) — the score that won each cell</span>
 snaps.epochs             <span class="c"># ordered ascending</span></code></pre>
 

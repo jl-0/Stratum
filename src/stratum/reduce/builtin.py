@@ -93,10 +93,17 @@ def reduce_stack(snaps: SnapshotStack) -> dict[str, np.ndarray]:
         out.update(continuous(layer, vals, sel, score, unc, params))
 
     out["n_epochs"] = n_epochs.astype(np.uint16)
+    out["n_observed"] = n_observed(snaps)
     expected = [b.name for b in delivered_bands(schema)]
     if set(out) != set(expected):
         raise AssertionError(f"reducer delivered {sorted(out)}, schema promises {sorted(expected)}")
-    return {name: out[name] for name in expected}   # schema order, n_epochs last
+    return {name: out[name] for name in expected}   # schema order, n_epochs and n_observed last
+
+
+def n_observed(snaps: SnapshotStack) -> np.ndarray:
+    """Epochs in which any observation reached each cell, before masks and the scorer (uint16).
+    The reduce stage calls it for a plugin reducer too, which never delivers it itself."""
+    return np.asarray(snaps.observed, dtype=bool).sum(axis=0).astype(np.uint16)
 
 
 def band_counts(snaps: SnapshotStack) -> dict[str, int]:

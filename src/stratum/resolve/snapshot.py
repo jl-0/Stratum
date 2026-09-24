@@ -1,10 +1,15 @@
 """Snapshot IO (13, 11 section 8; first-slice plan section 4).
 
-A snapshot is a DIRECTORY of single-band GeoTIFFs - `{layer}.tif` per schema layer plus the two
-the framework always adds, `score.tif` and `valid.tif` - because layers have distinct dtypes.
-Tiled and deflate-compressed like the GLTs so a later read is a window read. Nodata on disk:
-categorical uint16 65535 (0 is the `none` class), continuous / score float32 NaN, valid uint8
-with no nodata (0 is a real answer: nothing occupied the cell).
+A snapshot is a DIRECTORY of single-band GeoTIFFs - `{layer}.tif` per schema layer plus the three
+the framework always adds, `score.tif`, `valid.tif` and `observed.tif` - because layers have
+distinct dtypes. Tiled and deflate-compressed like the GLTs so a later read is a window read.
+Nodata on disk: categorical uint16 65535 (0 is the `none` class), continuous / score float32 NaN,
+valid and observed uint8 with no nodata (0 is a real answer).
+
+`valid` is where an observation won the cell: it reached it, passed every mask and scored.
+`observed` is where any observation REACHED it, before any pixel mask or the scorer - the
+footprint of the granules that passed the granule filters. Their difference is what the masks
+and the scorer removed, which `valid` alone cannot tell apart from never having been seen.
 """
 from __future__ import annotations
 
@@ -24,7 +29,8 @@ CATEGORICAL_NODATA = 65535
 CONTINUOUS_DTYPE = "float32"
 SCORE_NAME = "score"
 VALID_NAME = "valid"
-RESERVED = (SCORE_NAME, VALID_NAME)
+OBSERVED_NAME = "observed"
+RESERVED = (SCORE_NAME, VALID_NAME, OBSERVED_NAME)
 
 
 def layer_dtype(layer: LayerSpec) -> np.dtype:
@@ -65,10 +71,14 @@ def _write_band_file(path: Path, arr: np.ndarray, *, transform: Affine, crs: str
 
 def write_snapshot(directory: Path, *, layers: Mapping[str, np.ndarray], score: np.ndarray,
                    valid: np.ndarray, schema: SnapshotSchema, transform: Affine,
-                   crs: str) -> Path:
-    """Write one block's snapshot: exactly the schema's layers plus `score` and `valid`
-    (04 section 4, 11 section 8). Arrays are (H, W) or (H, W, B) over the block's CORE window;
-    `transform` is that window's. Layers are cast to their storage dtype."""
+                   crs: str, observed: np.ndarray | None = None) -> Path:
+    """Write one block's snapshot: exactly the schema's layers plus `score`, `valid` and
+    `observed` (04 section 4, 11 section 8). Arrays are (H, W) or (H, W, B) over the block's
+    CORE window; `transform` is that window's. Layers are cast to their storage dtype.
+
+    `observed` defaults to `valid`: a caller that does not know the footprint can vouch only for
+    the cells something won. Resolve always passes the real one. Every valid cell must be
+    observed - winning a cell nothing reached is a bug, and is refused."""
     directory = Path(directory)
     directory.mkdir(parents=True, exist_ok=True)
     names = [layer.name for layer in schema.layers]
@@ -80,6 +90,12 @@ def write_snapshot(directory: Path, *, layers: Mapping[str, np.ndarray], score: 
     shape = np.asarray(valid).shape
     if len(shape) != 2 or np.asarray(score).shape != shape:
         raise ValueError(f"valid {shape} and score {np.asarray(score).shape} must be (H, W)")
+    seen = np.asarray(valid if observed is None else observed, dtype=bool)
+    if seen.shape != shape:
+        raise ValueError(f"observed {seen.shape} must match valid {shape}")
+    if (np.asarray(valid, dtype=bool) & ~seen).any():
+        raise ValueError("a cell is valid but not observed: an observation cannot win a cell it "
+                         "never reached")
     common = {"schema": schema.name, "layers_hash": schema.layers_hash}
     for layer in schema.layers:
         arr = np.asarray(layers[layer.name])
@@ -95,6 +111,9 @@ def write_snapshot(directory: Path, *, layers: Mapping[str, np.ndarray], score: 
     _write_band_file(directory / f"{VALID_NAME}.tif", np.asarray(valid, dtype=bool).astype(np.uint8),
                      transform=transform, crs=crs, nodata=None,
                      tags={**common, "layer": VALID_NAME})
+    _write_band_file(directory / f"{OBSERVED_NAME}.tif", seen.astype(np.uint8),
+                     transform=transform, crs=crs, nodata=None,
+                     tags={**common, "layer": OBSERVED_NAME})
     return directory
 
 
@@ -110,7 +129,7 @@ def _read_band_file(path: Path, window: Window | None) -> np.ndarray:
 
 def read_snapshot(directory: Path, window: Window | None = None) -> dict[str, np.ndarray]:
     """{name: array} for every `.tif` in a snapshot directory: each schema layer, `score`
-    (float32, NaN where nothing won) and `valid` (bool). Layers come back in their storage
+    (float32, NaN where nothing won), `valid` and `observed` (bool). Layers come back in their storage
     dtype with nodata in place (uint16 65535 / NaN) - `valid` says which cells were won.
     `window` is relative to the snapshot's own (core) extent."""
     directory = Path(directory)
@@ -118,8 +137,9 @@ def read_snapshot(directory: Path, window: Window | None = None) -> dict[str, np
     if not files:
         raise FileNotFoundError(f"no snapshot layers under {directory}")
     out = {f.stem: _read_band_file(f, window) for f in files}
-    if VALID_NAME in out:
-        out[VALID_NAME] = out[VALID_NAME].astype(bool)
+    for name in (VALID_NAME, OBSERVED_NAME):
+        if name in out:
+            out[name] = out[name].astype(bool)
     return out
 
 
@@ -127,8 +147,9 @@ def stack_snapshots(dirs: Sequence[Path | None], epochs: Sequence[Epoch], schema
                     window: Window | None = None) -> SnapshotStack:
     """The Reducer input (11 section 8): every epoch's snapshot over one window, epoch-major
     and in ascending epoch order whatever order `dirs`/`epochs` arrived in. A None entry is an
-    epoch that produced no snapshot: all-invalid, all-nodata. Every layer becomes
-    (n_epochs, H, W[, B]); `valid` (n_epochs, H, W) bool; `score` (n_epochs, H, W) float32."""
+    epoch that produced no snapshot: all-invalid, all-nodata, unobserved. Every layer becomes
+    (n_epochs, H, W[, B]); `valid` and `observed` (n_epochs, H, W) bool; `score`
+    (n_epochs, H, W) float32."""
     if len(dirs) != len(epochs):
         raise ValueError(f"{len(dirs)} snapshot dirs for {len(epochs)} epochs")
     order = sorted(range(len(epochs)), key=lambda i: epochs[i].start)
@@ -179,12 +200,14 @@ def stack_snapshots(dirs: Sequence[Path | None], epochs: Sequence[Epoch], schema
                       for s in snaps])
     score = np.stack([s[SCORE_NAME] if s is not None else np.full(shape, np.nan, dtype=np.float32)
                       for s in snaps]).astype(np.float32, copy=False)
+    observed = np.stack([s[OBSERVED_NAME] if s is not None else np.zeros(shape, dtype=bool)
+                         for s in snaps])
     return SnapshotStack(schema=schema, epochs=[epochs[i] for i in order], layers=layers,
-                         valid=valid, score=score)
+                         valid=valid, score=score, observed=observed)
 
 
 __all__ = [
-    "CATEGORICAL_DTYPE", "CATEGORICAL_NODATA", "CONTINUOUS_DTYPE", "RESERVED", "SCORE_NAME",
-    "VALID_NAME", "empty_layer", "layer_dtype", "layer_nodata", "read_snapshot",
+    "CATEGORICAL_DTYPE", "CATEGORICAL_NODATA", "CONTINUOUS_DTYPE", "OBSERVED_NAME", "RESERVED",
+    "SCORE_NAME", "VALID_NAME", "empty_layer", "layer_dtype", "layer_nodata", "read_snapshot",
     "stack_snapshots", "write_snapshot",
 ]

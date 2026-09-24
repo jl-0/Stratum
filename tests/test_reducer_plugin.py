@@ -18,7 +18,7 @@ from test_reduce import cat, cont, epochs, stack
 
 from stratum.cache import product_inputs
 from stratum.manifest.validate import _reducer_problems
-from stratum.reduce import N_EPOCHS, delivered_bands, product_bands
+from stratum.reduce import N_EPOCHS, N_OBSERVED, SchemaError, delivered_bands, product_bands
 from stratum.types import BandSpec, SnapshotSchema, SnapshotStack
 
 EPOCH_A = ["2026-06-01T00:00:00+00:00", "2026-07-01T00:00:00+00:00"]
@@ -56,7 +56,7 @@ def test_a_plugin_replaces_the_schemas_bands_entirely() -> None:
     assert {"m", "m_agreement", "d", "d_n"} <= from_schema
 
     from_plugin = product_bands(schema, Counting())
-    assert [b.name for b in from_plugin] == ["n_classes", "n_epochs"]
+    assert [b.name for b in from_plugin] == ["n_classes", "n_epochs", "n_observed"]
     assert not ({"m", "m_agreement", "d"} & {b.name for b in from_plugin})
 
 
@@ -67,8 +67,8 @@ def test_n_epochs_is_appended_when_a_plugin_forgets_it() -> None:
         outputs = (BandSpec("only", "uint16", "one band"),)
 
     bands = product_bands(schema_one_layer(), Forgetful())
-    assert [b.name for b in bands] == ["only", "n_epochs"]
-    assert bands[-1] == N_EPOCHS
+    assert [b.name for b in bands] == ["only", "n_epochs", "n_observed"]
+    assert bands[-2] == N_EPOCHS and bands[-1] == N_OBSERVED
 
 
 def test_a_plugin_that_declares_its_own_n_epochs_keeps_it() -> None:
@@ -78,8 +78,18 @@ def test_a_plugin_that_declares_its_own_n_epochs_keeps_it() -> None:
         outputs = (BandSpec("a", "uint16", "x"), mine)
 
     bands = product_bands(schema_one_layer(), Own())
-    assert bands == (BandSpec("a", "uint16", "x"), mine)
+    assert bands == (BandSpec("a", "uint16", "x"), mine, N_OBSERVED)
     assert bands.count(N_EPOCHS) == 0, "the framework must not append a second n_epochs"
+
+
+def test_n_observed_is_the_frameworks_and_a_plugin_may_not_declare_it() -> None:
+    """The footprint comes from the snapshots, not the reduction: a plugin cannot compute it
+    better, so a declaration could only disagree with it."""
+    class Claims(Counting):
+        outputs = (BandSpec("a", "uint16", "x"), BandSpec("n_observed", "uint16", "mine"))
+
+    with pytest.raises(SchemaError, match="framework computes"):
+        product_bands(schema_one_layer(), Claims())
 
 
 def test_band_counts_are_ignored_for_a_plugin() -> None:
@@ -158,7 +168,7 @@ def test_a_plugin_runs_through_the_real_reduce_stage(tmp_path) -> None:
 
     assert not hit
     written = sorted(p.stem for p in key.path.glob("*.tif"))
-    assert written == ["n_classes", "n_epochs"], written
+    assert written == ["n_classes", "n_epochs", "n_observed"], written
 
 
 def test_a_plugin_that_does_not_deliver_what_it_declared_is_caught_by_name() -> None:

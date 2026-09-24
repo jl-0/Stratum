@@ -351,6 +351,8 @@ Filters take an explicit <code>on_missing</code> policy rather than guessing.</p
     <span class="k">def</span> valid(self) -&gt; np.ndarray:                    <span class="c"># (n_epochs, H, W) bool</span>
     @property
     <span class="k">def</span> score(self) -&gt; np.ndarray:                    <span class="c"># (n_epochs, H, W) float32</span>
+    @property
+    <span class="k">def</span> observed(self) -&gt; np.ndarray:                 <span class="c"># (n_epochs, H, W) bool; defaults to valid</span>
 
 <span class="k">class</span> BandStack:
     <span class="c">"""OutputMapper input. Finished bands for one tile."""</span>

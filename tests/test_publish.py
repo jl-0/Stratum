@@ -96,6 +96,7 @@ def block_arrays(block: BlockRef, seed: int) -> dict[str, np.ndarray]:
         "d": rng.random((h, w, 2), dtype=np.float32),
         "d_n": rng.integers(0, 5, (h, w)).astype(np.uint16),
         "n_epochs": rng.integers(1, 6, (h, w)).astype(np.uint16),
+        "n_observed": rng.integers(6, 9, (h, w)).astype(np.uint16),
     }
 
 
@@ -458,7 +459,7 @@ def test_publish_period_without_render_or_stac(tmp_path, product_dirs):
     pub = publish_period(tmp_path / "c", product_dirs, TILE, PERIOD, schema(), {"stac": False},
                          run_id=RUN_ID, manifest_hash="sha256:x")
     assert pub.item is None and pub.images == {} and pub.legends == {}
-    assert pub.classes is not None and len(pub.data) == 6
+    assert pub.classes is not None and len(pub.data) == 7          # six + n_observed
 
 
 # ---------------------------------------------------------------------------------- provenance

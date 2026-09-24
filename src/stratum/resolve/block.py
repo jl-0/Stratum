@@ -189,6 +189,7 @@ class Resolved:
     score: np.ndarray
     valid: np.ndarray
     contributing: list[str]          # granule ids that won at least one core cell
+    observed: np.ndarray | None = None   # any GLT hit, before masks; None = not tracked
 
 
 def resolve_window(plan: PlanContext, block: BlockRef, epoch: Epoch,
@@ -202,6 +203,12 @@ def resolve_window(plan: PlanContext, block: BlockRef, epoch: Epoch,
     shape = (win.height, win.width)
     best = np.full(shape, np.nan, dtype=np.float32)
     won = np.zeros(shape, dtype=bool)
+    # The footprint, before any pixel mask or the scorer: every cell a granule's GLT reaches. It
+    # costs nothing - the GLT windows are already in hand - and it is the only record of where
+    # EMIT looked, as opposed to where a look survived.
+    observed = np.zeros(shape, dtype=bool)
+    for _, _, glt in reached:
+        observed |= np.asarray(glt)[..., 2] != 0
     layers: dict[str, np.ndarray] = {}
     contributing: list[str] = []
     if aux is None:
@@ -240,7 +247,7 @@ def resolve_window(plan: PlanContext, block: BlockRef, epoch: Epoch,
             # other epochs are (H, W, B), which `stack_snapshots` then cannot stack.
             layers[layer.name] = empty_layer(layer, shape, len(layer.bands) if layer.bands else 1)
     return Resolved(layers={k: v[core] for k, v in layers.items()}, score=best[core],
-                    valid=won[core], contributing=contributing)
+                    valid=won[core], contributing=contributing, observed=observed[core])
 
 
 def _core_slices(block: BlockRef) -> tuple[slice, slice]:
@@ -275,6 +282,7 @@ def resolve_block(item: Mapping[str, Any], plan: PlanContext) -> CacheKey:
     core_transform = BlockRef(tile, block.bx, block.by, halo=0).transform
     plan.cache.write_dir(snap_key, lambda d: write_snapshot(
         d, layers=resolved.layers, score=resolved.score, valid=resolved.valid,
+        observed=resolved.observed,
         schema=plan.schema, transform=core_transform, crs=plan.grid.crs))
     return snap_key
 

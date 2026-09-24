@@ -230,7 +230,16 @@ Every method applies band-wise to a multi-band layer. Options any continuous met
 `n_epochs` — epochs with `valid` true — is delivered once per product block regardless of schema,
 **and regardless of reducer**: the framework appends it when a `Reducer` plugin does not declare
 it, because it is `snaps.valid.sum(axis=0)` and every consumer may rely on it. A plugin that
-declares its own `n_epochs` keeps it. A plugin's categorical output shares the product's class
+declares its own `n_epochs` keeps it.
+
+`n_observed` — epochs in which any observation *reached* the cell, before pixel masks and the
+scorer — is delivered after it, from `snaps.observed.sum(axis=0)`. It is always the framework's:
+a plugin may not declare it, and the reduce stage adds it to a plugin's output. `n_observed >=
+n_epochs` everywhere, and the gap is what the masks and the scorer removed, so a sparse
+`n_epochs` can be read as "rarely seen" or "seen, and filtered" rather than guessed at. It counts
+only granules that passed the granule filters: a scene dropped whole for cloud cover is not in it.
+
+A plugin's categorical output shares the product's class
 table (§3 rule 3, one product one table); it cannot introduce an enumeration of its own.
 Every continuous layer also delivers `<layer>_n`, the count it actually aggregated over, because an
 estimate from two epochs and one from twelve must be distinguishable downstream.

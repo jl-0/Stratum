@@ -269,7 +269,7 @@ def test_resolve_block_writes_the_snapshot(pair_plan: PlanContext) -> None:
     key = resolve_block(item(TILE, EPOCH, 0, 0), plan)
     assert key.artifact == "snapshot" and plan.cache.hit(key)
     snap = read_snapshot(key.path)
-    assert set(snap) == {"mineral", "depth", "score", "valid"}
+    assert set(snap) == {"mineral", "depth", "score", "valid", "observed"}
     assert snap["mineral"].dtype == np.uint16 and snap["depth"].dtype == np.float32
     assert snap["score"].dtype == np.float32 and snap["valid"].dtype == bool
     # never won: nodata, NaN, invalid
@@ -279,8 +279,10 @@ def test_resolve_block_writes_the_snapshot(pair_plan: PlanContext) -> None:
     assert snap["valid"][4, 3] and snap["mineral"][4, 3] == 1 and snap["score"][4, 3] == -11.0
     # A's row 1 (class 0) is a real observation: valid and product id 0
     assert snap["valid"][3, 5] and snap["mineral"][3, 5] == 0
-    # A's fill row never wins
-    assert not snap["valid"][2, 5]
+    # A's fill row never wins - but A reached it, so it is observed: the footprint is before
+    # fill, masks and the scorer, and it is the only record that EMIT looked here
+    assert not snap["valid"][2, 5] and snap["observed"][2, 5]
+    assert snap["observed"].dtype == bool and not (snap["valid"] & ~snap["observed"]).any()
     # overlap at (8, 8): A vz = 10 + 6 = 16, B vz = 10 + 13 - 2 = 21 -> A wins
     assert snap["score"][8, 8] == -16.0 and snap["depth"][8, 8] == pytest.approx(0.01 * (6 * 14 + 6))
     # overlap at (9, 9) in block (1, 1) -> (19, 19) tile is out of A; check the .inputs.json
@@ -408,6 +410,11 @@ def test_snapshot_round_trip_and_stack(tmp_path: Path) -> None:
     with pytest.raises(ValueError, match="extra"):
         write_snapshot(tmp_path / "bad", layers={"mineral": mineral, "depth": depth, "x": depth},
                        score=score, valid=valid, schema=sch, transform=transform, crs=GRID.crs)
+    assert np.array_equal(back["observed"], valid), "observed defaults to valid"
+    with pytest.raises(ValueError, match="never reached"):
+        write_snapshot(tmp_path / "unseen", layers={"mineral": mineral, "depth": depth},
+                       score=score, valid=valid, schema=sch, transform=transform, crs=GRID.crs,
+                       observed=np.zeros_like(valid))
 
     e1 = Epoch(datetime(2026, 6, 1, tzinfo=UTC), datetime(2026, 7, 1, tzinfo=UTC))
     e2 = Epoch(datetime(2026, 7, 1, tzinfo=UTC), datetime(2026, 8, 1, tzinfo=UTC))
@@ -457,8 +464,9 @@ def test_seam_equivalence_blocks_equal_whole_tile(tmp_path: Path, scorer: NadirS
     whole = resolve_tile(with_block(plan_blocks, 20))
     quarters = resolve_tile(plan_blocks)
     slivers = resolve_tile(with_block(plan_blocks, 7))
-    assert set(whole) == {"mineral", "depth", "score", "valid"}
+    assert set(whole) == {"mineral", "depth", "score", "valid", "observed"}
     assert whole["valid"].shape == (20, 20) and whole["valid"].sum() > 50
+    assert whole["observed"].sum() > whole["valid"].sum(), "edge trim removes reached cells"
     # something real got resolved: class 0 and product 1 (raw 5 sits in a trimmed column)
     assert set(np.unique(whole["mineral"][whole["valid"]]).tolist()) == {0, 1}
     for name in whole:

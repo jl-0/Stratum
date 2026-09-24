@@ -84,7 +84,7 @@ def test_delivered_bands_order_dtypes_nodata():
         "depth_1", "depth_1_n", "depth_1_spread",
         "mineral_2", "mineral_2_agreement", "mineral_2_runner_up",
         "depth_2", "depth_2_n",
-        "n_epochs",
+        "n_epochs", "n_observed",
     ]
     by = {b.name: b for b in bands}
     assert (by["mineral_1"].dtype, by["mineral_1"].nodata) == ("uint16", 65535)
@@ -99,7 +99,7 @@ def test_delivered_bands_order_dtypes_nodata():
 
 def test_delivered_bands_best_and_none():
     schema = SnapshotSchema(name="t", layers=[cat("m", "best"), cont("d", "none"), cat("k", "none")])
-    assert [b.name for b in delivered_bands(schema)] == ["m", "n_epochs"]
+    assert [b.name for b in delivered_bands(schema)] == ["m", "n_epochs", "n_observed"]
 
 
 def test_delivered_bands_multiband_reports_band_axis():
@@ -248,7 +248,7 @@ def test_best_categorical_takes_highest_score_among_valid():
     valid = np.asarray([True, False, True])[:, None, None]
     out = reduce_stack(stack({"m": m}, valid=valid, score=score, specs=[cat("m", "best")]))
     assert out["m"][0, 0] == 3
-    assert list(out) == ["m", "n_epochs"]
+    assert list(out) == ["m", "n_epochs", "n_observed"]
 
 
 def test_best_continuous():
@@ -298,7 +298,7 @@ def test_inverse_variance_excludes_bad_uncertainty():
                              specs=[cont("d", "inverse_variance", unc="u"), cont("u", "none")]))
     assert out["d"][0, 0] == pytest.approx((1.0 * 1 + 3.0 * 0.25) / 1.25)
     assert out["d_n"][0, 0] == 2
-    assert list(out) == ["d", "d_n", "n_epochs"]                # `u` is carried, not delivered
+    assert list(out) == ["d", "d_n", "n_epochs", "n_observed"]                # `u` is carried, not delivered
 
 
 def test_spread_std_and_iqr():
@@ -310,7 +310,7 @@ def test_spread_std_and_iqr():
                              specs=[cont("d", "mean", spread="iqr")]))
     assert out["d_spread"][0, 0] == pytest.approx(np.percentile([1, 2, 3, 4], 75)
                                                   - np.percentile([1, 2, 3, 4], 25))
-    assert list(out) == ["d", "d_n", "d_spread", "n_epochs"]
+    assert list(out) == ["d", "d_n", "d_spread", "n_epochs", "n_observed"]
 
 
 def test_conditional_on_aggregates_concordant_epochs_only():
@@ -337,7 +337,7 @@ def test_conditional_on_a_later_layer_and_schema_order_preserved():
     out = reduce_stack(stack({"d": d, "m": m}, valid=np.ones((3, 1, 1), bool),
                              specs=[cont("d", "median", conditional_on="m"), cat("m")]))
     assert out["d"][0, 0] == 2.0 and out["d_n"][0, 0] == 2
-    assert list(out) == ["d", "d_n", "m", "m_agreement", "m_runner_up", "n_epochs"]
+    assert list(out) == ["d", "d_n", "m", "m_agreement", "m_runner_up", "n_epochs", "n_observed"]
 
 
 def test_multiband_layer_aggregates_band_wise():
@@ -473,3 +473,24 @@ def test_weighted_vote_refuses_a_score_that_is_only_an_ordering():
 def test_weighted_vote_parameters_are_validated(params, message):
     with pytest.raises(SchemaError, match=message):
         validate_schema(SnapshotSchema(name="t", layers=[cat("m", **params)]))
+
+
+# ------------------------------------------------------------------------------- n_observed
+def test_n_observed_counts_the_footprint_not_the_survivors():
+    """Four epochs reached the cell; one survived the masks. n_epochs says 1, n_observed says 4:
+    the gap is what the masks and the scorer removed, which n_epochs alone cannot tell apart
+    from never having been looked at."""
+    vals = column(1, 1, 1, 1)
+    valid = np.asarray([True, False, False, False])[:, None, None]
+    observed = np.ones((4, 1, 1), bool)
+    snaps = SnapshotStack(schema=SnapshotSchema(name="t", layers=[cat("m")]), epochs=epochs(4),
+                          layers={"m": vals}, valid=valid,
+                          score=np.zeros((4, 1, 1), np.float32), observed=observed)
+    out = reduce_stack(snaps)
+    assert out["n_epochs"][0, 0] == 1 and out["n_observed"][0, 0] == 4
+    assert out["n_observed"].dtype == np.uint16
+
+
+def test_a_stack_built_without_a_footprint_reports_its_valid_cells():
+    out = reduce_stack(stack({"m": column(1, 2)}, valid=np.asarray([True, False])[:, None, None]))
+    assert out["n_observed"][0, 0] == out["n_epochs"][0, 0] == 1
