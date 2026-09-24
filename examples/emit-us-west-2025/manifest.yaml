@@ -197,16 +197,26 @@ pixel_mask:
   - {ref: l2a_standard, flags: [cloud, cirrus, water, spacecraft, dilated_cloud]}
   - {ref: landcover, exclude: [water, built-up]}       # map-space, from the aux above.
                                   # `tree` is NOT excluded here, unlike the Cuprite example: over
-                                  # CONUS that would blank the whole east, and `soil_fraction`
-                                  # already drops a closed canopy on the evidence rather than on
-                                  # a 2021 land-cover label.
-  - {ref: soil_fraction, min_soil: 0.65}               # the vegetation component, per observation
+                                  # CONUS that would blank the whole east. Vegetation is the
+                                  # scorer's business below, graded per observation on the
+                                  # evidence rather than masked on a 2021 land-cover label.
+# NO `soil_fraction` mask, deliberately. It dropped every look under 65 % bare soil before the
+# scorer saw it, and over this AOI that is most of the map: on 60 random granules of the 22 Sep
+# run only 17.5 % of observed pixels clear 0.65 (median granule 8 %, forested scenes under 3 %).
+# The scorer now grades those looks instead of the mask discarding them - see `below_floor_weight`.
 
 scorer:
   ref: bare_earth_nadir           # within a month: the best-exposed, best-lit, most nadir look wins
   params:
-    hard_floor: 0.65              # below this the grain-size retrieval falls apart: NaN, meaning
-                                  #   this observation may not occupy the cell at all
+    hard_floor: 0.65              # below this the grain-size retrieval falls apart, so a look
+                                  #   under it is GRADED DOWN rather than refused -
+    below_floor_weight: 0.1       #   scored at a tenth of what it would be. It still loses to any
+                                  #   look at ground within a week, and under `weight: score`
+                                  #   below it votes across the year at a tenth of a bare week's
+                                  #   strength: one bare winter week outvotes nine vegetated
+                                  #   summer ones, and a cell that never shows ground still gets
+                                  #   its best answer. Must stay under 0.65 / (0.65 + 0.25 +
+                                  #   0.10) = 0.65, or a vegetated look could outrank ground.
     min_soil: 0.80                # the bar recommended for mosaicking, kept SEPARATE from the
                                   #   floor so 0.65-0.80 still ranks instead of being discarded
     sun_weight: 0.25              # illumination breaks ties among comparable ground
@@ -234,13 +244,17 @@ snapshot:
       kind: categorical
       source: mineral_1
       classes: source
-      aggregate: {method: vote, min_count: 3, ignore: [none], tie_break: highest_score}
-                                  # 3 agreeing WEEKS now, not months
+      aggregate: {method: vote, weight: score, ignore: [none], tie_break: highest_score}
+                                  # WEIGHTED BY SCORE, so a bare week counts ~10x a vegetated one.
+                                  # No min_count: a cell seen only through vegetation still gets
+                                  # its best answer, and `_agreement` - now the winner's share of
+                                  # the total score - is the confidence that says how little it
+                                  # rests on. The render below fades it by that agreement.
     mineral_2_native:
       kind: categorical
       source: mineral_2
       classes: source
-      aggregate: {method: vote, min_count: 3, ignore: [none], tie_break: highest_score}
+      aggregate: {method: vote, weight: score, ignore: [none], tie_break: highest_score}
 
     # ---- THREE GROUPINGS OVER THE SAME DETECTIONS. "The only way to do this is to basically flood
     # it and give multiple different groupings available."  Each is an independent enumeration and
@@ -249,17 +263,17 @@ snapshot:
       kind: categorical
       source: mineral_1
       classes: "@ref:classes/iron-oxide-v1.yaml"
-      aggregate: {method: vote, min_count: 3, ignore: [none], tie_break: highest_score}
+      aggregate: {method: vote, weight: score, ignore: [none], tie_break: highest_score}
     alteration:                   # group 2, by alteration assemblage - the deposit-system cut
       kind: categorical
       source: mineral_2
       classes: "@ref:classes/alteration-v1.yaml"
-      aggregate: {method: vote, min_count: 3, ignore: [none], tie_break: highest_score}
+      aggregate: {method: vote, weight: score, ignore: [none], tie_break: highest_score}
     mineral_family:               # group 2, by plain mineral family - the same rows, cut differently
       kind: categorical
       source: mineral_2
       classes: "@ref:classes/mineral-family-v1.yaml"
-      aggregate: {method: vote, min_count: 3, ignore: [none], tie_break: highest_score}
+      aggregate: {method: vote, weight: score, ignore: [none], tie_break: highest_score}
 
     # ---- band depth, carried per group and conditioned on that group's own winner. This is the
     # "how much?" the tag-up insisted on - "they care about it, they just don't know it yet" - but
@@ -269,11 +283,14 @@ snapshot:
     depth_1:
       kind: continuous
       source: depth_1
-      aggregate: {method: median, conditional_on: mineral_1_native, spread: iqr}
+      aggregate: {method: score_weighted, conditional_on: mineral_1_native, spread: iqr}
+                                  # score_weighted, not median: the concordant epochs now include
+                                  #   graded-down vegetated looks, whose band depths are diluted
+                                  #   by the canopy, so the barest looks should dominate the depth
     depth_2:
       kind: continuous
       source: depth_2
-      aggregate: {method: median, conditional_on: mineral_2_native, spread: iqr}
+      aggregate: {method: score_weighted, conditional_on: mineral_2_native, spread: iqr}
     # MANY BANDS FROM WHICHEVER GRANULE WON THE CELL. One layer with a band axis, four bands of
     # the 11-band L1B OBS cube - 13 section 2: "a reflectance mosaic is one layer, not several
     # hundred". 0-based indices into `obs`:

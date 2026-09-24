@@ -82,8 +82,30 @@ figure out what you want."*
 reprocess everything"* ask. It holds only while the scorer, masks and schema hash the same.
 
 **Every mask discussed.** `l2a_standard` (cloud, cirrus, water, spacecraft, dilated cloud) — *"the
-mask layer, which is not applied yet"*. `soil_fraction` + `prefer_bare_earth` over EMITL2BFRCOV —
-the vegetation component. `landcover` over ESA WorldCover aux — the land/water boundary.
+mask layer, which is not applied yet"*. `landcover` over ESA WorldCover aux — the land/water
+boundary. Vegetation, from EMITL2BFRCOV, is **graded by the scorer rather than masked** since
+24 September 2026: see below.
+
+**Vegetation is graded, not masked (24 Sep 2026).** The 22 Sep run masked every look under 65 %
+bare soil (`soil_fraction`, and the scorer's `hard_floor` as a NaN), and its `n_epochs` map was
+sparse everywhere but the desert southwest. Measured on 60 random granules of that run, only
+**17.5 %** of observed pixels clear 0.65 — median granule 8 %, forested scenes under 3 %. So the
+manifest now:
+
+| | before | now |
+|---|---|---|
+| `soil_fraction` mask | 0.65 | removed |
+| look below `hard_floor` | NaN: may not occupy the cell | scored at `below_floor_weight: 0.1` of its value |
+| categorical `vote` | one week, one vote; `min_count: 3` | `weight: score`: a week votes with its score; no `min_count` |
+| `*_agreement` | modal weeks / valid weeks | winner's share of the total score — a confidence |
+| `depth_*` | `median` of concordant weeks | `score_weighted`, so the barest looks dominate |
+| coverage bands | `n_epochs` only | `n_epochs` and `n_observed` (weeks any granule reached the cell, before masks) |
+
+Within a week the barest look still wins. Across the year a bare week outvotes about ten
+vegetated ones, and a cell that never shows ground still gets its best answer, with a low
+agreement. The cost: the snapshot key changed, so resolve reruns in full. **Not yet measured**:
+how much coverage this recovers, how often labels change where the old run had one, and whether
+FRCOV reads winter snow as bare soil — no product in the pipeline flags snow.
 
 ---
 
@@ -180,7 +202,8 @@ a year is not a whole number of weeks. It now places them in time when the two a
 incommensurable, provided every period is the same fixed window; a rolling window still needs
 whole epochs to slide by ([09 §5](../../docs/specs/09-run-manifest.md)).
 
-`min_count: 3` is now three agreeing **weeks** of the ~13 observed. (Over full CONUS the same filter leaves a median of five, which is why the cloud threshold is
+`min_count: 3` was three agreeing **weeks** of the ~13 observed; the score-weighted vote has since
+replaced it (§1). (Over full CONUS the same filter leaves a median of five, which is why the cloud threshold is
 worth revisiting at continental scope and not here.) Raising `max_cloud_fraction` to 0.8 would give
 2,562 granules and a median of 7 months, at about 30 % more compute.
 

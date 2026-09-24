@@ -91,11 +91,11 @@ granule_filter:
 pixel_mask:
   - {ref: edge_trim, columns: 7}
   - {ref: landcover, exclude: [water, built-up]}
-  - {ref: soil_fraction, min_soil: 0.65}
 
 scorer:
   ref: bare_earth_nadir
-  params: {hard_floor: 0.65, min_soil: 0.80, sun_weight: 0.25, nadir_weight: 0.10}
+  params: {hard_floor: 0.65, below_floor_weight: 0.1, min_soil: 0.80, sun_weight: 0.25,
+           nadir_weight: 0.10}        # as manifest.yaml: vegetation graded, not masked
 
 snapshot:
   name: us-west-2025-grouping-v1
@@ -104,35 +104,35 @@ snapshot:
       kind: categorical
       source: mineral_1
       classes: source
-      aggregate: {method: vote, min_count: 3, ignore: [none], tie_break: highest_score}
+      aggregate: {method: vote, weight: score, ignore: [none], tie_break: highest_score}
     mineral_2_native:
       kind: categorical
       source: mineral_2
       classes: source
-      aggregate: {method: vote, min_count: 3, ignore: [none], tie_break: highest_score}
+      aggregate: {method: vote, weight: score, ignore: [none], tie_break: highest_score}
     iron_oxide:
       kind: categorical
       source: mineral_1
       classes: "@ref:classes/iron-oxide-v1.yaml"
-      aggregate: {method: vote, min_count: 3, ignore: [none], tie_break: highest_score}
+      aggregate: {method: vote, weight: score, ignore: [none], tie_break: highest_score}
     alteration:
       kind: categorical
       source: mineral_2
       classes: "@ref:classes/alteration-v1.yaml"
-      aggregate: {method: vote, min_count: 3, ignore: [none], tie_break: highest_score}
+      aggregate: {method: vote, weight: score, ignore: [none], tie_break: highest_score}
     mineral_family:
       kind: categorical
       source: mineral_2
       classes: "@ref:classes/mineral-family-v1.yaml"
-      aggregate: {method: vote, min_count: 3, ignore: [none], tie_break: highest_score}
+      aggregate: {method: vote, weight: score, ignore: [none], tie_break: highest_score}
     depth_1:
       kind: continuous
       source: depth_1
-      aggregate: {method: median, conditional_on: mineral_1_native, spread: iqr}
+      aggregate: {method: score_weighted, conditional_on: mineral_1_native, spread: iqr}
     depth_2:
       kind: continuous
       source: depth_2
-      aggregate: {method: median, conditional_on: mineral_2_native, spread: iqr}
+      aggregate: {method: score_weighted, conditional_on: mineral_2_native, spread: iqr}
     geometry_stack:                 # 4 bands from whichever granule won the cell
       kind: continuous
       source: geometry
