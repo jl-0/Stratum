@@ -38,6 +38,7 @@ reference/
   manifest.html           every manifest field                        [generation candidate]
   types.html              the types plugins receive                   [generation candidate]
   cli.html                every command and option                    [generation candidate]
+  glossary.html           every Stratum term, one anchor each - diagrams link #<term>
 developer/
   codebase.html           package map, the layer graph, module by module, spec -> code
   lifecycle.html          plan -> work lists -> exec_item; the key-agreement contract

@@ -28,7 +28,8 @@
     { section: 'Reference', items: [
       { id: 'reference/manifest', href: 'reference/manifest.html', label: 'Manifest' },
       { id: 'reference/types',    href: 'reference/types.html',    label: 'Types' },
-      { id: 'reference/cli',      href: 'reference/cli.html',      label: 'Commands' }
+      { id: 'reference/cli',      href: 'reference/cli.html',      label: 'Commands' },
+      { id: 'reference/glossary', href: 'reference/glossary.html', label: 'Glossary' }
     ]},
     { section: 'Developer', items: [
       { id: 'developer/codebase',  href: 'developer/codebase.html',  label: 'Codebase map' },

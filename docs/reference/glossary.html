@@ -1,0 +1,428 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Glossary · Stratum</title>
+<link rel="stylesheet" href="../assets/stratum.css">
+</head>
+<body data-page="reference/glossary" data-root="../">
+<a class="skip" href="#content">Skip to content</a>
+<header class="masthead">
+  <a class="wordmark" href="../index.html"><span class="glyph"></span>Stratum</a>
+  <span class="stage">Pre-release</span>
+  <span class="spacer"></span>
+  <span class="repo">EMIT Critical Minerals L3</span>
+</header>
+<div class="layout">
+<nav id="sidebar" aria-label="Documentation"></nav>
+<main id="content">
+<div class="prose">
+
+<h1>Glossary</h1>
+<p class="lede">Every word Stratum uses in a sense of its own, one line each, with a link to where
+it is explained properly.</p>
+
+<p>Several of these are ordinary words used in a narrow sense &mdash; <em>epoch</em>,
+<em>tile</em> and <em>asset</em> most of all &mdash; so read the definition here even when the
+word looks familiar. Each entry has a stable anchor, so
+<code>reference/glossary.html#asset</code> is a link you can put in a diagram, a ticket or a
+slide.</p>
+
+<p>
+<a href="#a">A</a> <a href="#b">B</a> <a href="#c">C</a> <a href="#d">D</a> <a href="#e">E</a>
+<a href="#g">G</a> <a href="#h">H</a> <a href="#i">I</a> <a href="#l">L</a> <a href="#m">M</a>
+<a href="#n">N</a> <a href="#o">O</a> <a href="#p">P</a> <a href="#r">R</a> <a href="#s">S</a>
+<a href="#t">T</a> <a href="#v">V</a> <a href="#w">W</a> <a href="#z">Z</a>
+</p>
+
+<dl class="glossary">
+
+<dt id="ref"><code>@ref:</code></dt>
+<dd>A manifest value that names another file, resolved relative to the manifest. Today it is how a
+categorical layer names its <a href="#enumeration">enumeration</a>:
+<code>classes: "@ref:classes/iron-oxide-v1.yaml"</code>. The file's fingerprint enters the
+manifest hash, so editing the file changes the run.
+<a href="manifest.html#layer">Manifest &rarr; layers</a></dd>
+
+<dt id="agreement"><span id="a"></span>Agreement <span class="aka">(<code>&lt;layer&gt;_agreement</code>)</span></dt>
+<dd>For a categorical layer, the winning class's share of the <a href="#vote">vote</a>: winning
+epochs over valid epochs, or &mdash; with <code>weight: score</code> &mdash; the winner's share of
+the total score, which makes it a confidence. Reported even where the class itself was suppressed.
+<a href="../guide/plugins.html#reducer-decide">How a cell is decided</a></dd>
+
+<dt id="algo-hash">Algorithm version <span class="aka">(algo hash)</span></dt>
+<dd>A version stamp that is part of the <a href="#cache-key">cache key</a> of anything an algorithm
+produces &mdash; <code>regrid_algo_version</code> for a <a href="#glt">GLT</a>,
+<code>warp_algo_version</code> for a warp. Change the algorithm and the key changes, so no stale
+result can be read back. A recorded content hash catches a change nobody versioned.
+<a href="../developer/working.html#algo-hash">The recorded regrid hash</a></dd>
+
+<dt id="aoi">AOI <span class="aka">(area of interest)</span></dt>
+<dd>Where a run is. Exactly one of a list of <a href="#zone">zones</a>, a bounding box or explicit
+tiles; it resolves to the set of <a href="#tile">tiles</a> it intersects.
+<a href="manifest.html#aoi">Manifest &rarr; <code>aoi</code></a></dd>
+
+<dt id="asset">Asset</dt>
+<dd>One file that a <a href="#granule">granule</a> resolves to for one <a href="#role">role</a>
+&mdash; the thing a reader actually opens. An EMIT L1B RAD granule has an <code>OBS</code> asset
+and a <code>RAD</code> asset; an L2B MIN granule has <code>MIN</code> and <code>MINUNCERT</code>.
+A role names the asset it reads (<code>asset: OBS</code>), the <a href="#index">index</a> holds one
+row per asset. A file that no <code>source.patterns</code> glob matches is never indexed or
+downloaded.
+<a href="../guide/manifests.html#granule-id">A granule is an acquisition, not a file</a></dd>
+
+<dt id="asset-cache">Asset cache</dt>
+<dd>The directory on one machine where remote <a href="#asset">assets</a> are staged: verbatim
+copies of the archive's files, keyed on the catalogue checksum, verified as they download, evicted
+least-recently-used to stay within a size bound. Its location never enters a
+<a href="#cache-key">cache key</a>. Not the same thing as the <a href="#cache">cache</a>, which
+holds what Stratum derives.
+<a href="../guide/reading-data.html#asset-cache">The asset cache</a></dd>
+
+<dt id="aux">Aux <span class="aka">(ancillary source)</span></dt>
+<dd>Data a plugin reads that is <em>not</em> of the acquisition &mdash; a landcover map, a DEM,
+claim polygons. Declared once under <code>aux:</code> with a URI, a kind and a resampling method,
+fetched once and warped once per tile, and the same map whichever granule is being scored. If the
+data is of the overpass, it is a <a href="#role">role</a> instead.
+<a href="../guide/concepts.html#roles-vs-aux">Roles are granules; aux is everything else</a></dd>
+
+<dt id="band-alias"><span id="b"></span>Band alias</dt>
+<dd>A name for one band of a role's variable, so a plugin writes <code>obs["view_zenith"]</code>
+rather than an index: <code>view_zenith: {role: geometry, band: 2}</code>. Aliases and roles share
+one namespace. <a href="../guide/manifests.html#aliases">Roles, aliases, and when you need
+which</a></dd>
+
+<dt id="block">Block</dt>
+<dd>A square subdivision of a <a href="#tile">tile</a>, sized in cells by
+<code>grid.block_size</code>: the unit a worker processes. It never appears in an output, and
+changing its size cannot change the result. <a href="../guide/concepts.html#tile-block">Tile and
+block</a></dd>
+
+<dt id="budget">Budget</dt>
+<dd>Required ceilings on a run's fan-out &mdash; tiles, granules, compute &mdash; checked at
+<a href="#plan">plan</a> time, before any work item runs. <a href="manifest.html#budget">Manifest
+&rarr; <code>budget</code></a></dd>
+
+<dt id="cache"><span id="c"></span>Cache</dt>
+<dd>Where every <em>derived</em> artifact lives &mdash; GLTs, masked observations, warps, epoch
+snapshots, product blocks &mdash; under <code>cache/</code> in the <a href="#storage-root">storage
+root</a>, each at its <a href="#cache-key">cache key</a>. It is what makes changing a scorer
+cheap. <a href="../guide/caching.html">Caching &amp; reruns</a></dd>
+
+<dt id="cache-key">Cache key <span class="aka">(content-addressed)</span></dt>
+<dd>The hash an artifact is stored under, computed from everything that determines its content:
+inputs, parameters, plugin versions, <a href="#algo-hash">algorithm version</a>. A change to any
+of them is a new key, never an overwrite, so a stale artifact cannot be read by mistake.
+<a href="../guide/caching.html#what-invalidates">What invalidates what</a></dd>
+
+<dt id="candidate">Candidate</dt>
+<dd>A granule whose footprint meets a given block in a given epoch, and so might occupy some of its
+cells. Resolve reads the candidates of one (tile, block, epoch) in index order.
+<a href="../developer/lifecycle.html#work-lists">The four work lists</a></dd>
+
+<dt id="categorical">Categorical layer</dt>
+<dd>A <a href="#layer">layer</a> whose values are class ids from an
+<a href="#enumeration">enumeration</a>, such as a mineral id. It is <a href="#vote">voted</a>, never
+averaged: the mean of two class ids is a third class nobody identified. Its opposite is a
+<a href="#continuous">continuous layer</a>. <a href="manifest.html#layer">Manifest &rarr;
+layers</a></dd>
+
+<dt id="class-table">Class table</dt>
+<dd>The table that says what a categorical band's integers mean: a key column whose values appear in
+the pixels, plus attribute columns. EMIT L2B embeds one, 294 rows, at
+<code>/mineral_metadata</code>. Declared per role, and fingerprinted per granule at plan time.
+<a href="../guide/concepts.html#class-tables">Class tables</a></dd>
+
+<dt id="collection">Collection</dt>
+<dd>A product line in a catalogue, such as <code>EMITL2BMIN</code> version <code>001</code>. A
+<a href="#role">role</a> reads from one collection; a <a href="#granule">granule</a> belongs to
+one. <a href="../guide/reading-data.html#sources">Where granules come from</a></dd>
+
+<dt id="conditional-on"><code>conditional_on</code></dt>
+<dd>Restricts a continuous aggregation to the epochs whose value in a named categorical layer equals
+that layer's winner. It is why <code>depth_1</code> is the band depth <em>of the mineral that
+won</em>, not an average across epochs that found different minerals.
+<a href="../guide/plugins.html#continuous">Reducing continuous bands</a></dd>
+
+<dt id="continuous">Continuous layer</dt>
+<dd>A <a href="#layer">layer</a> of measured quantities &mdash; a band depth, an angle, a fraction
+&mdash; aggregated through time by a statistic such as <code>median</code> or
+<code>score_weighted</code>. <a href="manifest.html#aggregate">Manifest &rarr;
+<code>aggregate</code></a></dd>
+
+<dt id="delivery-period"><span id="d"></span>Delivery period</dt>
+<dd>One output product in time, set by <code>time.deliver</code> &mdash; for example a year. It is
+reduced from the <a href="#epoch">epochs</a> in its <a href="#window">window</a>, which need not
+equal the period. <a href="../guide/concepts.html#epoch">Epochs and delivery</a></dd>
+
+<dt id="enumeration"><span id="e"></span>Enumeration <span class="aka">(classes file)</span></dt>
+<dd>A product's own list of classes: explicit ids, names, and the input rows each class gathers,
+matched by attribute rather than by integer. Named by a layer's <code>classes:</code>, usually as an
+<a href="#ref"><code>@ref:</code></a> file; <code>classes: source</code> adopts the input's
+<a href="#class-table">class table</a> unchanged. Id 0 is reserved for <a href="#none">none</a>.
+<a href="manifest.html#classes">The classes file</a></dd>
+
+<dt id="epoch">Epoch</dt>
+<dd><strong>The unit of one vote</strong>, set by <code>time.epoch</code> &mdash; for example a
+week. Every observation in an epoch competes per cell and one wins, giving one
+<a href="#snapshot">snapshot</a>, however many overpasses fell in it. That is what stops a densely
+revisited week outvoting a sparse one. <a href="../guide/concepts.html#epoch">Epochs and
+delivery</a></dd>
+
+<dt id="executor">Executor</dt>
+<dd>What runs the work items: <code>local</code>, <code>slurm</code> or <code>aws</code>. A
+command-line choice, never a manifest field, so the same science runs in every place.
+<a href="../guide/scaling.html#portability">One pipeline, three executors</a></dd>
+
+<dt id="glt"><span id="g"></span>GLT <span class="aka">(geographic lookup table)</span></dt>
+<dd>For one granule and one tile, which raw sensor pixel (line, sample) lands in each grid cell,
+found by nearest neighbour within a <code>max_distance</code>. Built once per granule &times; tile
+by <a href="#regrid">regrid</a>, cached, and reused by every epoch and every layer.
+<a href="../guide/algorithms.html#regrid">Regrid &mdash; the geometry</a></dd>
+
+<dt id="granule">Granule</dt>
+<dd>One acquisition by one instrument &mdash; the atom of input. EMIT: about 75&nbsp;&times;&nbsp;75
+km at 60&nbsp;m. A granule is several <a href="#asset">assets</a>, not one file.
+<a href="../guide/manifests.html#granule-id">A granule is an acquisition, not a file</a></dd>
+
+<dt id="granule-filter">Granule filter</dt>
+<dd>Which granules may take part at all, decided from index metadata before any pixel is read
+&mdash; cloud fraction, solar zenith, months, build. An ordered list of predicates and plugins.
+<a href="manifest.html#granule-filter">Manifest &rarr; <code>granule_filter</code></a></dd>
+
+<dt id="grid">Grid</dt>
+<dd>A CRS, a resolution and an origin: a rule for where cell edges fall, with no extent of its
+own. <a href="#tile">Tiles</a> and <a href="#block">blocks</a> are cut from it.
+<a href="../guide/concepts.html#grid">Grid</a></dd>
+
+<dt id="halo"><span id="h"></span>Halo</dt>
+<dd>A ring of extra pixels a block reads beyond its own edges, for a plugin that needs neighbours.
+Declared by the plugin, trimmed before writing. <a href="../guide/concepts.html#halos">Halos</a></dd>
+
+<dt id="index"><span id="i"></span>Index <span class="aka">(granule index)</span></dt>
+<dd>The table of every granule a run may use &mdash; one row per <a href="#asset">asset</a>, with
+footprint, time, URL, checksum and vintage &mdash; written as parquet by <code>stratum index
+build</code> from the <a href="#source">source</a>. A run reads the index and never the catalogue;
+the set it selects is frozen and hashed into the run, so a rerun sees the same granules.
+<a href="../guide/reading-data.html#index">Building and refreshing the index</a></dd>
+
+<dt id="layer"><span id="l"></span>Layer</dt>
+<dd>One named band of a <a href="#snapshot">snapshot</a>, declared under
+<code>snapshot.layers</code>: a <a href="#source-layer">source</a>, a kind (categorical or
+continuous), and how it <a href="#reduce">aggregates</a> through time. Every layer is taken from
+the same winning observation. <a href="manifest.html#layer">Manifest &rarr; layers</a></dd>
+
+<dt id="legend">Legend <span class="aka">(sidecar)</span></dt>
+<dd>A published file beside a product that says what its values mean &mdash; a class table or ramp
+stops. One per categorical layer (<code>classes.&lt;layer&gt;.json</code>), because layers can
+have different enumerations. <a href="../guide/concepts.html#outputs">What a run produces</a></dd>
+
+<dt id="manifest"><span id="m"></span>Manifest</dt>
+<dd>The one YAML file that defines a run: grid, AOI, time, inputs, filters, masks, scorer,
+snapshot, outputs, budget. Validated and hashed; the hash is part of the run's identity.
+<a href="manifest.html">Manifest reference</a></dd>
+
+<dt id="mapper">Mapper <span class="aka">(<code>OutputMapper</code>)</span></dt>
+<dd>What turns a product band into a picture &mdash; categorical colours, a continuous ramp,
+transparency from agreement. The data product ships whether or not a band is rendered.
+<a href="../guide/plugins.html#mapper">OutputMapper</a></dd>
+
+<dt id="min-count"><code>min_count</code>, <code>min_count_unless_score</code></dt>
+<dd><code>min_count</code> is how many epochs must agree before a vote's winner is delivered; below
+it the cell is <a href="#nodata">nodata</a>. <code>min_count_unless_score</code> waives that for a
+winner holding at least one epoch that scored this high &mdash; "one good look is enough; a class
+seen only through poor looks needs three". <a href="../guide/plugins.html#reducer-decide">How a
+cell is decided</a></dd>
+
+<dt id="n-epochs"><span id="n"></span>n_epochs, n_observed</dt>
+<dd>Two count bands every product carries. <code>n_observed</code> is how many epochs any granule
+reached the cell, before masks and the scorer; <code>n_epochs</code> is how many had a valid
+winner. The gap between them is what the masks and the scorer removed.
+<a href="../guide/plugins.html#continuous">Reducing continuous bands</a></dd>
+
+<dt id="nodata">Nodata</dt>
+<dd>Nothing was observed here. Not the same as <a href="#none">none</a>, and a reduction that
+confuses the two reports confident agreement over pixels nobody looked at. Inside Stratum it is a
+validity mask; on disk, a sentinel. <a href="../guide/concepts.html#nodata">Missing data</a></dd>
+
+<dt id="none">None <span class="aka">(class 0)</span></dt>
+<dd>Observed, and nothing identified. A real answer, unlike <a href="#nodata">nodata</a>; votes
+usually <code>ignore</code> it so it counts as observed without winning.
+<a href="../guide/concepts.html#nodata">Missing data</a></dd>
+
+<dt id="observation"><span id="o"></span>Observation</dt>
+<dd>One granule's contribution to one <a href="#block">block</a>: its bands gathered onto the block
+through the <a href="#glt">GLT</a>, with <a href="#pixel-mask">masks</a> applied. What a
+<a href="#scorer">scorer</a> scores. <a href="../guide/reading-data.html#block">How a block gets its
+data</a></dd>
+
+<dt id="ortho-native">Ortho-native</dt>
+<dd>A product delivered already on a map grid, such as EMIT L2B FRCOV. It has no sensor geometry
+and no GLT, so it is warped onto the block directly &mdash; but it is still a per-granule
+<a href="#role">role</a>, not <a href="#aux">aux</a>.
+<a href="../guide/reading-data.html#ortho">Products already on a map grid</a></dd>
+
+<dt id="pixel-mask"><span id="p"></span>Pixel mask</dt>
+<dd>A rule that makes pixels ineligible &mdash; cloud, water, detector edges &mdash; before
+scoring. Masks combine by AND into the observation's <code>valid</code>, and each works in
+<a href="#space">sensor or map space</a>. <a href="../guide/plugins.html#pixel-mask">PixelMask</a></dd>
+
+<dt id="plan">Plan</dt>
+<dd>Everything decided before a pixel is read: query the index, filter granules, lay out epochs,
+resolve class tables, stage aux, check the budget, and emit the <a href="#work-item">work
+lists</a>. <a href="../developer/lifecycle.html#plan">What planning decides</a></dd>
+
+<dt id="plugin">Plugin</dt>
+<dd>Science code Stratum calls through a fixed hook &mdash; a scorer, pixel mask, reducer, mapper or
+granule filter &mdash; named in the manifest by <code>ref</code>. The framework knows nothing about
+minerals; the plugins do. <a href="../guide/plugins.html">Writing plugins</a></dd>
+
+<dt id="product">Product</dt>
+<dd>What a run delivers per tile and <a href="#delivery-period">delivery period</a>: the reduced
+data bands, their rendering, legends and a STAC item.
+<a href="../guide/concepts.html#outputs">What a run produces</a></dd>
+
+<dt id="provenance">Provenance</dt>
+<dd>The record of how a product was made &mdash; frozen index digest, plugin versions, algorithm
+versions, image digest, filter counts &mdash; carried in the STAC item and the run directory.
+<a href="../guide/running.html#reproduce">Reproducing a run</a></dd>
+
+<dt id="publish">Publish</dt>
+<dd>Stitch a tile's blocks, write the data bands, their rendering, the legends and the STAC
+item. One work item per tile &times; delivery period.
+<a href="../guide/algorithms.html#publish">Publish</a></dd>
+
+<dt id="reduce"><span id="r"></span>Reduce, reducer</dt>
+<dd>Collapse the epoch snapshots in a delivery window into one value per cell, layer by layer,
+using each layer's <code>aggregate</code>. The built-in reducer covers <a href="#vote">vote</a>,
+the continuous statistics and <code>best</code>; a reducer plugin is only for what that cannot
+express. <a href="../guide/algorithms.html#reduce">Reduce &mdash; combining epochs</a></dd>
+
+<dt id="regrid">Regrid</dt>
+<dd>Build the <a href="#glt">GLT</a> for one granule &times; tile. Built once per granule &times; tile and
+reused by every epoch and every layer.
+<a href="../guide/algorithms.html#regrid">Regrid &mdash; the geometry</a></dd>
+
+<dt id="resolve">Resolve</dt>
+<dd>For one tile &times; block &times; epoch: read each candidate observation, mask it, score it, and
+keep the best per cell, writing every layer from the winner. The result is the
+<a href="#snapshot">snapshot</a>. <a href="../guide/algorithms.html#resolve">Resolve &mdash; read,
+score, keep one</a></dd>
+
+<dt id="role">Role</dt>
+<dd>A logical input name &mdash; <code>geometry</code>, <code>mineral_1</code>, <code>pv</code>
+&mdash; that the manifest resolves to a collection, an <a href="#asset">asset</a> and a variable.
+Plugins name roles, never files or band indices, which is what lets one scorer run on another
+instrument. <a href="../guide/concepts.html#roles">Roles and band aliases</a></dd>
+
+<dt id="run">Run <span class="aka">(<code>run_id</code>)</span></dt>
+<dd>One execution of one manifest. Its <code>run_id</code> names the <code>runs/</code> and
+<code>products/</code> prefixes in the storage root. <a href="../guide/running.html">Running a
+mosaic</a></dd>
+
+<dt id="runner-up">Runner-up <span class="aka">(<code>&lt;layer&gt;_runner_up</code>)</span></dt>
+<dd>The class that came second in a <a href="#vote">vote</a>, delivered beside the winner.
+<a href="../guide/plugins.html#reducer-decide">How a cell is decided</a></dd>
+
+<dt id="schema"><span id="s"></span>Schema <span class="aka">(snapshot schema)</span></dt>
+<dd>The declared set of snapshot <a href="#layer">layers</a> &mdash; kind, enumeration, aggregation
+&mdash; one per run and constant across its epochs. It can be extended, never redefined.
+<a href="../guide/plugins.html#snapshot-schema">What the snapshot carries</a></dd>
+
+<dt id="score">Score</dt>
+<dd>The number a <a href="#scorer">scorer</a> gives one observation at one cell. Highest wins the
+cell within an epoch; <code>NaN</code> means "may not occupy this cell". The winning score is kept
+as a snapshot layer, and can weight the vote and continuous aggregations.
+<a href="../guide/algorithms.html#scoring">Scoring and the running best</a></dd>
+
+<dt id="scorer">Scorer</dt>
+<dd>The cost function: the plugin that scores observations, and so decides which look wins each
+cell within an epoch. The one piece of science every run must name.
+<a href="../guide/plugins.html#scorer">Scorer</a></dd>
+
+<dt id="snapshot">Snapshot <span class="aka">(epoch snapshot)</span></dt>
+<dd>The winning value per cell for one epoch, for every layer, plus the <code>score</code> that won
+and whether the cell was <code>valid</code>. Written by resolve, cached, and read only by reduce
+&mdash; never rendered. <a href="../guide/plugins.html#snapshot-schema">What the snapshot
+carries</a></dd>
+
+<dt id="source">Source <span class="aka">(granule source)</span></dt>
+<dd>Where the <a href="#index">index</a> is built from &mdash; a catalogue such as NASA CMR, or a
+directory. Queried when the index is built, never by a run.
+<a href="../guide/reading-data.html#sources">Where granules come from</a></dd>
+
+<dt id="source-layer"><code>source</code> (of a layer)</dt>
+<dd>The role or band alias a snapshot layer is gathered from. Not the same word as the
+<a href="#source">granule source</a>. <a href="manifest.html#layer">Manifest &rarr; layers</a></dd>
+
+<dt id="space">Space <span class="aka">(sensor, map)</span></dt>
+<dd>Which pixel layout an array is in: <em>sensor</em> (downtrack, crosstrack, as the detector saw
+it) or <em>map</em> (the block grid, after the GLT). A detector-edge mask must work in sensor space;
+a water mask in map space. <a href="../guide/concepts.html#spaces">Coordinate spaces</a></dd>
+
+<dt id="spread">Spread</dt>
+<dd>A second band delivered beside a continuous layer saying how much the epochs disagreed &mdash;
+for example <code>iqr</code>, the interquartile range. <a href="manifest.html#aggregate">Manifest
+&rarr; <code>aggregate</code></a></dd>
+
+<dt id="stac-item">STAC item</dt>
+<dd>A JSON document per published tile describing its footprint, time, bands, class tables and
+provenance, so standard tooling can find the products without knowing the storage layout.
+<a href="../guide/concepts.html#outputs">What a run produces</a></dd>
+
+<dt id="storage-root">Storage root</dt>
+<dd><code>outputs.bucket</code>: an <code>s3://</code> URI or a directory, under which
+<code>cache/</code>, <code>runs/</code> and <code>products/</code> all hang, with the same layout
+either way. <a href="manifest.html#outputs">Manifest &rarr; <code>outputs</code></a></dd>
+
+<dt id="tie-break"><span id="t"></span>Tie break</dt>
+<dd>How a vote picks between classes with equal support: <code>highest_score</code>,
+<code>earliest</code> or <code>latest</code>. <a href="../guide/algorithms.html#vote">Mode through
+time</a></dd>
+
+<dt id="tile">Tile</dt>
+<dd>A bounded rectangle of the <a href="#grid">grid</a>, sized in CRS units by
+<code>grid.tile_size</code> &mdash; what a consumer downloads. Named by its grid indices, so a
+name is a position. <a href="../guide/concepts.html#tile-block">Tile and block</a></dd>
+
+<dt id="vintage"><span id="v"></span>Vintage</dt>
+<dd>Which version of an upstream product a granule is, as its <a href="#class-table">class
+table</a> reveals. Stratum fingerprints every contributing granule's table and refuses a run that
+mixes vintages, because the same integer can mean different minerals in two of them.
+<a href="../guide/running.html#vintage">Mixed vintages are refused</a></dd>
+
+<dt id="vote">Vote</dt>
+<dd>The categorical aggregation: the modal class across the epochs of a window, one vote per epoch
+&mdash; or, with <code>weight: score</code>, each epoch voting with its winning score, so a good
+look outweighs several poor ones. <a href="../guide/plugins.html#reducer-decide">How a cell is
+decided</a></dd>
+
+<dt id="window"><span id="w"></span>Window</dt>
+<dd>The span of epochs one product is reduced from. By default it equals the
+<a href="#delivery-period">delivery period</a>; it can be longer, to make rolling composites.
+<a href="../guide/concepts.html#window">Delivering more often than the window slides</a></dd>
+
+<dt id="work-item">Work item, work list</dt>
+<dd>A work item is the whole input to one worker: one JSON line naming one unit of one stage
+&mdash; a granule &times; tile for regrid, a tile &times; block &times; epoch for resolve, and so
+on. Plan writes one work list per stage. <a href="../developer/lifecycle.html#work-lists">The four
+work lists</a></dd>
+
+<dt id="zone"><span id="z"></span>Zone</dt>
+<dd>A named bounding box in a registry file (<code>examples/zones.yaml</code>) that an
+<a href="#aoi">AOI</a> can name instead of coordinates. <a href="manifest.html#aoi">Manifest
+&rarr; <code>aoi</code></a></dd>
+
+</dl>
+
+</div>
+<nav class="pager" aria-label="Pagination"></nav>
+<footer class="site">
+  Vocabulary fixed in <a href="../specs/00-overview.md"><code>specs/00-overview.md</code></a> &sect;1
+</footer>
+</main>
+</div>
+<script src="../assets/stratum.js"></script>
+</body>
+</html>

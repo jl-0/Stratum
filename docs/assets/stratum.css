@@ -159,6 +159,13 @@ strong { font-weight: 650; }
 
 .lede { font-size: 1.06rem; color: var(--muted); margin-bottom: 1.6rem; }
 
+/* reference/glossary.html: one <dt id> per term, so a diagram or ticket can link #asset */
+dl.glossary { margin: 1.4rem 0 1.6rem; }
+dl.glossary dt { font-weight: 650; margin-top: 1.1rem; padding: .15rem .4rem; margin-left: -.4rem; border-radius: 4px; }
+dl.glossary dt .aka { font-weight: 400; color: var(--muted); }
+dl.glossary dd { margin: .2rem 0 0; }
+dl.glossary dt:target { background: var(--accent-soft); }
+
 .anchor {
   opacity: 0; margin-left: .4rem; font-weight: 400; color: var(--muted);
   text-decoration: none; font-size: .8em;

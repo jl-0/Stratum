@@ -302,7 +302,7 @@ examples/          example manifests and classes files - configuration, not core
 docs/index.html    site landing page (GitHub Pages serves docs/)
 docs/guide/        concepts, running, reading-data, algorithms, plugins, caching,
                    viewing, scaling                                 <- how to use it
-docs/reference/    manifest, types, cli                             <- field/API reference
+docs/reference/    manifest, types, cli, glossary                   <- field/API reference
 docs/developer/    codebase, lifecycle, objects, extending, working <- how to CHANGE it
 docs/decisions/    ADR digest (HTML) + the ADRs themselves (Markdown)
 docs/status.html   what is implemented, what is open
@@ -428,6 +428,15 @@ before halos were defined.
 
 The rule: if a term appears in a table or list, it is defined before that table, or glossed inside
 it. Prefer reordering the sections over inventing a friendlier synonym.
+
+### The glossary is the link target for a term
+
+`docs/reference/glossary.html` gives every Stratum term a `<dt id>`, and diagrams link
+`https://jl-0.github.io/Stratum/reference/glossary.html#<term>` rather than explaining in the box.
+Those anchors are an interface: rename one and every diagram linking it 404s, so
+`tests/test_docs_links.py` fails when any `.excalidraw` under `examples/` or any site page links a
+term the glossary does not define. Add a term there when a diagram or page starts using a word in
+a Stratum-specific sense; keep entries to a sentence or three plus a link to where it is explained.
 
 ### Assume no GIS background — but do not let it take over the page
 

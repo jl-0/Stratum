@@ -63,3 +63,30 @@ def test_code_link_points_at_the_line_it_names(page: Path, sym: str, url: str) -
 def test_the_page_actually_carries_links() -> None:
     """A regex that silently matches nothing would make every assertion above vacuous."""
     assert len(anchors()) >= 30
+
+
+GLOSSARY = DOCS / "reference" / "glossary.html"
+GLOSSARY_URL = "https://jl-0.github.io/Stratum/reference/glossary.html"
+
+
+def test_every_glossary_link_names_a_term_the_glossary_defines() -> None:
+    """Diagrams link terms to `reference/glossary.html#<term>`; a renamed anchor would 404 silently.
+
+    Scans every .excalidraw under the repo and every page on the site, so a term dropped from the
+    glossary fails here rather than in front of whoever clicked it.
+    """
+    import json
+
+    defined = set(re.findall(r'<dt id="([^"]+)"', GLOSSARY.read_text()))
+    wanted: list[tuple[str, str]] = []
+    for scene in sorted(ROOT.glob("examples/**/*.excalidraw")):
+        for e in json.loads(scene.read_text())["elements"]:
+            link = e.get("link") or ""
+            if link.startswith(GLOSSARY_URL + "#"):
+                wanted.append((scene.name, link.partition("#")[2]))
+    for page in sorted(DOCS.rglob("*.html")):
+        for anchor in re.findall(r'href="(?:\.\./)*(?:reference/)?glossary\.html#([^"]+)"', page.read_text()):
+            wanted.append((page.name, anchor))
+    assert wanted, "no glossary links found; the scan is matching nothing"
+    missing = [(where, a) for where, a in wanted if a not in defined]
+    assert not missing, f"links to glossary terms that do not exist: {missing}"

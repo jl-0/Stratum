@@ -36,8 +36,8 @@ file picker accepts `.excalidraw` anyway — its extension filter is commented o
 a WebKit bug — then fails with **"Couldn't load library"**. Drag-and-drop is the safe route
 because `loadFileToCanvas` routes on the `type` field rather than the file extension.
 
-Verified, not by eye: it loads in the live editor at excalidraw.com holding all 373 of 373
-elements, with 39 element links. Re-check that after any edit: `uv run scripts/check-excalidraw.py examples/emit-us-west-2025/algorithm.excalidraw`
+Verified, not by eye: it loads in the live editor at excalidraw.com holding all 490 of 490
+elements, with 99 element links. Re-check that after any edit: `uv run scripts/check-excalidraw.py examples/emit-us-west-2025/algorithm.excalidraw`
 drops the file onto excalidraw.com in headless Chromium and fails unless the editor holds every element.
 
 Every box is a hyperlink to the code or the manifest line that implements it, pinned to one
@@ -45,6 +45,13 @@ commit (`5688e8d`, the one that carries the 24 Sep algorithm), because a line nu
 something at one commit. The flowcharts were drawn with `scripts/mermaid-to-excalidraw.py`, which
 turns a Mermaid flowchart into native, editable Excalidraw shapes. It is still a hand-editable
 drawing, not a generated artefact: edit it in place.
+
+**Terms link to the glossary, not the code.** The GLOSSARY strip under the canvas has one chip per
+Stratum-specific word the boxes use (ASSET, EPOCH, GLT, snapshot, vote…), and the five stage
+headings link the same way, each to its entry in the
+[online glossary](https://jl-0.github.io/Stratum/reference/glossary.html). Those links are not
+pinned to a commit — a definition should be the current one — and `tests/test_docs_links.py`
+fails if any of them names a term the glossary no longer defines.
 
 ---
 
