@@ -171,3 +171,28 @@ variable "viewer_storage_gib" {
   type        = number
   default     = 21
 }
+
+# --- the mosaic task (mosaic.tf) ----------------------------------------------------------------
+variable "mosaic_cpu" {
+  description = "Fargate CPU units for `stratum mosaic`. GDAL uses every core per layer."
+  type        = number
+  default     = 4096
+}
+
+variable "mosaic_memory_mb" {
+  description = "Fargate memory for `stratum mosaic`. Must be a valid pairing with mosaic_cpu."
+  type        = number
+  default     = 16384
+}
+
+variable "mosaic_storage_gib" {
+  description = "Ephemeral storage: room for mosaic_workers layers' output while each is written, before it is uploaded."
+  type        = number
+  default     = 100
+}
+
+variable "mosaic_workers" {
+  description = "Layers built at once. Each already uses every core inside GDAL, so more mostly buys contention."
+  type        = number
+  default     = 2
+}

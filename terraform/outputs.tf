@@ -59,3 +59,9 @@ output "viewer_network" {
     port             = var.viewer_port
   } : null
 }
+
+# --- the mosaic task ----------------------------------------------------------------------------
+output "mosaic_task_definition" {
+  description = "Task definition for `stratum mosaic`. `make cloud-mosaic RUN=<run id>` runs it in the viewer's cluster and network."
+  value       = one(aws_ecs_task_definition.mosaic[*].arn)
+}

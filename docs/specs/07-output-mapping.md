@@ -230,4 +230,12 @@ None of this is Tetracorder-specific: the framework matches attributes it was to
    enumeration, so a viewer that styles single-band rasters can use it directly, and the RGBA
    rendering ships beside it.
 3. ~~Overviews/pyramids: build them in publish, or leave to the MMGIS tiling step?~~ **Resolved:**
-   leave them to the tiling step, which merges tiles anyway.
+   both, at two scales. Each per-tile COG carries its own internal overviews (`formats: [cog]`).
+   The merge a map server needs is a separate run-level step, `stratum mosaic`
+   (`stratum.publish.mosaic`): one COG per layer and period, reprojected to EPSG:3857 on the
+   GoogleMapsCompatible tile grid with 256-pixel blocks, so a slippy-map tile at any zoom is one
+   internal block of one file. It is written to `products/{run}/mosaic/{start}_{end}/{asset}.tif`
+   and recorded as a collection asset with the `overview` role beside the tile asset's own roles,
+   class counts summed over the tiles. Categorical bands and RGBA renderings resample nearest,
+   continuous bands average - the same rule as the per-tile overviews. The per-tile files remain
+   the deliverable; the mosaic is derived from them and can be rebuilt at any time.

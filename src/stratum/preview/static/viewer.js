@@ -12,8 +12,8 @@
 'use strict';
 
 const $ = (id) => document.getElementById(id);
-const state = { products: '', runs: [], run: null, items: [], layer: null, legend: null,
-                overlays: [], grid: null, ramps: {}, legends: {} };
+const state = { products: '', runs: [], run: null, items: [], mosaics: [], bbox: null,
+                layer: null, legend: null, overlays: [], grid: null, ramps: {}, legends: {} };
 
 /** The raster layer for one asset: an XYZ layer over the server's tile endpoint. The style
  *  travels in the query string, so the server holds no session.
@@ -101,10 +101,18 @@ async function loadRun(runId) {
     } catch { return null; }              // a half-published run is a gap, not a failure
   }))).filter(Boolean);
 
+  // The run's layer mosaics (`stratum mosaic`): collection assets with the `overview` role, one
+  // per layer and period. A layer that has one is drawn from it alone.
+  state.mosaics = Object.values(collection.assets || {})
+    .filter((a) => (a.roles || []).includes('overview'))
+    .map((a) => ({ ...a, href: `${runId}/${a.href.replace(/^\.\//, '')}` }));
+  state.bbox = collection.extent?.spatial?.bbox?.[0] ?? null;
+
   state.run = runId; state.items = items;
   const p = collection.extent?.temporal?.interval?.[0] ?? [];
   $('runmeta').textContent =
     `${items.length} tile${items.length === 1 ? '' : 's'}` +
+    (state.mosaics.length ? ' · mosaicked' : '') +
     (p[0] ? ` · ${p[0].slice(0, 10)} to ${(p[1] || '').slice(0, 10)}` : '');
 
   fillLayers(items);
@@ -228,7 +236,10 @@ function paintDrawing() {
     + 'a blank area here is no data, not a pending load</span>';
 }
 
-/** One overlay per item, because one raster per tile is how the products are written. */
+/** One overlay for a layer that has a mosaic; otherwise one per item, because one raster per
+ *  tile is how the products are written. The per-item fallback is what made a zoomed-out view
+ *  slow - every map tile asked every product tile under it - and is kept for runs no one has
+ *  mosaicked. */
 async function drawLayer() {
   for (const l of state.overlays) map.removeLayer(l);
   state.overlays = [];
@@ -258,12 +269,15 @@ async function drawLayer() {
   }
   $('ramprow').hidden = opts.kind !== 'continuous';
 
-  for (const item of state.items) {
-    const a = item.assets?.[key];
-    if (!a) continue;
-    const [w, s, e, n] = item.bbox;
-    const layer = watchTiles(rasterLayer(a.href, { ...opts,
-                                                   bounds: L.latLngBounds([s, w], [n, e]) }));
+  const mosaics = state.mosaics.filter((m) => m['stratum:asset'] === key);
+  const sources = mosaics.length
+    ? mosaics.map((m) => ({ href: m.href, bbox: state.bbox }))
+    : state.items.filter((i) => i.assets?.[key])
+      .map((i) => ({ href: i.assets[key].href, bbox: i.bbox }));
+  for (const src of sources) {
+    const bounds = src.bbox
+      ? L.latLngBounds([src.bbox[1], src.bbox[0]], [src.bbox[3], src.bbox[2]]) : undefined;
+    const layer = watchTiles(rasterLayer(src.href, { ...opts, bounds }));
     layer.addTo(map);
     state.overlays.push(layer);
   }

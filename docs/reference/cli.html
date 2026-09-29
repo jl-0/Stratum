@@ -52,6 +52,7 @@ on a laptop, on a cluster, and as the worker entrypoint.</p>
 <tr><td><a href="#approve"><code>stratum approve</code> / <code>reject</code></a></td><td>Release or cancel a run paused at the budget gate</td><td><span class="chip chip-open">not yet</span></td></tr>
 <tr><td><a href="#render"><code>stratum render</code></a></td><td>Re-render published data with a different mapper</td><td><span class="chip chip-open">not yet</span></td></tr>
 <tr><td><a href="#preview"><code>stratum preview</code></a></td><td>Serve a map of a published products tree, locally</td><td><span class="chip chip-locked">built</span></td></tr>
+<tr><td><a href="#mosaic"><code>stratum mosaic</code></a></td><td>Merge a published run into one web-mercator COG per layer, for serving</td><td><span class="chip chip-locked">built</span></td></tr>
 <tr><td><a href="#cache"><code>stratum cache</code></a></td><td>Explain and diff cache entries; collect the cache</td><td><span class="chip chip-locked">built</span> <code>explain</code>, <code>diff</code></td></tr>
 <tr><td><a href="#index"><code>stratum index</code></a></td><td>Build, query and verify the granule index</td><td><span class="chip chip-locked">built</span> <code>build</code>, <code>query</code></td></tr>
 <tr><td><a href="#plugins"><code>stratum plugins</code></a></td><td>List registered plugins and show what one declares</td><td><span class="chip chip-locked">built</span></td></tr>
@@ -272,7 +273,35 @@ asset's <code>classification:classes</code>.</p>
 
 <p>Rasters are rendered server-side, so it works over <code>gtiff</code> output as well as
 <code>cog</code>. Over a bucket, each raster is copied into a node-local mirror the first time a
-tile needs it &mdash; the first pan over a tile is slow and the rest are not.</p>
+tile needs it &mdash; the first pan over a tile is slow and the rest are not. A layer with a
+<a href="#mosaic">mosaic</a> is drawn from that one file instead, read by range and never
+mirrored.</p>
+
+<h2 id="mosaic">stratum mosaic</h2>
+
+<pre><code>stratum mosaic --run RUN_ID [--root PATH] [--layer NAME]... [--period START_END]... [--force] [--workers N]</code></pre>
+
+<p>Merges a published run's product tiles into one COG per layer and period, in EPSG:3857 on the
+<code>GoogleMapsCompatible</code> tile grid, and records each on the run's
+<code>collection.json</code>. Reads only the published STAC and rasters, so it needs no manifest and
+never changes the run. See <a href="../guide/viewing.html#mosaic">Viewing products</a>.</p>
+
+<div class="tw">
+<table>
+<thead><tr><th>Option</th><th>Does</th></tr></thead>
+<tbody>
+<tr><td><code>--run</code></td><td>A published run id under the products root. Required</td></tr>
+<tr><td><code>--root</code></td><td>A local storage root or products directory. An <code>s3://</code> root is accepted only inside the ECS task that <code>make cloud-mosaic</code> starts, which reads the tiles in place (<code>/vsis3/</code>); anywhere else it is refused with that command</td></tr>
+<tr><td><code>--layer</code></td><td>Only this asset; repeatable. Default every data and visual raster</td></tr>
+<tr><td><code>--period</code></td><td>Only this period directory, e.g. <code>20250101_20251231</code>; repeatable</td></tr>
+<tr><td><code>--force</code></td><td>Rebuild a mosaic that already exists</td></tr>
+<tr><td><code>--workers</code></td><td>Layers built at once. Default <code>2</code>; each also uses every core inside GDAL</td></tr>
+</tbody>
+</table>
+</div>
+
+<pre><code>stratum mosaic --root out --run us-west-2025-...           <span class="c"># a local run, every layer</span>
+make cloud-mosaic RUN=us-west-2025-... ARGS="--force"       <span class="c"># as a Fargate task</span></code></pre>
 
 <p>The same command runs as a Fargate task inside a VPC, reading the bucket with the task role and
 serving on its own private IP &mdash; <code>make viewer-up</code>. See

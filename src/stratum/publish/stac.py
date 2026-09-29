@@ -278,3 +278,26 @@ def write_stac_collection(products_dir: Path, items: Sequence[Path], *,
     path = products_dir / COLLECTION_NAME
     path.write_text(json.dumps(collection, indent=2, default=list) + "\n")
     return path
+
+
+def add_collection_assets(collection_path: Path, assets: Mapping[str, Mapping[str, Any]]) -> Path:
+    """Merge `assets` into an existing `collection.json` - run-level files such as the layer
+    mosaics (`stratum.publish.mosaic`), which belong to the run rather than to any one tile.
+
+    A key already present is replaced and every other asset is kept, so adding one layer's mosaic
+    never drops another's. The extensions the assets use are declared on the collection.
+    """
+    path = Path(collection_path)
+    doc = json.loads(path.read_text())
+    doc.setdefault("assets", {}).update({k: dict(v) for k, v in assets.items()})
+    used = set()
+    for asset in doc["assets"].values():
+        if "classification:classes" in asset:
+            used.add(EXT_CLASSIFICATION)
+        if "raster:bands" in asset:
+            used.add(EXT_RASTER)
+        if "proj:epsg" in asset:
+            used.add(EXT_PROJ)
+    doc["stac_extensions"] = sorted(set(doc.get("stac_extensions") or ()) | used)
+    path.write_text(json.dumps(doc, indent=2, default=list) + "\n")
+    return path

@@ -106,6 +106,54 @@ readable.</td></tr>
 that was looked at and found empty indistinguishable from one that was never looked at.</p>
 </div>
 
+<h2 id="mosaic">Making a big run fast to draw: layer mosaics</h2>
+
+<p>A run is published one file per product tile, which is the right shape for a deliverable and
+the wrong one for a map. Zoomed out over US West, every map tile overlaps all 402 product tiles, so
+the viewer opened and warped 402 files to draw one 256-pixel square. After a run, merge it:</p>
+
+<pre><code>make cloud-mosaic RUN=&lt;run id&gt;                     <span class="c"># a cloud run: a Fargate task</span>
+stratum mosaic --root out --run &lt;run id&gt;          <span class="c"># a local run, where it is</span></code></pre>
+
+<p>A run in the bucket is mosaicked <strong>only in AWS</strong>: <code>stratum mosaic</code> refuses
+an <code>s3://</code> root anywhere but inside the ECS task, because building elsewhere would stream
+every tile of the run out of the region and the mosaics back in. <code>make cloud-mosaic</code>
+starts the task from your laptop and waits for it.</p>
+
+<p>That writes <strong>one COG per layer</strong> to
+<code>products/{run}/mosaic/{start}_{end}/{asset}.tif</code> and records each on the run's
+<code>collection.json</code> as an asset with the <code>overview</code> role. Each is reprojected to
+web mercator on the <code>GoogleMapsCompatible</code> tile grid with 256-pixel blocks and internal
+overviews, so <strong>a map tile at any zoom is one block of one file</strong>. The viewer notices
+the collection assets and draws a mosaicked layer as a single overlay, read from the bucket by range
+rather than mirrored; a layer without one falls back to one overlay per product tile.</p>
+
+<div class="tw">
+<table>
+<thead><tr><th>What</th><th>How</th></tr></thead>
+<tbody>
+<tr><td>Resolution</td><td>The web-mercator zoom closest to the product's cells: z12 (38&nbsp;m
+mercator, about 30&nbsp;m on the ground in the western US) for one-arcsecond products. A mosaic is
+about the size of the tiles it merges.</td></tr>
+<tr><td>Resampling</td><td>Nearest for categorical bands and RGBA renderings, average for
+continuous ones &mdash; the same rule as each tile's own overviews. No class id is ever
+averaged.</td></tr>
+<tr><td>Bands with no nodata</td><td>(<code>n_epochs</code>, <code>n_observed</code>) gain an alpha
+band, so outside the run is transparent rather than zero.</td></tr>
+<tr><td>Re-running</td><td>A mosaic already in the tree is kept; <code>--force</code> rebuilds, and
+<code>--layer</code> / <code>--period</code> narrow it. Re-run it with <code>--force</code> after
+republishing a run: Finalize rewrites <code>collection.json</code> and drops the mosaic
+assets.</td></tr>
+<tr><td>Point readings</td><td>Unchanged: a click still reads the full-resolution per-tile
+files.</td></tr>
+</tbody>
+</table>
+</div>
+
+<p><strong>For MMGIS</strong>, the mosaic is the file to hand over: a Tile layer pointing at one
+mosaic with <em>Use TiTiler</em> checked serves it directly. How MMGIS reaches the bucket is not
+decided yet &mdash; the products prefix is not public.</p>
+
 <h2 id="deploying">Handing someone a URL</h2>
 
 <p>The same server, run as a Fargate task inside your VPC. It reads the bucket with the task role
@@ -218,7 +266,8 @@ signs the requests itself with the task role, and speaks plain HTTP only to your
 
 <h2 id="limits">What it is not</h2>
 
-<p>It is a way to look at products, not a way to serve them. There is no styling beyond the ramp
+<p>It is a way to look at products, not a way to serve them &mdash; the <a href="#mosaic">layer
+mosaics</a> are what to serve. There is no styling beyond the ramp
 picker, no per-pixel inspection, no time slider, and no way to compare two runs side by side — the
 run picker swaps one for the other. It reads the products tree and never writes to it, so nothing
 you do in the viewer can change a run.</p>

@@ -15,7 +15,7 @@ It serves four things:
 | `/api/range`              | one continuous layer's stretch, pooled over the run's tiles |
 | `/api/value`              | every named asset sampled at one point - what a click asks |
 | `/stac/<path>`            | any JSON in the products tree - collections, items, legends |
-| `/tiles/<path>/z/x/y.png` | one asset, one web-mercator tile |
+| `/tiles/<path>/z/x/y.png` | one asset, one web-mercator tile - a tile's raster, or a layer mosaic |
 
 **It binds to the loopback interface and is not hardened.** It reads a directory the person who
 started it can already read, and `Products.resolve` refuses a path that climbs out of the tree,
@@ -33,6 +33,8 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, unquote, urlparse
 
+import rasterio
+
 from stratum.preview import render
 from stratum.preview.catalog import CatalogError, Products
 
@@ -45,6 +47,8 @@ TILE_ROUTE = re.compile(r"^/tiles/(?P<asset>.+)/(?P<z>\d+)/(?P<x>\d+)/(?P<y>\d+)
 #: 64 x 128^2 is a million cells: plenty for two percentiles, and small enough to hold at once.
 MEASURE_TILES = 64
 MEASURE_SIZE = 128
+#: The same budget when the layer has a mosaic: one read, at about the same million cells.
+MEASURE_MOSAIC = 1024
 
 MEDIA = {".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8",
          ".css": "text/css; charset=utf-8", ".json": "application/json",
@@ -156,8 +160,15 @@ class PreviewHandler(BaseHTTPRequestHandler):
         key = (asset, z, x, y, self.path.partition("?")[2])
         cached = self.tiles.take(key)
         if cached is None:
-            cached = self.tiles.give(key, render.render_tile(
-                self.products.materialise(asset), z, x, y, self._style(asset, query)))
+            style = self._style(asset, query)
+            if self.products.is_mosaic(asset):
+                # A mosaic is read in place, by range: a map tile is one of its blocks, and
+                # mirroring the whole file first would be gigabytes for the first tile.
+                with rasterio.Env(**self.products.gdal_config()):
+                    png = render.render_tile(self.products.gdal_path(asset), z, x, y, style)
+            else:
+                png = render.render_tile(self.products.materialise(asset), z, x, y, style)
+            cached = self.tiles.give(key, png)
         self._send(cached, "image/png", cache="public, max-age=60")
 
     def _sample(self, rel: str, lon: float, lat: float) -> list[float] | None:
@@ -180,6 +191,13 @@ class PreviewHandler(BaseHTTPRequestHandler):
         cached = self.ranges.take(key)
         if cached is not None:
             return cached
+        # A mosaic already holds the whole layer, overviews and all, so one decimated read of it
+        # is the entire run at once - no sampling of tiles and nothing mirrored.
+        mosaics = [m["href"] for m in self.products.mosaics(run) if m.get("stratum:asset") == layer]
+        if mosaics:
+            with rasterio.Env(**self.products.gdal_config()):
+                return self.ranges.give(key, render.measure(
+                    *(self.products.gdal_path(h) for h in mosaics), size=MEASURE_MOSAIC))
         hrefs = [item["assets"][layer]["href"] for item in self.products.items(run)
                  if layer in item.get("assets", {})]
         if not hrefs:

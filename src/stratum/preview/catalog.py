@@ -23,6 +23,11 @@ from stratum.storage import Workspace
 #: Where published runs live under the storage root (06 section 4). A `--root` that already
 #: points at the products directory is accepted as-is; see `Products.open`.
 PRODUCTS_DIR = "products"
+#: A run's layer mosaics (`stratum.publish.mosaic`): `{run}/mosaic/{start}_{end}/{asset}.tif`,
+#: beside the `{tx}_{ty}` tile directories, so the name cannot collide with one. Each is recorded
+#: on the run's collection as an asset carrying `MOSAIC_ROLE` alongside the tile asset's roles.
+MOSAIC_DIR = "mosaic"
+MOSAIC_ROLE = "overview"
 
 
 class CatalogError(RuntimeError):
@@ -115,6 +120,21 @@ class Products:
             raise CatalogError(f"{rel!r} is not in the products tree")
         return target
 
+    def gdal_path(self, rel: str) -> str:
+        """`resolve`, as GDAL should open it WITHOUT mirroring it (`Workspace.gdal_path`): a
+        range read over a bucket, the file itself locally. For a layer mosaic, which is one file
+        of several gigabytes of which a map tile needs one block. Open it inside
+        `rasterio.Env(**self.gdal_config())`."""
+        return self.workspace.gdal_path(self.resolve(rel))
+
+    def gdal_config(self) -> dict[str, str]:
+        return self.workspace.gdal_config()
+
+    @staticmethod
+    def is_mosaic(rel: str) -> bool:
+        """`{run}/mosaic/...`: a run-level layer mosaic rather than one product tile's raster."""
+        return rel.split("/")[1:2] == [MOSAIC_DIR]
+
     def read_json(self, rel: str) -> Any:
         return json.loads(self.materialise(rel).read_text())
 
@@ -127,6 +147,17 @@ class Products:
             if link.get("rel") == "item":
                 link["href"] = f"{run_id}/{str(link['href']).lstrip('./')}"
         return doc
+
+    def mosaics(self, run_id: str) -> list[dict[str, Any]]:
+        """The run's layer mosaics: the collection assets carrying `MOSAIC_ROLE`, hrefs rewritten
+        relative to the products root.
+        Empty for a run no one has mosaicked, which is every run published before the step
+        existed."""
+        out = []
+        for asset in self.collection(run_id).get("assets", {}).values():
+            if MOSAIC_ROLE in (asset.get("roles") or ()):
+                out.append({**asset, "href": f"{run_id}/{str(asset['href']).lstrip('./')}"})
+        return out
 
     def item_paths(self, run_id: str) -> list[str]:
         return [link["href"] for link in self.collection(run_id).get("links", ())
@@ -157,4 +188,4 @@ class Products:
         return doc
 
 
-__all__ = ["PRODUCTS_DIR", "CatalogError", "Products"]
+__all__ = ["MOSAIC_DIR", "MOSAIC_ROLE", "PRODUCTS_DIR", "CatalogError", "Products"]

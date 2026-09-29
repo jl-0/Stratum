@@ -2,7 +2,7 @@
 # repository names an account, a profile, a bucket, or a site's IAM requirements.
 SHELL := /usr/bin/env bash
 .PHONY: help env-check bootstrap stratum-infrastructure infra infra-plan infra-output \
-        cloud-run image image-local destroy test lint viewer viewer-up viewer-url \
+        cloud-run cloud-mosaic image image-local destroy test lint viewer viewer-up viewer-url \
         viewer-down viewer-logs
 
 help:
@@ -12,6 +12,7 @@ help:
 	@echo "infra-plan              plan the same, without applying"
 	@echo "infra-output            show the outputs (storage root, function name, run command)"
 	@echo "cloud-run               run examples/emit-cmr-nevada in AWS (MANIFEST=... to pick another)"
+	@echo "cloud-mosaic            merge a published run into one COG per layer (RUN=<run id>)"
 	@echo "image                   build the worker image and push it; prints the digest to pin"
 	@echo "image-local             build it without pushing, for a local docker run"
 	@echo "viewer                  serve a map of a products tree (ROOT=... to pick one)"
@@ -53,6 +54,13 @@ cloud-run: env-check
 	./scripts/cloud-manifest.sh $(MANIFEST)
 	STRATUM_LAMBDA_FUNCTION=$$(./scripts/tf.sh output -raw function_name) \
 	  ./scripts/stratum.sh run -m $(MANIFEST:.yaml=.cloud.yaml) --executor aws $(ARGS)
+
+# After a cloud run: one web-mercator COG per layer, which is what the viewer and MMGIS read
+# (guide/viewing.html). A Fargate task; ARGS reaches `stratum mosaic`, e.g. ARGS="--force".
+RUN ?=
+cloud-mosaic: env-check
+	@test -n "$(RUN)" || { echo "usage: make cloud-mosaic RUN=<run id> [ARGS=...]" >&2; exit 64; }
+	./scripts/mosaic-task.sh $(RUN) $(ARGS)
 
 image:       env-check ; ./scripts/build-image.sh
 image-local: env-check ; ./scripts/build-image.sh --local

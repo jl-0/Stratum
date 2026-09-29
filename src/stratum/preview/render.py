@@ -1,8 +1,9 @@
 """Turning a published raster into a 256-pixel web-mercator tile.
 
-Only the local preview server uses this. A viewer deployed beside the products reads the COGs
-itself, by HTTP range, and never calls any of it - which is why nothing here may become the only
-place a rendering rule is written down. The rules are in the legend and the class table that
+Only the preview server uses this - over the per-tile products, or over a run's layer mosaics
+(`stratum.publish.mosaic`), which it reads in place by range. Nothing here may become the only
+place a rendering rule is written down: MMGIS, reading the same mosaics through TiTiler, never
+calls any of it. The rules are in the legend and the class table that
 publish already wrote (07 section 7); this module reads them, it does not invent them.
 
 Two things are deliberate:
@@ -136,7 +137,7 @@ def tile_bounds(z: int, x: int, y: int) -> tuple[float, float, float, float]:
     return west, north - span, west + span, north
 
 
-def measure(*paths: Path, band: int = 1, size: int = 512) -> tuple[float, float]:
+def measure(*paths: Path | str, band: int = 1, size: int = 512) -> tuple[float, float]:
     """The 2nd and 98th percentile of one or more rasters, pooled, from decimated reads.
 
     A stretch has to come from somewhere, and reading the whole band per tile is not it. The
@@ -191,7 +192,7 @@ def sample(path: Path, lon: float, lat: float) -> list[float] | None:
                             np.ma.getmaskarray(values).ravel(), strict=True)]
 
 
-def render_tile(path: Path, z: int, x: int, y: int, style: Style) -> bytes:
+def render_tile(path: Path | str, z: int, x: int, y: int, style: Style) -> bytes:
     """One raster, one tile, as PNG bytes. Transparent where the tile misses the raster.
 
     The warped VRT *is* the tile - its CRS, transform and shape are the tile's - so GDAL does the
@@ -200,7 +201,7 @@ def render_tile(path: Path, z: int, x: int, y: int, style: Style) -> bytes:
     comes back masked and becomes alpha 0.
     """
     import rasterio
-    from rasterio.enums import Resampling
+    from rasterio.enums import ColorInterp, Resampling
     from rasterio.transform import from_bounds
     from rasterio.vrt import WarpedVRT
 
@@ -215,10 +216,11 @@ def render_tile(path: Path, z: int, x: int, y: int, style: Style) -> bytes:
             "resampling": resampling,
         }
         # How "off the edge" becomes transparent. A raster that declares nodata says so itself;
-        # one that does not (an RGBA rendering) already carries its own alpha band.
+        # one that carries an alpha band (an RGBA rendering, or a mosaic of a band with no
+        # nodata, which GDAL gives one) is masked by it - and GDAL refuses to add a second.
         if src.nodata is not None:
             vrt_options |= {"src_nodata": src.nodata, "nodata": src.nodata}
-        elif src.count < 4:
+        elif ColorInterp.alpha not in src.colorinterp:
             vrt_options["add_alpha"] = True
         with WarpedVRT(src, **vrt_options) as vrt:                 # type: ignore[arg-type]
             if _disjoint(bounds, _source_bounds(src)):

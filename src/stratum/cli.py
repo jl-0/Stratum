@@ -1,8 +1,8 @@
 """The command surface. Reference: docs/reference/cli.html.
 
-Implemented in this slice: plan, run (local), exec, validate, status, report, index build /
-query, plugins list / show, cache explain / diff. approve, reject, render, cache stats / gc and
-index verify raise NotImplementedError naming their section; so does `-p/--patch`
+Implemented in this slice: plan, run (local), exec, validate, status, report, preview, mosaic,
+index build / query, plugins list / show, cache explain / diff. approve, reject, render, cache
+stats / gc and index verify raise NotImplementedError naming their section; so does `-p/--patch`
 (09 section 3) and any executor but local (08).
 
 Exit codes: 0 ok; 1 invalid or failed; 2 valid but over budget (plan, run).
@@ -288,6 +288,57 @@ def preview(root: str, port: int, host: str, open_browser: bool) -> None:
         click.echo("")
     finally:
         httpd.server_close()
+
+
+# ---------------------------------------------------------------------------------------- mosaic
+@main.command()
+@click.option("--root", default=".", type=click.Path(),
+              help="Storage root, or the products directory itself. May be an s3:// prefix.")
+@click.option("--run", "run_id", required=True, help="A published run id under the products root.")
+@click.option("--layer", "layers", multiple=True,
+              help="Only this asset (repeatable). Default: every data and visual raster.")
+@click.option("--period", "periods", multiple=True,
+              help="Only this period directory, e.g. 20250101_20251231 (repeatable).")
+@click.option("--force", is_flag=True, help="Rebuild mosaics that already exist.")
+@click.option("--workers", type=int, default=2, show_default=True,
+              help="Layers built at once; each also uses every core inside GDAL.")
+def mosaic(root: str, run_id: str, layers: tuple[str, ...], periods: tuple[str, ...],
+           force: bool, workers: int) -> None:
+    """Merge a published run's tiles into one web-mercator COG per layer.
+
+    Reads the run's STAC items, writes `products/{run}/mosaic/{period}/{asset}.tif` and records
+    each on the run's `collection.json`. The file a map server - the preview, or MMGIS through
+    TiTiler - reads one block of per map tile, at any zoom.
+    """
+    import logging
+    import os
+    import time
+
+    from stratum.preview.catalog import Products
+    from stratum.publish.mosaic import ECS_METADATA_ENV, run_mosaics
+
+    logging.basicConfig(level=logging.INFO, format="%(message)s")
+    products = Products.open(root)
+    if products.workspace.remote and not os.environ.get(ECS_METADATA_ENV):
+        # Streaming a run's tiles out of the bucket to a laptop and the mosaics back up is
+        # gigabytes each way per layer. The task does it inside the region.
+        raise click.ClickException(
+            f"{products.uri} is a bucket: build its mosaics in AWS, not here -\n\n"
+            f"  make cloud-mosaic RUN={run_id}\n\n"
+            f"`stratum mosaic` runs against a bucket only inside the ECS task.")
+    if run_id not in products.run_ids():
+        raise click.ClickException(f"no published run {run_id!r} under {products.uri}")
+    started = time.monotonic()
+    try:
+        results = run_mosaics(products, run_id, layers=layers or None, periods=periods or None,
+                              force=force, workers=workers)
+    except ValueError as e:
+        raise click.ClickException(str(e)) from None
+    for job, status in results:
+        click.echo(f"{status:8} {job.rel}  ({len(job.sources)} tile(s))")
+    built = sum(s == "built" for _, s in results)
+    click.echo(f"{built} built, {len(results) - built} already present, "
+               f"{time.monotonic() - started:.0f}s")
 
 
 @main.group()

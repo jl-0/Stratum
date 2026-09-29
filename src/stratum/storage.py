@@ -388,6 +388,30 @@ class ObjectStore:
         except ClientError as e:
             raise StorageError(f"PUT s3://{self.bucket}/{key}: {_s3_detail(e)}") from e
 
+    def gdal_config(self) -> dict[str, str]:
+        """GDAL config options that let `/vsis3/` read this bucket with boto3's credentials.
+
+        GDAL resolves AWS credentials itself, but not through every provider boto3 knows - an
+        SSO profile on a laptop is the one that matters here - so the frozen credentials are
+        handed over explicitly. Called per use rather than once, because a Fargate task role and
+        an SSO session both rotate, and a stale token reads as a 403 on every range request.
+        """
+        # The client's own credential chain, so GDAL signs as exactly what boto3 signs as.
+        creds = getattr(getattr(self.client, "_request_signer", None), "_credentials", None)
+        frozen = creds.get_frozen_credentials() if creds is not None else None
+        region = getattr(getattr(self.client, "meta", None), "region_name", None)
+        config = {"AWS_REGION": region or "us-east-1",
+                  # One HEAD per open instead of a LIST of the whole prefix.
+                  "GDAL_DISABLE_READDIR_ON_OPEN": "EMPTY_DIR"}
+        if frozen is not None:
+            config |= {"AWS_ACCESS_KEY_ID": frozen.access_key,
+                       "AWS_SECRET_ACCESS_KEY": frozen.secret_key}
+            if frozen.token:
+                config["AWS_SESSION_TOKEN"] = frozen.token
+        else:
+            config["AWS_NO_SIGN_REQUEST"] = "YES"
+        return config
+
 
 # ------------------------------------------------------------------------------- the workspace
 @dataclass(frozen=True)
@@ -444,6 +468,18 @@ class Workspace:
         if not self.remote:
             return str(Path(path))
         return f"s3://{self.store.bucket}/{self.key(path)}"  # type: ignore[union-attr]
+
+    def gdal_path(self, path: Path | str) -> str:
+        """A path inside this workspace as GDAL should open it WITHOUT mirroring it: `/vsis3/`
+        for a bucket, so a read of a few blocks is a few range requests rather than a download
+        of the whole object; the path itself when the root is local. Pair with `gdal_config`."""
+        if not self.remote:
+            return str(Path(path))
+        return f"/vsis3/{self.store.bucket}/{self.key(path)}"  # type: ignore[union-attr]
+
+    def gdal_config(self) -> dict[str, str]:
+        """What GDAL needs to open a `gdal_path`; empty for a local root."""
+        return self.store.gdal_config() if self.remote else {}  # type: ignore[union-attr]
 
     def local(self, url: str | Path) -> Path:
         """The inverse of `url`: where a durable name lives in this process."""

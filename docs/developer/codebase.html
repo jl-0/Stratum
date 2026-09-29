@@ -206,7 +206,7 @@ granule's raw class table: the lumping from raw keys to product ids.</td><td><a 
 <code>explain</code>/<code>diff</code>.</td><td><a class="src" data-sym="def key(self, artifact: str, grid_id: str, tile: TileRef" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/cache/__init__.py#L91">CacheRoot.key</a></td></tr>
 <tr><td><code>storage.py</code></td><td>The storage root, as one object: a local directory, or an
 <code>s3://</code> prefix with a node-local mirror. Everything above it is handed a real
-<code>pathlib.Path</code>, so no stage handles a URI.</td><td><a class="src" data-sym="class Workspace" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/storage.py#L394">Workspace</a></td></tr>
+<code>pathlib.Path</code>, so no stage handles a URI.</td><td><a class="src" data-sym="class Workspace" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/storage.py#L418">Workspace</a></td></tr>
 <tr><td><code>filters.py</code></td><td>The built-in <code>GranuleFilter</code> predicates and the
 <code>on_missing</code> policy machinery. Runs against the index at plan time, never against
 pixels.</td><td><a class="src" data-sym="def apply_filters" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/filters.py#L220">apply_filters</a></td></tr>
@@ -298,7 +298,7 @@ from Secrets Manager, run directory mirrored from the bucket, then the same
 web-mercator tile rendered from a published raster. Takes no part in a run and writes nothing
 &mdash; <code>catalog.py</code> is the only module that knows the products layout, and the same
 three files under <code>preview/static/</code> are what a deployed viewer
-serves.</td><td><a class="src" data-sym="class Products" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/preview/catalog.py#L33">Products</a></td></tr>
+serves.</td><td><a class="src" data-sym="class Products" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/preview/catalog.py#L38">Products</a></td></tr>
 <tr><td><code>cli.py</code></td><td>The click command tree. Every command body imports its
 dependencies locally, which is what keeps <code>stratum --help</code>
 fast.</td><td><a class="src" data-sym="def main() -> None" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/cli.py#L66">main</a></td></tr>

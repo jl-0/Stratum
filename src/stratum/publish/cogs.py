@@ -2,9 +2,10 @@
 
 The data product is what ships; the image is derived from it. Every file carries `run_id` and
 `manifest_hash` in its tags so an orphaned GeoTIFF still leads back to its run (10 section 3).
-Written with the GTiff driver rather than GDAL's COG driver, which would build the whole file in
-memory to reorder it; internal tiling is what makes a window read a range request. No overviews
-(07 section 7, resolution 3).
+`formats: [cog]` goes through GDAL's COG driver, with internal overviews; `formats: [gtiff]` is a
+plain stripped GeoTIFF with none (`write_geotiff`). Either way the file covers one product tile.
+The run-wide, web-mercator-aligned file a map server wants is a separate step over the published
+tree - `stratum.publish.mosaic` - because it is one file per layer rather than per tile.
 """
 from __future__ import annotations
 
@@ -87,7 +88,24 @@ def cog_block_size(shape: tuple[int, int]) -> int:
 def is_categorical(spec: BandSpec) -> bool:
     """A delivered band holding product ids: the reducer's categorical convention (first-slice
     plan section 4) - uint16 with nodata 65535. Counts are uint16 with no nodata."""
-    return spec.dtype == CATEGORICAL_DTYPE and spec.nodata == CATEGORICAL_NODATA
+    return is_categorical_dtype(spec.dtype, spec.nodata)
+
+
+def is_categorical_dtype(dtype: Any, nodata: Any) -> bool:
+    """`is_categorical` for a band known only by its dtype and nodata - a STAC `raster:bands`
+    entry, which is all a run-level step has to go on."""
+    try:
+        return str(dtype) == CATEGORICAL_DTYPE and float(nodata) == CATEGORICAL_NODATA
+    except (TypeError, ValueError):
+        return False
+
+
+def resampling_for(*, categorical: bool) -> str:
+    """GDAL's name for how a band is resampled when it is made coarser. Averaging class ids would
+    invent classes that do not exist, so a categorical band decimates; a continuous one averages,
+    which is what makes a zoomed-out view honest. RGBA renderings count as categorical: their
+    colours are class colours."""
+    return "NEAREST" if categorical else "AVERAGE"
 
 
 def _require_tags(tags: Mapping[str, Any]) -> None:
@@ -141,9 +159,7 @@ def write_geotiff(path: Path, data: np.ndarray, spec: BandSpec, *, transform: Af
         with tempfile.TemporaryDirectory(dir=path.parent) as tmp:
             staged = write_geotiff(Path(tmp) / path.name, data, spec, transform=transform,
                                    crs=crs, tags=tags, colormap=colormap, cog=False)
-            # Averaging class ids would invent classes that do not exist, so a categorical band
-            # decimates. A continuous one averages, which is what makes a zoomed-out view honest.
-            resampling = "NEAREST" if is_categorical(spec) else "AVERAGE"
+            resampling = resampling_for(categorical=is_categorical(spec))
             rio_copy(str(staged), str(path), driver="COG", COMPRESS="DEFLATE",
                      OVERVIEW_RESAMPLING=resampling, BLOCKSIZE=str(cog_block_size(
                          (int(data.shape[0]), int(data.shape[1])))))

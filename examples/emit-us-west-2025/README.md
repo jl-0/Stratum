@@ -280,6 +280,7 @@ GB-second in `us-west-2`:
 | S3 after cache eviction, products only | **$0.43 / month** |
 | CloudWatch Logs, 30-day retention | < $1 |
 | Preview viewer (Fargate, 1 vCPU / 2 GB) if left up | **$35 / month** — stop it between demos |
+| Layer mosaics (`make cloud-mosaic`, Fargate 4 vCPU / 16 GB, ~$0.19 / hour) | *estimate, not yet measured:* about 1.1× the products they merge, so ~25 GB and ~$0.55 / month |
 
 **One western pass: on the order of $70, inside the deployment's default $100 budget alarm** — but note that alarm has no subscriber unless `STRATUM_BUDGET_ALERT_EMAIL` is in `.env`.
 

@@ -105,8 +105,9 @@ observation count. Blocks attack the term that actually dominates.
 > results.
 
 This is enforced by a seam-equivalence test in CI, not by convention. It is what allows block size
-to be tuned per workload without touching the product contract — and, as noted, MMGIS tiling
-merges tiles anyway, so block size is purely a compute knob.
+to be tuned per workload without touching the product contract — and the map-serving mosaic
+(`stratum mosaic`, [07](07-output-mapping.md) open question 3) merges tiles anyway, so block size
+is purely a compute knob.
 
 ---
 
