@@ -57,13 +57,15 @@ inputs:
       collection: EMITL2BMIN
       var: group_1_mineral_id
       class_table: {source: embedded, path: /mineral_metadata, key: index,
-                    attributes: [name, record, library, group, url]}
+                    attributes: [name, record, library, group, url],
+                    identity: [collection_version, build_version]}
     depth_1: {collection: EMITL2BMIN, var: group_1_band_depth}
     mineral_2:
       collection: EMITL2BMIN
       var: group_2_mineral_id
       class_table: {source: embedded, path: /mineral_metadata, key: index,
-                    attributes: [name, record, library, group, url]}
+                    attributes: [name, record, library, group, url],
+                    identity: [collection_version, build_version]}
     depth_2: {collection: EMITL2BMIN, var: group_2_band_depth}
     pv:                           # fill wherever FRCOVQC flags cloud/urban/water/snow: the snow mask
       collection: EMITL2BFRCOV
@@ -98,7 +100,7 @@ scorer:
                                   # as manifest.yaml: bare = PV <= 0.40, greener looks graded
 
 snapshot:
-  name: us-west-2025-grouping-v1
+  name: us-west-2025-grouping-v2
   layers:
     mineral_1_native:
       kind: categorical
@@ -143,6 +145,14 @@ snapshot:
       source: geometry
       bands: [0, 2, 4, 9]            # path length, to-sensor zenith, to-sun zenith, UTC hour
       aggregate: {method: best}
+    acquired_1:                     # provenance: the winning look's time -> granules.json
+      kind: continuous
+      source: acquired
+      aggregate: {method: best, conditional_on: mineral_1_native}
+    acquired_2:
+      kind: continuous
+      source: acquired
+      aggregate: {method: best, conditional_on: mineral_2_native}
 
 outputs:
   bucket: ../emit-cmr-cuprite/out     # shares assets/ and cache/ with the Cuprite runs

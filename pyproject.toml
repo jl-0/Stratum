@@ -61,6 +61,7 @@ platforms = ["osx-arm64", "linux-64", "linux-aarch64"]
 python = "3.11.*"
 gdal = "*"
 netcdf4 = "<1.7.1"
+h5py = "*"
 rasterio = "*"
 rioxarray = "*"
 xarray = "*"

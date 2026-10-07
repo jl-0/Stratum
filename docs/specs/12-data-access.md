@@ -145,7 +145,7 @@ things it is worth being precise about, because "already on a map grid" is easy 
 - **It is a warp, not a crop.** [observed] 2026-09-15: FRCOV's cell is 0.000542232520256367°,
   the EMIT ortho lattice exactly — so FRCOV, OBS and MIN do share one lattice. But against a
   one-arcsecond run grid that is a ratio of 1.952, not an integer, so it resamples. "On the same
-  grid" in the tag-up notes means *EMIT's* grid, not ours.
+  grid" at the 28 Aug 2026 tag-up meant *EMIT's* grid, not ours.
 - **The reader hands back a location, not pixels.** `ortho_source(ctx, var) -> OrthoSource(uri,
   band, nodata, dtype)`; the framework does the geometry. A reader that warped for itself would
   be a reader that had to know what a tile is, which is the seam this spec exists to keep shut.
@@ -270,6 +270,8 @@ precisely the case the registry exists for, and precisely the case filename disp
 class AssetStore:
     def open(self, uri: str, *, etag: str | None = None,
              checksum: str | None = None) -> AssetHandle
+    def open_ranged(self, uri: str, *, etag: str | None = None,
+                    checksum: str | None = None) -> AssetHandle         # planner metadata reads
     def stage(self, uri: str, *, checksum: str | None = None) -> Path   # this worker, this file, now
     def credentials_for(self, uri: str) -> Credentials
     def cache_path(self, uri: str, checksum: str | None = None) -> Path
@@ -296,6 +298,25 @@ accepted and ignored: it is asset identity for cache keys, not something to re-d
 |---|---|---|
 | **Stage-in** | The worker copies that one asset to its own scratch and gets a path back | Default. Works with any code that takes a filename, including unmodified `SpectralUtil` |
 | **Stream** | `/vsis3/` or fsspec; reads become HTTP range requests | Once the asset is in a windowable layout. Stratum's COGs and uncompressed variables already are; the delivered L2B science bands are one gzip chunk each and are not (§2), which is what prepared assets are for |
+
+| **Ranged** | `open_ranged` → `RangedAsset`; a reader that accepts one (declares `range_prefetch`) opens `fileobj()` and reads only the byte ranges it touches | Planner metadata only: the class-table reads of §7. Never checksum-verified, so never a pixel |
+
+**Ranged, as built (2026-10-06).** `open_ranged` returns the ordinary handle for a local asset or
+one already in the cache, and otherwise a `RangedAsset` (`path()` is None — how a reader that
+cannot use one says so). Bytes are fetched in aligned 64 KiB blocks (`RANGE_BLOCK`) and kept on
+the handle; adjacent missing blocks go in one request; `warm(ranges)` fetches the head (which
+yields the size from `Content-Range`) and any `(offset, length)` ranges, negative offsets from the
+end. The first request goes through the trusted Earthdata session and follows the archive's
+redirect; every later one goes straight to the signed URL it ended at on an **anonymous**
+session, since a signed URL needs no credential and must not be sent one. A refused signed URL is
+re-resolved once; a server answering `200` to a Range request raises `RangeUnsupported` and the
+caller stages instead. The EMIT NetCDF readers open a `RangedAsset` with h5py (netCDF4 cannot
+read a file object) and serve `class_table` only; anything else on that context raises
+`NotImplementedError`. h5py links the same conda-forge libhdf5 as netCDF4, and
+`tests/test_readers.py` holds the two to the same fingerprint on a synthetic and a delivered
+granule. [observed] 2026-10-06: the delivered files are not paged-aggregated, so where the table
+lands varies — in the last ~75 KB on three US West granules, with object headers 1.4–4.4 MB from
+the end on the reference granule (5 requests, 568 KB of 54 MB).
 
 The sequencing is deliberate and already the plan in [03 §4](03-regrid-glt.md): **stage-in first**,
 because it works immediately against code that exists; **streaming second**, because that is where
@@ -334,17 +355,25 @@ later blocks   same worker        -> asset cache hit; no second fetch
 > before `stratum run` is invoked. A worker that never touches a granule never fetches it, and a
 > granule that no block reaches is never downloaded at all.
 
-The one exception is the planner's data-dependent checks (§7). Against a catalogue source the
-plan stages **one geometry asset** (the sample-asset check) and **every contributing granule's
-class-table asset** (the vintage check reads the embedded table, which lives only in the file). On a
-continental run that is the longest step of a plan by a wide margin — 1,932 granules at ~46 MB is
-~89 GB, on whatever machine runs `plan` — so it reports progress rather than blocking silently
-(`console.progress`, the same helper the executors use for stage fan-out).
-Those bytes land in the same node-local cache the workers use and are hits for the run, so the
-total download volume is unchanged; the first plan is simply where that share of it happens
-(measured on `examples/emit-cmr-nevada`: 1.55 GB at plan, 3.5 GB in regrid, 5.0 GB total for 33
-granules). Deferring the fingerprint check to the workers was rejected as the "fails in four
-thousand workers" anti-pattern.
+The one exception is the planner's data-dependent checks (§7), and it is kept small. Against a
+catalogue source the plan **stages** one geometry asset and one asset of each other role (the
+sample-asset and `variables()` checks), and **range-reads** the class tables the vintage check
+needs — over HTTP byte ranges, never staging the file (`AssetStore.open_ranged`, below). How many
+tables it reads is the manifest's choice: one per `class_table.identity` group, or one per
+contributing granule when no identity is declared ([02 §3](02-granule-index.md)).
+
+[observed] 2026-10-06. Staging every contributing granule's class-table asset — the earlier rule —
+cost 1,931 L2B files, **82 GB**, on the laptop that planned a US West 2025 run, and under
+`--executor aws` every one of them was downloaded again by a Lambda. A ranged read of the same
+table costs 2–7 requests and 0.4–0.6 MB of a 44–54 MB file; with `identity: [collection_version,
+build_version]` the Nevada example reads 2 tables for 33 granules (`examples/emit-cmr-nevada`).
+
+Moving part of the vintage check to the workers was once rejected as the "fails in four thousand
+workers" anti-pattern. What moved is narrower than that: every identity group is still read at
+plan time, so a reprocessing that changes the build — the case the check exists for — still fails
+the plan. A worker only ever catches a granule whose table differs from its own group's, which is
+an identity the manifest declared and the archive does not honour; it fails on the first item
+that reads such a granule (§7, "Worker confirmation").
 
 The line is **metadata versus pixels**, and the two have opposite economics:
 
@@ -580,8 +609,7 @@ both a `001` and a `002` collection. If L2B follows, the new vintage arrives as 
 beside the old one, `collection_version` distinguishes the rows, and a role pins one with
 `version:` ([02 §5](02-granule-index.md)). If granules are instead re-delivered in place, the
 fingerprint check catches it and `updated_since` reports it. Both paths are handled; neither is
-guessed. The window in which this matters is the reprocessing itself
-([notes](../notes/2026-08-28-mines-tagup.md)).
+guessed. The window in which this matters is the reprocessing itself.
 
 ### Paging, and how reprocessing gets noticed
 
@@ -719,23 +747,41 @@ The rule is the same one the aux accessor follows: a typo fails in the planner, 
 thousand workers ([05 §5](05-ancillary-data.md)).
 
 As built (`stratum/plan/run.py`, `inspect_granules`): the first three checks and the sensor-space
-one run against every contributing granule's header — `variables()` and the embedded class table,
-never a pixel; `band:` is validated against the band count and `match:` resolved to an index.
-Every plan-time open goes through the `AssetStore` with the asset's catalogue checksum, so
-against a catalogue source the planner **downloads** what it inspects: one geometry asset for
-the sample-asset check and every contributing granule's class-table asset for the vintage check,
-staged into the node-local asset cache and hits for the run (§4). The class-table assets are
-staged together through `AssetStore.prefetch` (eight threads, one login) rather than one serial
-download per granule, and the count is bounded by `budget.max_granules`: the budget gate runs
-**before** these checks, so a plan that is going to be refused downloads nothing
-([09 §4](09-run-manifest.md)). A metadata-only read of the embedded table (a range-request
-HDF5 reader, or a fingerprint recorded in the index at build time) would remove the download
-altogether and is not built. That first https open is where
+one run against real granule headers — `variables()` on one sample per role, and the embedded
+class table on one granule per `class_table.identity` group — never a pixel; `band:` is validated
+against the band count and `match:` resolved to an index. Every plan-time open goes through the
+`AssetStore` with the asset's catalogue checksum. The sample-asset and `variables()` checks
+**stage** what they open into the node-local asset cache (§4). The class-table reads do not:
+`_class_table_handles` asks the store for `open_ranged`, warms each `RangedAsset` with the ranges
+the reader declares in `range_prefetch`, in a thread pool of `PLAN_FETCH_WORKERS` (eight, one
+login), and the tables are then parsed **serially**, because netCDF4 and h5py share a libhdf5
+that is not built thread-safe. A reader that declares no `range_prefetch`, a server that ignores
+`Range`, or an asset already in the cache falls back to the staged open. The count of reads is
+bounded by `budget.max_granules`, and the budget gate runs **before** these checks, so a plan
+that is going to be refused reads nothing ([09 §4](09-run-manifest.md)).
+
+**Grouping.** `identity_groups` keys each granule on its values of `class_table.identity` — a
+`GranuleRef` column (`collection`, `collection_version`, `build_version`, `product_version`,
+`day_night`) or a catalogue attribute. A granule missing any value is its own group, so an
+unknown identity is never assumed to match; a name that is neither a column nor an attribute of
+any contributing granule fails the plan as a typo. The first granule of each group, in granule-id
+order, is read; its fingerprint is assigned to the group. `plan.json` records the groups under
+`class_table_sampling` and the report lists them, with the granule each table was read from.
+
+**Worker confirmation.** `PlanContext.table_probes` carries each categorical role's table location
+(`ClassTableProbe`). Before resolve reads a granule's pixels for such a role,
+`confirm_class_table` reads that granule's own table — from the staged, checksum-verified file the
+worker has open anyway — and raises `ClassTableMismatch` unless its fingerprint is the one the
+granule's remap was resolved from. A ranged read is never checksum-verified (a range is not the
+file), so this is also what keeps an unverified read from ever deciding a pixel. Confirmation runs
+whether or not an identity was declared, once per (granule, role, expected fingerprint) per process.
+
+That first https open is where
 a missing or bad Earthdata credential fails — `EarthdataLoginError` or `AssetFetchError` in the
 plan, not in a worker — which is the credential check in practice; `credentials_for` exists and
-is not yet called by the planner (question 10). The report gains an "Assets staged at plan time"
-section and `plan.json` a `staging: {asset_cache, assets, bytes, uris}` block. `s3://` is
-refused as a later slice. One more check belongs here and exists: a granule lacking an asset for **any role that will be read**
+is not yet called by the planner (question 10). The report gains a "Remote reads at plan time"
+section, and `plan.json` a `staging: {asset_cache, assets, bytes, uris, ranged: {assets,
+requests, bytes, file_bytes}}` block. `s3://` is refused as a later slice. One more check belongs here and exists: a granule lacking an asset for **any role that will be read**
 — the schema's sources, the scorer's and every mask's `required_roles` through their aliases, and
 the geolocation role — is dropped by the planner and counted as a filter row ("provides an asset
 for every role read …"), so the report and provenance say so. Resolve raises on such a granule,
@@ -800,3 +846,12 @@ granules when the scorer needs OBS geometry.
     be staged. A glob matching two files of one record is refused at index time.
 12. Direct S3 (`prefer: direct`, `s3://` in the store) is refused. It needs the in-region check,
     the `s3credentials` exchange and the one-hour refresh; nothing local waits on it.
+13. The sample-asset and `variables()` checks still **stage** one asset per role — on Nevada one
+    OBS and one MIN file, 152 MB, whatever the run's size. `variables()` reads headers only, so a
+    ranged open could serve it too; the EMIT reader's ranged context would need `variables()`
+    over h5py, held to the same answers as the netCDF4 path.
+14. Ranged reads are warmed in parallel but parsed serially, and a table whose object headers
+    the reader's `range_prefetch` misses costs extra serial round trips (3 on the reference
+    granule). Trivial for an identity-sampled plan; for a plan with no `identity` over thousands
+    of granules it is minutes. Wider prefetch costs MB per granule; recording each delivery's
+    layout is the other option.

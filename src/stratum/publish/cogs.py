@@ -87,7 +87,7 @@ def cog_block_size(shape: tuple[int, int]) -> int:
 
 def is_categorical(spec: BandSpec) -> bool:
     """A delivered band holding product ids: the reducer's categorical convention (first-slice
-    plan section 4) - uint16 with nodata 65535. Counts are uint16 with no nodata."""
+    11 section 2) - uint16 with nodata 65535. Counts are uint16 with no nodata."""
     return is_categorical_dtype(spec.dtype, spec.nodata)
 
 

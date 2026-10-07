@@ -4,7 +4,7 @@ Every kernel here is vectorized over (H, W). The only Python loops are over the 
 over the class ids present in a block. Every aggregation masks on `valid` before it looks at a
 value; that is a framework guarantee, not a plugin responsibility.
 
-Conventions on the way out (first-slice plan section 4; 11 section 2): categorical bands are
+Conventions on the way out (11 section 2): categorical bands are
 uint16 with nodata 65535 and 0 the real `none` class; continuous bands float32 with NaN nodata;
 counts uint16 with no nodata. Over a single epoch every aggregation is the identity.
 """
@@ -283,11 +283,12 @@ def continuous(layer: LayerSpec, vals: np.ndarray, sel: np.ndarray, score: np.nd
     Cells with nothing to aggregate deliver NaN and a count of 0.
     """
     squeeze = vals.ndim == 3
-    x = vals.astype(np.float32, copy=False)
+    ft = np.float64 if layer.dtype == "float64" else np.float32   # `acquired`: keep the second
+    x = vals.astype(ft, copy=False)
     if squeeze:
         x = x[..., None]
     sel4 = sel[..., None]
-    xm = np.where(sel4, x, np.nan).astype(np.float32)
+    xm = np.where(sel4, x, np.nan).astype(ft)
     n_sel = sel.sum(axis=0)
     method = params.method
 
@@ -326,12 +327,12 @@ def continuous(layer: LayerSpec, vals: np.ndarray, sel: np.ndarray, score: np.nd
             usable = sel & ~np.isnan(score)
             idx = np.where(usable, score, -np.inf).argmax(axis=0)
             idx4 = np.broadcast_to(idx[None, ..., None], (1,) + x.shape[1:])
-            est = np.take_along_axis(x, idx4, axis=0)[0].astype(np.float32)
+            est = np.take_along_axis(x, idx4, axis=0)[0].astype(ft)
             est = np.where(usable.any(axis=0)[..., None], est, np.nan)
         else:  # pragma: no cover - parse_schema refuses anything else
             raise SchemaError(f"unknown continuous method {method!r}")
 
-        est = est.astype(np.float32)
+        est = est.astype(ft)
         est[n_sel == 0] = np.nan
 
         out: dict[str, np.ndarray] = {}
@@ -342,7 +343,7 @@ def continuous(layer: LayerSpec, vals: np.ndarray, sel: np.ndarray, score: np.nd
                 spread = np.nanstd(xm, axis=0)
             else:
                 spread = np.nanpercentile(xm, 75, axis=0) - np.nanpercentile(xm, 25, axis=0)
-            spread = spread.astype(np.float32)
+            spread = spread.astype(ft)
             spread[n_sel == 0] = np.nan
             out[f"{layer.name}_spread"] = spread[..., 0] if squeeze else spread
     return out

@@ -95,8 +95,7 @@ incompatible products into a result that looks entirely plausible.
 The check is on the **class table**, not the build number: plan-time validation fails if the
 frozen index's granules carry class tables that disagree by fingerprint, unless the manifest
 explicitly opts in. `build_version` is filterable and reported, but one collection already spans
-eight builds, so pinning one is not the guard. See [02 §3](02-granule-index.md) and
-[the tag-up notes](../notes/2026-08-28-mines-tagup.md#1-time-critical-the-reprocessing-window).
+eight builds, so pinning one is not the guard. See [02 §3](02-granule-index.md).
 
 ---
 
@@ -141,8 +140,7 @@ notice it changing.
 
 ### Built-in EMIT masks
 
-Instrument knowledge belongs in `stratum_emit`, not in user config. Per the science lead at the Mines tag-up
-([notes](../notes/2026-08-28-mines-tagup.md#2-concrete-instrument-artifacts-to-mask)):
+Instrument knowledge belongs in `stratum_emit`, not in user config. Per the science lead at the Mines tag-up:
 
 The `ref:` column is what a manifest writes; the class is where the code lives. They are
 connected by an entry point in the plugin's `pyproject.toml`, and `stratum plugins list` prints
@@ -238,7 +236,12 @@ questions worth answering with a real workload in hand rather than in the abstra
 - Several of the motivating bands are **framework-knowable, not scorer-derived** — `source_granule`,
   `acquired` and `runner_up_score` are all things the selection loop already computes. Those may
   belong as built-ins rather than as plugin output, which would leave `emit()` with a much narrower
-  job.
+  job. **Settled for the first two (2026-10-07): `acquired` is a framework-provided layer source,
+  and it covers `source_granule` too** — to the second it names the granule, and `granules.json`
+  maps it back ([13 §2](13-snapshot-schema.md), [10 §3](10-provenance.md)). The 1 Oct 2026 tag-up
+  was the workload this list was waiting for: the science lead's condition for "walk before run"
+  on the viewer was that the provenance be tracked through the process now. `runner_up_score`
+  remains open.
 - Whether a `stack`-capability scorer may emit a band that is a property of the whole stack rather
   than of one observation — a within-epoch median, say — blurs the scorer/reducer split and is
   unresolved.
@@ -568,8 +571,7 @@ less defensive one: a single well-scoring epoch takes the cell with no corrobora
 At the Mines tag-up the science lead framed the whole problem as a Kalman filter — *"coming up with the
 appropriate loss function that one applies… to get the right solution out"* — and named the goal
 as *"a version of the world where we're not destroying all of that information,"* noting that
-Tetracorder's binarized output has already discarded some of it
-([notes](../notes/2026-08-28-mines-tagup.md#5-framing-worth-adopting)).
+Tetracorder's binarized output has already discarded some of it.
 
 That gives a direction on the open question of whether to take the mode over mineral IDs directly
 or over something continuous first: **prefer reducing the continuous quantities — band depth, fit,

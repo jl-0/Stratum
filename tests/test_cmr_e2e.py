@@ -144,9 +144,10 @@ def test_plan_built_the_index_from_cmr_scoped_to_the_manifest(cmr_e2e) -> None:
     assert result.counts["granules_queried"] == 3 and result.counts["granules"] == 2
     filters = {f["describe"]: f["removed"] for f in result.document["filters"]}
     assert filters["cloud_fraction <= 0.5 (on_missing: fail)"] == 1      # ONE granule (B), not its 2 rows
-    assert result.document["staging"] == {"asset_cache": str(root / "out" / "assets"),
-                                          "assets": 0, "bytes": 0, "uris": []}
-    assert "Assets staged at plan time" not in result.report
+    assert result.document["staging"] == {
+        "asset_cache": str(root / "out" / "assets"), "assets": 0, "bytes": 0, "uris": [],
+        "ranged": {"assets": 0, "requests": 0, "bytes": 0, "file_bytes": 0}}
+    assert "Remote reads at plan time" not in result.report
 
 
 def test_products_and_provenance_carry_the_asset_identity(cmr_e2e) -> None:

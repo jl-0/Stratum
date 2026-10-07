@@ -97,6 +97,21 @@ individual GLT, snapshot or product block can be explained without the run recor
 products additionally embed `run_id` and `manifest_hash` in their metadata, so an orphaned GeoTIFF
 still leads back to its run.
 
+**Per-cell provenance** is a layer, not metadata. A layer with `source: acquired`
+([13 §2](13-snapshot-schema.md)) delivers the winning look's start time. Each published
+(tile, period) then writes `granules.json`, listing every `acquired` value present in that tile
+with the granule id it names:
+
+```json
+{"layers": ["acquired_1", "acquired_2"], "units": "s since 1970-01-01 UTC",
+ "granules": [{"acquired": 1738180165.0, "datetime": "2025-01-29T19:49:25Z",
+               "granule_ids": ["20250129T194925_2502913_007"]}, ...]}
+```
+
+`granule_ids` is a list because the format permits several. One entry per value is the EMIT
+case, observed on every row of the US West proof tile. Cell → `acquired` → granule id → that
+granule's own GLT → the source pixel: the spectrum is reachable without the frozen index.
+
 ---
 
 ## 4. STAC
@@ -111,8 +126,10 @@ legend.
 | `raster` | Per-band data type, nodata, units |
 | `proj` | Grid, transform, shape |
 
-Also non-standard but necessary: links back to the frozen index and the provenance record, and the
-fingerprint of every input class table the run resolved against.
+Also non-standard but necessary: links back to the frozen index and the provenance record, the
+fingerprint of every input class table the run resolved against, and a `granules` asset
+(`granules.json`, §3) when the schema delivers an `acquired` layer. That band's `raster:bands`
+entry is `float64` with unit `s since 1970-01-01 UTC`.
 
 The class table appearing in the STAC item is what closes the loop on AMD's problem — the meaning
 of a colour travels with the product instead of living in a config on a cluster account.

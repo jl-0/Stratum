@@ -65,8 +65,7 @@ Every handler recomputes the content-addressed keys of its inputs exactly as the
 did, so a missing input is a clear error and a present one is a hit whoever wrote it; a re-run of
 a finished run reports every regrid, resolve and reduce item as a hit and rewrites publish, which
 is run-prefixed and never a hit. A spawn pool costs about 2.5 s per stage even when every item is
-a hit, so a fully cached local re-run is ~11 s on the trial tile
-([notes/heritage.md](../notes/heritage.md), "First measurements").
+a hit, so a fully cached local re-run is ~11 s on the trial tile.
 
 ### SLURM
 
@@ -118,6 +117,31 @@ JSONL an `ItemReader` consumes, so §3 remains additive rather than superseded.
 
 The orchestrator holds **no state**: every result is in the bucket before the invocation returns.
 Losing the laptop loses the dispatch, never the work.
+
+### Preflight: the executor's half of validation (2026-10-07)
+
+A plan proves the manifest and the data ([09 §5](09-run-manifest.md), [12 §7](12-data-access.md))
+and is deliberately executor-agnostic, because one plan runs on several executors. Whether *this*
+executor can run it is a separate question, answered after the plan and before the first item is
+dispatched (`stratum/executors/preflight.py`). `stratum run` refuses on any `fail`;
+`stratum plan --executor <name>` prints the same checks and exits 2. They are not written to
+`plan.json`: they describe a machine or a deployment at one moment, not the run.
+
+| Executor | Check | Fails when |
+|---|---|---|
+| `local` | storage root's volume | the estimated bytes written plus the eviction reserve exceed free space — a local root is the record and is never evicted. A bucket root's mirror is only reported: it is evicted |
+| `local` | asset cache's volume | never; it warns when the downloads exceed free space, since LRU eviction then re-downloads |
+| `local` | wall time | never; reports the estimate at the pool width |
+| `aws` | credentials | `sts:GetCallerIdentity` fails — an expired session token is the common case, and it used to surface as the first upload failing after a full plan |
+| `aws` | worker function | `$STRATUM_LAMBDA_FUNCTION` is unset or `GetFunctionConfiguration` fails |
+| `aws` | timeout | the longest estimated item × Lambda's slowdown exceeds the function's timeout; warns at ×2 |
+| `aws` | concurrency | never; warns when `--workers` exceeds reserved concurrency |
+| `aws` | cost | never; the estimate re-priced at the function's real memory, and wall time at the real width |
+
+What preflight cannot see: **which image the function runs.** It reports the function's
+`LastModified`, but nothing records which stratum version an image digest carries, so a worker
+older than the planner — one that predates a field the plan relies on, such as `table_probes` —
+is not detected (question 8).
 
 ---
 
@@ -171,6 +195,41 @@ measured per-stage constants refined from prior runs.
 The plan itself is routed the same way, by the tile and epoch counts the manifest implies before a
 single block is enumerated. It writes per-tile work lists as it goes, so a run near the threshold
 checkpoints rather than fails, and a local run is unaffected either way.
+
+
+### The run estimate (2026-10-07)
+
+Every plan carries a rough order of magnitude (`stratum/plan/estimate.py`, `plan.json`
+`estimate`, the report's *Estimate* section): CPU time per stage, the longest item per stage,
+the Lambda bill at the deployment's default memory, unique download bytes, and the bytes the run
+will write. It is computed from the finished work lists, because each item's cost depends on
+what it touches:
+
+| Stage | Model, seconds on the calibration core | Fitted r |
+|---|---|---|
+| regrid | 6.56 + 23.44 × (tile cells the granule's bbox covers ÷ 12.96 M) | 0.78 |
+| resolve | 0.074 + 0.080 × candidates × (block cells × bytes per cell ÷ 5.18 M) | 0.92 |
+| reduce | 8.65 × (block cells × bytes per cell ÷ 5.18 M) | flat in epochs (−0.17) |
+| publish | 3.87 × (tile cells × bytes per cell ÷ 129.6 M) | one item |
+
+Bytes per cell is each snapshot layer's dtype size × its band count. Each resolve item records
+its candidate count (`candidates`, for the estimate only; a worker ignores it). The constants are
+fitted to one cold run with every item recorded — `examples/emit-cmr-nevada`, run
+`nevada-regrid-cost-probe-20260917-d095b352`, 33 granules, one 1° tile at 1″, `block_size: 720`,
+three layers at 10 bytes a cell, Apple M-series — and the report names it. Lambda is priced at
+2.25× the calibration core's time (the measured 2–2.5×), arm64 GB-seconds and requests; the
+footprint uses the same run's cache measured by kind, plus 23 MB per ortho role per regrid item.
+
+The range is ×0.5 to ×2. [observed] Out of sample, on the US West 2025 plan (8 layers, 34 bytes a
+cell, an ortho role and aux rasters the calibration run lacked): **126 CPU-hours, $55 on Lambda**
+against the README's independent hand estimate of 91–234 CPU-hours and $35–112. The total
+agrees; the split does not — resolve comes out at 8.5 h against 19–127 h, because nothing prices
+the ortho warp or aux reads, and reduce at 81 h against 24–59 h, because bytes per cell
+over-counts an eight-layer schema. The two errors partly cancel (§7, question 7).
+
+`budget.max_vcpu_hours` is checked against the central estimate after the work lists exist — a
+second gate, since the first runs before any granule is opened ([09 §4](09-run-manifest.md)). An
+over-budget plan is still written, work lists and all, and `run_all` refuses it.
 
 ---
 
@@ -290,11 +349,17 @@ versus experimentation, or a different region — never for an experiment.
    goes (§2).
 4. ~~Is `ToleratedFailurePercentage` acceptable for a delivered product, or must delivery runs be
    all-or-nothing?~~ **Resolved:** tolerate in experiments; delivery runs are all-or-nothing.
-5. The router in §2 needs per-stage constants, and the budget's `max_vcpu_hours` is reported as
-   "not estimated" until they exist. The first measurements are in
-   [notes/heritage.md](../notes/heritage.md): regrid scales with a granule's coverage of the tile
-   (3–19 s per granule single-threaded), resolve and reduce are ~0.5 s per 720 × 720 block with up
-   to 14 candidates, publish ~1.6 s per tile. Turning those into an estimate is the next step.
+5. ~~The router in §2 needs per-stage constants, and the budget's `max_vcpu_hours` is reported
+   as "not estimated" until they exist.~~ **Estimate built 2026-10-07; the router is not.** §2, *The run estimate*,
+   has the model. The router can now be written against `longest_item_seconds`, and is not
+   needed until an item approaches Lambda's ceilings.
 6. The local executor's regrid items run the KD-tree query single-threaded inside a pool that
    already fills the node. A SLURM task should set `n_workers` from `$SLURM_CPUS_PER_TASK`
    ([03 §3](03-regrid-glt.md)); the local pool may want fewer, fatter regrid workers.
+7. The estimate prices cells and bytes, not the work a role or plugin adds: an ortho warp, aux
+   reads, masks. On US West that under-states resolve ~2–15× and over-states reduce ~1.5×. A term
+   per ortho role and per aux source, fitted to a run that has them, and calibration from each
+   finished run's outcome records (they carry seconds per item) would tighten it.
+8. Nothing records which stratum version a deployed image carries, so preflight cannot tell a
+   worker older than the planner from a current one. A version label on the image, read back
+   through `GetFunctionConfiguration`, would make it a check.

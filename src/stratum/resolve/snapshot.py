@@ -1,4 +1,4 @@
-"""Snapshot IO (13, 11 section 8; first-slice plan section 4).
+"""Snapshot IO (13, 11 section 8).
 
 A snapshot is a DIRECTORY of single-band GeoTIFFs - `{layer}.tif` per schema layer plus the three
 the framework always adds, `score.tif`, `valid.tif` and `observed.tif` - because layers have
@@ -34,8 +34,11 @@ RESERVED = (SCORE_NAME, VALID_NAME, OBSERVED_NAME)
 
 
 def layer_dtype(layer: LayerSpec) -> np.dtype:
-    """What a layer is stored as: categorical uint16, continuous float32 (plan section 4)."""
-    return np.dtype(CATEGORICAL_DTYPE if layer.kind == "categorical" else CONTINUOUS_DTYPE)
+    """What a layer is stored as: categorical uint16, continuous float32 (11 section 2) -
+    except a float64 layer (the `acquired` source), which float32 would round by minutes."""
+    if layer.kind == "categorical":
+        return np.dtype(CATEGORICAL_DTYPE)
+    return np.dtype("float64" if layer.dtype == "float64" else CONTINUOUS_DTYPE)
 
 
 def layer_nodata(layer: LayerSpec) -> float | int:

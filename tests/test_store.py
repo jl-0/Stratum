@@ -23,6 +23,8 @@ from stratum.access.store import (
     CachedAsset,
     ChecksumMismatch,
     LocalAsset,
+    RangedAsset,
+    RangeUnsupported,
     UntrustedScheme,
     asset_cache_path,
     cache_budget,
@@ -635,3 +637,95 @@ def test_staging_evicts_to_make_room_and_a_hit_refreshes_access(tmp_path, monkey
     os.utime(handle.local, (before - 500, before - 500))
     store.open("https://example.test/new.nc")
     assert handle.local.stat().st_atime > before - 500
+
+
+# ----------------------------------------------------------------------------- range reads
+SIGNED = "https://d1nklfio7vscoe.cloudfront.net/s3-abc/X_001_gran.nc?Signature=sig"
+
+
+class RangeResponse(FakeResponse):
+    def __init__(self, status: int, body: bytes, headers: dict, url: str) -> None:
+        super().__init__(status, body, headers)
+        self.url = url
+
+
+class RangeSession:
+    """Serves `body` to Range requests: 206 with Content-Range. A request to URL (the trusted
+    archive) is 'redirected' to SIGNED, as Earthdata's is, and reports SIGNED as `resp.url`.
+    `ignore_range` answers 200 with the whole body, as a server without range support would."""
+
+    def __init__(self, body: bytes, auth_obj=None, *, ignore_range: bool = False,
+                 redirect: bool = True) -> None:
+        self.body, self.ignore_range, self.redirect = body, ignore_range, redirect
+        self.headers = {"Authorization": SECRET} if auth_obj is not None else {}
+        self.calls: list[dict] = []
+
+    def get(self, url: str, *, stream: bool, timeout, headers=None) -> RangeResponse:
+        self.calls.append({"url": url, "range": (headers or {}).get("Range"),
+                           "auth": "Authorization" in self.headers})
+        final = SIGNED if (url == URL and self.redirect) else url
+        if self.ignore_range or not headers:
+            return RangeResponse(200, self.body, {}, final)
+        lo, hi = (int(v) for v in headers["Range"].removeprefix("bytes=").split("-"))
+        part = self.body[lo:hi + 1]
+        return RangeResponse(206, part, {"Content-Range":
+                                         f"bytes {lo}-{lo + len(part) - 1}/{len(self.body)}"},
+                             final)
+
+
+def _ranged_store(cache, body: bytes = BODY, **kw) -> tuple[AssetStore, list[RangeSession]]:
+    sessions: list[RangeSession] = []
+
+    def factory(auth_obj):
+        sessions.append(RangeSession(body, auth_obj, **kw))
+        return sessions[-1]
+
+    return AssetStore(cache, auth=lambda: {"login": 1}, session_factory=factory,
+                      backoff=0.0), sessions
+
+
+def test_ranged_read_fetches_only_what_it_touches(tmp_path):
+    """12 section 4: the head, the prefetched tail and the one block read - not the file - and
+    nothing is written to the asset cache."""
+    store, _ = _ranged_store(tmp_path / "assets")
+    asset = store.open_ranged(URL, checksum=f"sha512:{SHA}")
+    assert isinstance(asset, RangedAsset) and asset.path() is None
+    asset.warm([(-1000, 1000)])
+    assert asset.size == len(BODY) and asset.requests == 2
+    f = asset.fileobj()
+    assert f.read(10) == BODY[:10]                         # the head: already fetched
+    f.seek(-4, os.SEEK_END)
+    assert f.read() == b"tail"                             # the tail: already fetched
+    f.seek(200_000)
+    assert f.read(5000) == BODY[200_000:205_000]           # one more block, one more request
+    assert asset.requests == 3 and asset.bytes < len(BODY) // 2
+    assert not (tmp_path / "assets").exists() or not any((tmp_path / "assets").rglob("*.nc"))
+
+
+def test_ranged_read_resolves_the_redirect_once_and_sends_it_no_credential(tmp_path):
+    """The first request goes through the Earthdata session; every later one goes straight to
+    the signed URL it was redirected to, on an anonymous session (12 section 4, 08 section 5)."""
+    store, sessions = _ranged_store(tmp_path)
+    asset = store.open_ranged(URL).warm([(-1000, 1000), (100_000, 10)])
+    calls = [c for s in sessions for c in s.calls]
+    assert [c["url"] for c in calls] == [URL, SIGNED, SIGNED]
+    assert calls[0]["auth"] and not any(c["auth"] for c in calls[1:])
+    assert asset.read(0, 4) == BODY[:4]
+
+
+def test_ranged_read_refused_by_the_server_raises_range_unsupported(tmp_path):
+    store, _ = _ranged_store(tmp_path, ignore_range=True)
+    with pytest.raises(RangeUnsupported, match="ignored the Range header"):
+        store.open_ranged(URL).warm()
+
+
+def test_open_ranged_prefers_a_local_or_cached_copy(tmp_path):
+    """A cached or local asset costs nothing to read, so it is never range-read."""
+    local = tmp_path / "g.nc"
+    local.write_bytes(BODY)
+    store, _ = _ranged_store(tmp_path / "assets")
+    assert isinstance(store.open_ranged(str(local)), LocalAsset)
+    target = asset_cache_path(tmp_path / "assets", URL, f"sha512:{SHA}")
+    target.parent.mkdir(parents=True)
+    target.write_bytes(BODY)
+    assert isinstance(store.open_ranged(URL, checksum=f"sha512:{SHA}"), CachedAsset)

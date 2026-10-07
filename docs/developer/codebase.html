@@ -222,7 +222,7 @@ pixels.</td><td><a class="src" data-sym="def apply_filters" href="https://github
 <tbody>
 <tr><td><code>manifest/models.py</code></td><td>The Pydantic model of the whole manifest, about
 740 lines, <code>extra="forbid"</code> throughout so a misspelt key is an error rather than a
-silent default.</td><td><a class="src" data-sym="class Manifest(Strict)" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/manifest/models.py#L571">Manifest</a></td></tr>
+silent default.</td><td><a class="src" data-sym="class Manifest(Strict)" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/manifest/models.py#L580">Manifest</a></td></tr>
 <tr><td><code>manifest/validate.py</code></td><td>Every static check that needs no data:
 instantiating each named plugin, resolving each role, confirming the reducer can deliver the
 band names promised.</td><td><a class="src" data-sym="def validate_static" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/manifest/validate.py#L164">validate_static</a></td></tr>
@@ -235,7 +235,7 @@ implementations. <code>LocalSource</code> walks a directory and reads each heade
 rows.</td><td><a class="src" data-sym="class CMRSource" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/access/sources.py#L351">CMRSource</a></td></tr>
 <tr><td><code>access/store.py</code></td><td>Every worker's door to bytes: URI schemes, the
 node-local asset cache, checksum verification, retry, and the refusal to send an Earthdata
-session to an untrusted host.</td><td><a class="src" data-sym="class AssetStore" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/access/store.py#L377">AssetStore</a></td></tr>
+session to an untrusted host.</td><td><a class="src" data-sym="class AssetStore" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/access/store.py#L498">AssetStore</a></td></tr>
 <tr><td><code>access/readers.py</code></td><td>The reader registry, keyed on collection, with one
 instance per <code>(collection, ref)</code> per process.</td><td><a class="src" data-sym="def reader_for" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/access/readers.py#L33">reader_for</a></td></tr>
 <tr><td><code>access/auth.py</code></td><td>Earthdata Login, in one place, cached for the
@@ -262,7 +262,7 @@ continuous aggregations, plus the derivation of which bands a schema
 delivers.</td><td><a class="src" data-sym="def reduce_stack" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/reduce/builtin.py#L39">reduce_stack</a></td></tr>
 <tr><td><code>publish/</code></td><td>Stitching blocks into a tile, data COGs, colour resolution,
 RGBA rendering, legends, STAC items and collections, and the run
-record.</td><td><a class="src" data-sym="def publish_period" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/publish/period.py#L98">publish_period</a></td></tr>
+record.</td><td><a class="src" data-sym="def publish_period" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/publish/period.py#L142">publish_period</a></td></tr>
 </tbody>
 </table>
 </div>
@@ -275,13 +275,14 @@ record.</td><td><a class="src" data-sym="def publish_period" href="https://githu
 <tbody>
 <tr><td><code>plan/run.py</code></td><td>The plan stage end to end: load, validate, index, filter,
 freeze, budget-gate, inspect real granules, build the work lists. About a thousand lines and the
-largest module in the tree.</td><td><a class="src" data-sym="def plan_run" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/plan/run.py#L777">plan_run</a></td></tr>
+largest module in the tree.</td><td><a class="src" data-sym="def plan_run" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/plan/run.py#L875">plan_run</a></td></tr>
+<tr><td><code>plan/estimate.py</code></td><td>The run's rough order of magnitude: per-item seconds from pixels and bytes per cell, constants fitted to one recorded run, Lambda dollars, downloads and bytes written. Pure arithmetic over the work lists; reads no granule.</td><td><a class="src" data-sym="def estimate(" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/plan/estimate.py#L84">estimate</a></td></tr>
 <tr><td><code>plan/document.py</code></td><td>The serialisation seam: <code>plan.json</code>, the
 work lists, and the paired <code>*_to_doc</code> / <code>*_from_doc</code> functions that let a
-worker rebuild a planner's context from plain JSON.</td><td><a class="src" data-sym="class RunPlan" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/plan/document.py#L279">RunPlan</a></td></tr>
+worker rebuild a planner's context from plain JSON.</td><td><a class="src" data-sym="class RunPlan" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/plan/document.py#L291">RunPlan</a></td></tr>
 <tr><td><code>executors/worker.py</code></td><td>The portability seam: one handler per stage, and
 the single <code>exec_item</code> entry point every executor
-reduces to.</td><td><a class="src" data-sym="def exec_item" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/executors/worker.py#L235">exec_item</a></td></tr>
+reduces to.</td><td><a class="src" data-sym="def exec_item" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/executors/worker.py#L236">exec_item</a></td></tr>
 <tr><td><code>executors/local.py</code></td><td>A spawn-context process pool over the work lists,
 the budget gate, and Finalize. <code>run_all</code> lives here and takes the stage runner as a
 parameter, so the stage order and Finalize are shared with every other
@@ -290,6 +291,7 @@ executor.</td><td><a class="src" data-sym="def run_all" href="https://github.com
 over <code>lambda:InvokeFunction</code>, writing the same outcome records. Imported only when
 <code>--executor aws</code> is asked for, so a local run never imports
 boto3.</td><td><a class="src" data-sym="def run_stage(run_dir: Path | str, stage: str" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/executors/aws.py#L94">run_stage</a></td></tr>
+<tr><td><code>executors/preflight.py</code></td><td>The executor's half of validation, run after the plan and before dispatch: disk for <code>local</code>; credentials, the worker function, its timeout and concurrency for <code>aws</code>. Returns findings; the CLI refuses on a failure.</td><td><a class="src" data-sym="def preflight(" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/executors/preflight.py#L44">preflight</a></td></tr>
 <tr><td><code>executors/awslambda.py</code></td><td>The worker half: the Lambda entrypoint. Credential
 from Secrets Manager, run directory mirrored from the bucket, then the same
 <code>exec_item</code>.</td><td><a class="src" data-sym="def handler(event" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/executors/awslambda.py#L107">handler</a></td></tr>
@@ -301,7 +303,7 @@ three files under <code>preview/static/</code> are what a deployed viewer
 serves.</td><td><a class="src" data-sym="class Products" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/preview/catalog.py#L38">Products</a></td></tr>
 <tr><td><code>cli.py</code></td><td>The click command tree. Every command body imports its
 dependencies locally, which is what keeps <code>stratum --help</code>
-fast.</td><td><a class="src" data-sym="def main() -> None" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/cli.py#L66">main</a></td></tr>
+fast.</td><td><a class="src" data-sym="def main() -> None" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/cli.py#L78">main</a></td></tr>
 </tbody>
 </table>
 </div>
@@ -313,7 +315,7 @@ fast.</td><td><a class="src" data-sym="def main() -> None" href="https://github.
 <thead><tr><th>Module</th><th>Owns</th><th>Start at</th></tr></thead>
 <tbody>
 <tr><td><code>stratum_emit/readers/netcdf.py</code></td><td>The shared NetCDF machinery: group
-walking, fill handling, band attributes, the sensor-space read.</td><td><a class="src" data-sym="class EmitNetCDFReader" href="https://github.com/jl-0/Stratum/blob/main/plugins/stratum-emit/src/stratum_emit/readers/netcdf.py#L85">EmitNetCDFReader</a></td></tr>
+walking, fill handling, band attributes, the sensor-space read.</td><td><a class="src" data-sym="class EmitNetCDFReader" href="https://github.com/jl-0/Stratum/blob/main/plugins/stratum-emit/src/stratum_emit/readers/netcdf.py#L125">EmitNetCDFReader</a></td></tr>
 <tr><td><code>stratum_emit/readers/__init__.py</code></td><td>One subclass per EMIT collection.
 <code>L2BFrcov</code> is the interesting one: already orthorectified, so it overrides the read
 path and reports no geolocation.</td><td><a class="src" data-sym="class L2BFrcov(EmitNetCDFReader)" href="https://github.com/jl-0/Stratum/blob/main/plugins/stratum-emit/src/stratum_emit/readers/__init__.py#L69">L2BFrcov</a></td></tr>

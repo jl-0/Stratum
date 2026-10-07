@@ -21,7 +21,7 @@ from synthetic_nc import (
 )
 
 from stratum.cli import main
-from stratum.executors import run_all
+from stratum.executors import ExecutionError, run_all
 from stratum.manifest import load_manifest
 from stratum.plan import BudgetExceeded, PlanError, plan_run, read_work
 from stratum.plan.run import local_source
@@ -91,6 +91,89 @@ def test_mixed_vintage_is_refused_with_fingerprints(root: Path) -> None:
     with pytest.raises(PlanError, match="do not resolve into enumeration"):
         plan_run(write_manifest(root / "m.yaml", allow_mixed_vintage=True,
                                 mixed_vintage_reason="testing the relaxation"))
+
+
+def _with_identity(path: Path, identity: list[str], **kwargs) -> Path:
+    """`write_manifest` with `class_table.identity` set on the mineral role."""
+    doc = manifest_doc(**kwargs)
+    doc["inputs"]["roles"]["mineral"]["class_table"]["identity"] = identity
+    path.write_text(yaml.safe_dump(doc, sort_keys=False))
+    return path
+
+
+def test_identity_reads_one_table_per_group(root: Path, monkeypatch) -> None:
+    """02 section 3: with `identity: [build_version]` the planner reads ONE granule's table per
+    build and assigns its fingerprint to the rest; the report says so, per group."""
+    from stratum_emit.readers.netcdf import EmitNetCDFReader
+
+    read: list[str] = []
+    real = EmitNetCDFReader.class_table
+    monkeypatch.setattr(EmitNetCDFReader, "class_table",
+                        lambda self, ctx, *a: read.append(ctx.asset.uri) or real(self, ctx, *a))
+    result = plan_run(_with_identity(root / "m.yaml", ["build_version"]))
+    assert len(read) == 1
+    sampling = result.document["class_table_sampling"]["mineral_1"]
+    assert sampling["identity"] == ["build_version"]
+    [group] = sampling["groups"]
+    assert group["identity"] == {"build_version": "010635"} and group["granules"] == 3
+    assert [len(g) for g in result.document["class_tables"]["mineral_1"].values()] == [3]
+    assert "read from 1 sample(s), one per build_version" in result.report
+    assert "build_version=010635" in result.report
+
+
+def test_identity_without_it_reads_every_granule(root: Path) -> None:
+    result = plan_run(write_manifest(root / "m.yaml"))
+    assert result.document["class_table_sampling"] == {}
+    assert "read from every granule" in result.report
+
+
+def test_identity_still_refuses_mixed_vintage_across_groups(root: Path) -> None:
+    """A different build is a different group, so its table IS read and the vintage check
+    sees it."""
+    odd = Scene("20260615T100000_2616715_005", datetime(2026, 6, 15, 10, tzinfo=UTC), r0=5, c0=5,
+                build="010700", class_table=dict(CLASS_TABLE, record=[11, 12, 99]))
+    write_scene(root / "granules", odd)
+    with pytest.raises(PlanError, match="2 different class tables"):
+        plan_run(_with_identity(root / "m.yaml", ["build_version"]))
+
+
+def test_identity_that_does_not_hold_fails_the_worker(root: Path) -> None:
+    """12 section 7: a granule sharing the sample's build but carrying another table passes the
+    plan - its table was assumed - and is refused by the worker that opens it, before any of
+    its classes is used."""
+    odd = Scene("20260615T100000_2616715_005", datetime(2026, 6, 15, 10, tzinfo=UTC), r0=5, c0=5,
+                class_table=dict(CLASS_TABLE, record=[11, 12, 99]))
+    write_scene(root / "granules", odd)
+    result = plan_run(_with_identity(root / "m.yaml", ["build_version"]))
+    assert result.document["class_table_sampling"]["mineral_1"]["groups"][0]["granules"] == 4
+    with pytest.raises(ExecutionError, match="ClassTableMismatch") as e:
+        run_all(result.run_dir, workers=1)
+    assert odd.granule_id in str(e.value)
+
+
+def test_identity_names_are_checked(root: Path) -> None:
+    with pytest.raises(PlanError, match=r"identity names \['buildversion'\]"):
+        plan_run(_with_identity(root / "m.yaml", ["buildversion"]))
+
+
+def test_identity_missing_value_is_its_own_group() -> None:
+    """A granule lacking any identity value is never assumed to match another."""
+    from stratum.plan.run import identity_groups
+    from stratum.types import GranuleRef
+
+    def ref(gid: str, build: str, delivery: str | None) -> GranuleRef:
+        t = datetime(2026, 6, 1, tzinfo=UTC)
+        return GranuleRef(granule_id=gid, collection="EMITL2BMIN", datetime=t, end_datetime=t,
+                          bbox=(0, 0, 1, 1), assets={}, build_version=build,
+                          product_version="V001", collection_version="001", cloud_fraction=None,
+                          attributes={} if delivery is None else {"DELIVERY": delivery})
+
+    refs = {"a": ref("a", "1", "x"), "b": ref("b", "1", "x"), "c": ref("c", "1", None),
+            "d": ref("d", "2", "x")}
+    groups = identity_groups(refs, sorted(refs), ["build_version", "DELIVERY"])
+    assert list(groups.values()) == [["a", "b"], ["c"], ["d"]]
+    assert ("granule", "c") in groups
+    assert list(identity_groups(refs, sorted(refs), []).values()) == [["a"], ["b"], ["c"], ["d"]]
 
 
 def test_budget_gate(root: Path, monkeypatch) -> None:

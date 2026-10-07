@@ -80,7 +80,7 @@ on a laptop, on a cluster, and as the worker entrypoint.</p>
 
 <h2 id="plan">stratum plan</h2>
 
-<pre><code>stratum plan -m manifest.yaml [--out PATH] [--asset-cache PATH] [--json]</code></pre>
+<pre><code>stratum plan -m manifest.yaml [--out PATH] [--asset-cache PATH] [--executor local|aws] [--json]</code></pre>
 
 <p>Validates the manifest, queries the index, applies filters, resolves tiles and epochs, resolves
 every categorical layer's classes against each contributing granule's embedded table, and writes
@@ -91,9 +91,10 @@ nothing and reads no pixels — headers, variable lists and class tables only.</
 <p>If the index under <code>inputs.index_location</code> does not exist, it is built first from
 <code>inputs.source</code> — a directory indexed whole, or the archive queried for the manifest's
 area and time range — so a laptop run and an archive run are each one command. Against the
-archive the plan downloads the files it validates (one geometry file, and every contributing
-granule's class-table file, fetched in parallel) into the asset cache; the report's <em>Assets
-staged at plan time</em> section counts them. The budget is checked first: a plan that
+archive the plan downloads one file per role for the variable checks into the asset cache, and
+reads one class table per <code>class_table.identity</code> group over HTTP range requests
+without downloading the file; the report's <em>Remote reads at plan time</em> section counts
+both. The budget is checked first: a plan that
 <code>max_tiles</code> or <code>max_granules</code> refuses stops before opening or downloading
 anything. An existing index is used only if the scope it records — source kind, collections,
 area, time range — covers the manifest; a wider manifest is refused until the index is
@@ -104,6 +105,7 @@ rebuilt.</p>
 <thead><tr><th>Option</th><th>Effect</th><th>Status</th></tr></thead>
 <tbody>
 <tr><td><code>--out PATH</code></td><td>The run directory. Default <code>{outputs.bucket}/runs/{run_id}</code>, with <code>outputs.bucket</code> a path relative to the manifest</td><td><span class="chip chip-locked">built</span></td></tr>
+<tr><td><code>--executor local|aws</code></td><td>Which executor's preflight checks to print after the report: disk and wall time for <code>local</code> (the default); credentials, the worker function, its timeout and concurrency, and cost for <code>aws</code>. Exits <code>2</code> if one fails. Not with <code>--json</code>. See <a href="../guide/running.html#preflight">preflight</a></td><td><span class="chip chip-built">built</span></td></tr>
 <tr><td><code>--asset-cache PATH</code></td><td>Node-local directory the plan stages the files it validates into. Sets <code>STRATUM_ASSET_CACHE</code>; name the same directory on <code>run</code> so those files are hits. Default <code>$STRATUM_ASSET_CACHE</code>, else <code>{root}/assets</code></td><td><span class="chip chip-locked">built</span></td></tr>
 <tr><td><code>--json</code></td><td>Print <code>run_id</code>, <code>run_dir</code>, the counts and the budget verdict as JSON</td><td><span class="chip chip-locked">built</span></td></tr>
 <tr><td><code>--explain-filters</code></td><td>List the granules each filter removed, not just counts</td><td><span class="chip chip-open">not yet</span></td></tr>
@@ -126,6 +128,11 @@ area, time and filters — is invalid, not an empty plan.</p>
 <code>provenance.json</code> and appends an execution table to <code>report.md</code>. Blocks
 until finished.</p>
 
+<p>Between planning and the first item it runs the executor's <a href="../guide/running.html#preflight">preflight
+checks</a> — disk space for <code>local</code>; live credentials, the worker function, its
+timeout against the longest estimated item, and concurrency for <code>aws</code> — and stops with
+"preflight failed; nothing was dispatched" if one fails.</p>
+
 <p>Where the items run is the only difference between the two executors. <code>local</code> uses a
 process pool on this machine. <code>aws</code> invokes the deployment's Lambda once per item, from
 this machine, and needs two things: <code>$STRATUM_LAMBDA_FUNCTION</code> (<code>make
@@ -142,7 +149,7 @@ everything the run writes are identical either way.</p>
 <tr><td><code>--workers N</code></td><td><code>local</code>: pool size, default one per core; <code>1</code> runs every item in-process, which is the path to use under a debugger. <code>aws</code>: invocations in flight, default <code>$STRATUM_LAMBDA_CONCURRENCY</code> else 32.</td><td><span class="chip chip-locked">built</span></td></tr>
 <tr><td><code>--out PATH</code></td><td>Run directory; default <code>{root}/runs/{run_id}</code></td><td><span class="chip chip-locked">built</span></td></tr>
 <tr><td><code>--asset-cache PATH</code></td><td>Node-local directory remote assets are staged into. Sets <code>STRATUM_ASSET_CACHE</code> for this process and every spawned worker. Default <code>$STRATUM_ASSET_CACHE</code>, else <code>{root}/assets</code></td><td><span class="chip chip-locked">built</span></td></tr>
-<tr><td><code>--dry-run</code></td><td>Equivalent to <code>plan</code></td><td><span class="chip chip-locked">built</span></td></tr>
+<tr><td><code>--dry-run</code></td><td>Plan and run the executor's preflight checks, then stop</td><td><span class="chip chip-locked">built</span></td></tr>
 <tr><td><code>--from-provenance URI</code></td><td>Re-run against a previous run's frozen index rather than re-querying</td><td><span class="chip chip-open">not yet</span></td></tr>
 <tr><td><code>--max-concurrent N</code></td><td><code>slurm</code>: cap on simultaneous work items. For <code>aws</code> this is <code>--workers</code>, and the ceiling that actually binds is the function's reserved concurrency, which is a deployment setting</td><td><span class="chip chip-open">not yet</span></td></tr>
 <tr><td><code>--partition</code>, <code>--cpus-per-task</code>, <code>--mem</code>, <code>--time</code></td><td><code>slurm</code>: passed through to <code>sbatch</code></td><td><span class="chip chip-open">not yet</span></td></tr>

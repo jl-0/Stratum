@@ -20,6 +20,10 @@ dependencies = [
   "stratum>=0.0.1",
   "numpy>=1.26",
   "netCDF4>=1.6,<1.7.1",
+  # the planner reads a granule's class table over HTTP range requests rather than staging the
+  # whole file (12 section 7); netCDF4 cannot open a file object, h5py can. It must link the
+  # SAME libhdf5 as netCDF4, which is why pixi installs it from conda-forge
+  "h5py>=3.10",
   # the GeoTIFF reader and the ortho role path open rasters directly; `stratum` depends on
   # rasterio too, but a reader's core import must not rest on a transitive dependency
   "rasterio>=1.3",

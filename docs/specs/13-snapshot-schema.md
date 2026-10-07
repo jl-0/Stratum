@@ -65,7 +65,7 @@ snapshot:
 | Field | Meaning |
 |---|---|
 | `kind` | `categorical` or `continuous`. Decides the aggregation vocabulary available and how nodata is represented ([11 §2](11-types.md)) |
-| `source` | Where the value comes from in the *winning* observation. A role name or a band alias; the two share one namespace ([09 §2](09-run-manifest.md)) |
+| `source` | Where the value comes from in the *winning* observation. A role name or a band alias; the two share one namespace ([09 §2](09-run-manifest.md)). Or `acquired`, which the framework provides — below |
 | `dtype` | Optional. Defaults to the source band's dtype; categorical layers default to `uint16` |
 | `bands` | Optional. Band indices to keep from a multi-band source; default all — see below |
 | `classes` | Categorical only. The enumeration file, or `source` — §3 |
@@ -78,6 +78,30 @@ winning score, and `valid`, whether any observation occupied the cell ([04 §4](
 declares `source: view_zenith`; both resolve through `inputs.roles` and `inputs.band_aliases`, which
 may not collide. A role whose variable has one band is addressed by the role name; a multi-band
 variable needs an alias. Naming something neither defines is a plan-time error.
+
+**One source the framework provides: `acquired`.** *(Built 2026-10-07.)* The winning
+observation's acquisition start, in Unix seconds UTC, the same in every cell that observation
+reaches. It is not a role and is never read from a file, and no role or alias may be named
+`acquired`. A layer that uses it must be `kind: continuous`, with no `bands` and no `dtype`, because
+it is always one `float64` band. It is the only `float64` layer, and the reason is resolution:
+float32 rounds a 2020s timestamp to 128 s, and adjacent EMIT scenes in one orbit start **12 s
+apart** [observed, US West proof tile]. To the second, an EMIT scene's start time is unique, so the
+value **names the granule**. Each published tile carries `granules.json`, which maps each value
+back to its granule id ([10 §3](10-provenance.md)). Declare it per categorical layer whose
+provenance matters:
+
+```yaml
+    acquired_1:
+      kind: continuous
+      source: acquired
+      aggregate: {method: best, conditional_on: mineral_1_native}
+```
+
+`best` conditioned on the winner gives the best-scoring look among the epochs that voted for the
+delivered class: an observation that actually saw it, not merely the best look at the cell. This is
+the per-cell provenance a pixel → granule → spectrum click-through needs. It has to be stored at
+resolve time, because a reducer cannot recover evidence a snapshot never stored
+([04 §4](04-cost-functions.md)).
 
 **A layer may have a band axis.** A `source` that names a multi-band variable — a reflectance
 cube, a set of abundance fractions — yields one layer of shape `(H, W, B)`, with one dtype and one
@@ -186,7 +210,7 @@ silent:
 
 | Rule | Contract |
 |---|---|
-| Delivered categorical nodata | `65535`; `none` stays `0`. Categorical bands are `uint16`, continuous `float32` with `NaN`, counts (`n_epochs`, `<layer>_n`) `uint16` with no nodata, whatever `LayerSpec.dtype` says about the snapshot ([11 §2](11-types.md)) |
+| Delivered categorical nodata | `65535`; `none` stays `0`. Categorical bands are `uint16`, continuous `float32` with `NaN` (an `acquired` layer, and its `_spread`, `float64` with `NaN` — §2), counts (`n_epochs`, `<layer>_n`) `uint16` with no nodata, whatever `LayerSpec.dtype` says about the snapshot ([11 §2](11-types.md)) |
 | `min_count` | `1` when omitted — the value under which a single epoch reduces to itself with no special case |
 | `tie_break` | `nodata` when omitted: refuse to choose unless the schema says how. Among tied classes with equal tie keys the lowest product id wins, so the result is deterministic |
 | `weight` | `count` when omitted: one epoch, one vote. `score` sums each epoch's winning score per class instead, and refuses a negative or NaN score on a valid epoch rather than rescaling it: unlike `score_weighted`, the absolute score is the point, since a graded-down epoch must stay graded down |
@@ -303,7 +327,7 @@ compatibility; it either extends its ancestor or it does not.
 | `ignore: [0, -4]` | Classes are named — `ignore: [none]` — and `-4` had no meaning here |
 | `Scorer.carry` | Gone. Layers are the schema's; the scorer only scores |
 | `Reducer.outputs` and `ModeThroughTime` | Derived from the schema by the built-in reducer. A plugin still declares its own outputs |
-| The `obs[...]` namespace | One namespace: roles and band aliases, which may not collide |
+| The `obs[...]` namespace | One namespace: roles and band aliases, which may not collide; `acquired` is reserved for the framework |
 
 ---
 

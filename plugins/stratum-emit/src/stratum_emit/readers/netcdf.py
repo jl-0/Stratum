@@ -54,6 +54,46 @@ class NetCDFContext:
         self.close()
 
 
+#: What a ranged open should fetch up front: the head (superblock, root group) and the last
+#: 256 KiB. [observed] 2026-10-06: EMIT L2B MIN files are not paged-aggregated, so where the
+#: metadata lands varies. On three US West 2025 granules `/mineral_metadata` sat in the final
+#: ~75 KB and these two ranges covered the read; on the reference granule (build 010635) three
+#: object headers sat 1.4-4.4 MB from the end, costing three more round trips - 568 KB of a
+#: 54 MB file in all. Widening the tail to cover that would cost MB per granule to save
+#: milliseconds on the few granules an identity-sampled plan reads.
+RANGED_PREFETCH: tuple[tuple[int, int], ...] = ((0, 64 * 1024), (-256 * 1024, 256 * 1024))
+
+
+@dataclass
+class RangedContext:
+    """A granule opened over HTTP byte ranges (12 section 4) with h5py, which - unlike netCDF4 -
+    reads from a file object. Only `class_table` works on it: it exists so the planner can read
+    a table without staging the file. Anything else stages."""
+
+    asset: AssetHandle
+    h5: Any
+
+    @property
+    def dataset(self) -> nc.Dataset:
+        raise NotImplementedError(f"{self.asset.uri!r} was opened over byte ranges, which serve "
+                                  "class tables only; stage it to read anything else "
+                                  "(12 section 4)")
+
+    def close(self) -> None:
+        self.h5.close()
+
+
+def _h5_column(ds: Any) -> pa.Array:
+    """`_column` for an h5py dataset, decoding to the SAME values netCDF4 yields, because a
+    worker re-reads the table with netCDF4 and the two fingerprints must agree (12 section 7)."""
+    import h5py
+
+    if h5py.check_string_dtype(ds.dtype) is not None:
+        return pa.array([None if v is None else str(v) for v in ds.asstr()[()].tolist()],
+                        type=pa.string())
+    return pa.array(np.asarray(ds[()]))
+
+
 def _fill_of(var: nc.Variable) -> float | int | None:
     fill = getattr(var, "_FillValue", None)
     if fill is None:
@@ -90,11 +130,18 @@ class EmitNetCDFReader:
     collections: tuple[str, ...] = ()
     space: Literal["sensor", "ortho"] = "sensor"
     band_names_var: str | None = None
+    #: Declares that `open` accepts a ranged handle (12 section 4), and what to fetch first.
+    range_prefetch: tuple[tuple[int, int], ...] = RANGED_PREFETCH
 
     # ---- open -----------------------------------------------------------------------------
-    def open(self, asset: AssetHandle) -> NetCDFContext:
+    def open(self, asset: AssetHandle) -> NetCDFContext | RangedContext:
         """Cheap: headers and metadata only (12 section 3 rule 3)."""
         path = asset.path()
+        fileobj = getattr(asset, "fileobj", None)
+        if path is None and fileobj is not None:
+            import h5py
+
+            return RangedContext(asset=asset, h5=h5py.File(fileobj(), mode="r"))
         if path is None:
             raise NotImplementedError(
                 f"{type(self).__name__} reads a local path; streaming {asset.uri!r} without "
@@ -202,15 +249,25 @@ class EmitNetCDFReader:
                            crs=str(ds.getncattr("spatial_ref")))
 
     # ---- class table ----------------------------------------------------------------------
-    def class_table(self, ctx: NetCDFContext, path: str, key: str,
+    def class_table(self, ctx: NetCDFContext | RangedContext, path: str, key: str,
                     attributes: Sequence[str]) -> ClassTable | None:
         """A table embedded at group `path` (11 section 9): `key` first, then `attributes` in the
         order asked. None when the group is absent; a missing column is a KeyError, because the
         manifest named it."""
+        wanted = [key, *[a for a in attributes if a != key]]
+        if isinstance(ctx, RangedContext):
+            grp = ctx.h5.get(path)
+            if grp is None:
+                return None
+            missing = [c for c in wanted if c not in grp]
+            if missing:
+                raise KeyError(f"{ctx.asset.uri}:{path} has no column(s) {missing}; "
+                               f"has {sorted(grp)}")
+            table = pa.table({c: _h5_column(grp[c]) for c in wanted})
+            return ClassTable(key=key, entries=table, source=f"{ctx.asset.uri}:{path}")
         grp = _walk(ctx.dataset, path)
         if grp is None:
             return None
-        wanted = [key, *[a for a in attributes if a != key]]
         missing = [c for c in wanted if c not in grp.variables]
         if missing:
             raise KeyError(f"{ctx.asset.uri}:{path} has no column(s) {missing}; "

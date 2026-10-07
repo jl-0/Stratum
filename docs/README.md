@@ -1,15 +1,14 @@
 # Stratum documentation
 
-Three layers, with different audiences. Keep them in step — see [`../CLAUDE.md`](../CLAUDE.md).
+Two layers, with different audiences. Keep them in step — see [`../CLAUDE.md`](../CLAUDE.md).
 
 | Layer | Format | Documents | Audience |
 |---|---|---|---|
 | **Site** | HTML, [`index.html`](index.html) | How the tool works and how to use it | Anyone using or operating Stratum |
 | **Specs** | Markdown, [`specs/`](specs/) | Contracts, invariants, citations, open questions | Whoever implements a stage |
-| **Notes** | Markdown, [`notes/`](notes/) | Prior art, and the build contracts the code was written against | Whoever needs the reasoning behind a contract |
 
 The site describes the **current tool**. It does not argue for the design, compare against
-predecessors, or explain what was replaced — that belongs in [`notes/heritage.md`](notes/heritage.md).
+predecessors, or explain what was replaced.
 
 `guide/` and `reference/` document the tool for whoever **uses** it. `developer/` documents the
 codebase for whoever **changes** it — module layout, execution flow, object lifetimes, extension
@@ -118,8 +117,7 @@ Authoritative. Numbered by dependency order, not build order.
 | [13 — Snapshot schema](specs/13-snapshot-schema.md) | Layers, enumerations, aggregation vocabulary, extend-never-redefine |
 
 Specs cite the file a claim came from, and mark inferences as inferences. Where a contract exists
-because of something observed in an existing pipeline, the citation is inline and the fuller
-account is in [`notes/heritage.md`](notes/heritage.md).
+because of something observed in an existing pipeline, the citation is inline.
 
 ## Decisions
 
@@ -129,19 +127,6 @@ account is in [`notes/heritage.md`](notes/heritage.md).
 | [0002 — Terraform/manifest boundary](decisions/ADR-0002-terraform-manifest-boundary.md) | Platform vs science configuration |
 | [0003 — Image build and digest](decisions/ADR-0003-image-build-and-digest.md) | One image from `pixi.lock`; `stratum-emit` as a separate distribution; deploy by digest |
 
-## Notes
-
-| Note | Contents |
-|---|---|
-| [heritage.md](notes/heritage.md) | Prior art, and which observations forced which design choices |
-| [2026-08-28-mines-tagup.md](notes/2026-08-28-mines-tagup.md) | External group building the same thing; detector-edge numbers, FRCOV, the bare-earth scorer |
-| [2026-09-02-first-slice-plan.md](notes/2026-09-02-first-slice-plan.md) | The build contract the first slice was written against |
-
-> **Everything under `docs/` is published.** Pages serves this directory from `main`, and the site
-> is public even while the repository is not. `notes/` is no exception — it is a note in the sense
-> of audience, never of access. Nothing site-specific, internal-only or credential-bearing belongs
-> anywhere under `docs/`.
-
 ## Reference material
 
 [`refs/`](../refs/) — artifacts from existing pipelines, kept verbatim. **Never edit them.**
@@ -149,7 +134,6 @@ account is in [`notes/heritage.md`](notes/heritage.md).
 | File | Source | Why it's here |
 |---|---|---|
 | `amd-config.yml` | Internal cluster path | The only readable record of `stack` parameters, the lumping `hashmap`, and the RGBA `colors` table |
-| `2026-08-28-mines-transcript.md` | Voice transcript | Source for the tag-up notes. Attribution is unreliable — see the caveat there |
 | `EMIT_L2B_MIN_001_20260825T151308_2623710_050.nc` | Delivered LP DAAC granule, `V001` / build `010635` | Ground truth for spec 11. **Gitignored** — see `../CLAUDE.md` |
 
 ## Conventions
@@ -157,7 +141,7 @@ account is in [`notes/heritage.md`](notes/heritage.md).
 - The **site** documents behaviour. The **specs** state contracts and invariants. Neither
   duplicates the other.
 - Every spec ends with **open questions**. An empty list means resolved, not unconsidered.
-- Claims about existing pipelines cite the file they came from, and live in the specs or
-  `notes/heritage.md` — not on the site.
+- Claims about existing pipelines cite the file they came from, and live in the specs — not on
+  the site.
 - Values read from delivered data are marked **[observed]** in the specs and with an `observed`
   chip on the site.

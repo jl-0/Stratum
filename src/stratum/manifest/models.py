@@ -42,6 +42,7 @@ from stratum.time import (
     parse_duration,
 )
 from stratum.types import (
+    BUILTIN_SOURCES,
     Aggregation,
     ClassTable,
     Epoch,
@@ -187,12 +188,20 @@ class TimeSpec(Strict):
 
 # ---------------------------------------------------------------------------------------- inputs
 class ClassTableSpec(Strict):
-    """Where a categorical role keeps its own class table (11 section 9)."""
+    """Where a categorical role keeps its own class table (11 section 9).
+
+    `identity` names the index fields that define one table - a granule column
+    (`collection_version`, `build_version`, `product_version`, `day_night`, `collection`) or a
+    catalogue attribute. Granules agreeing on every field are assumed to carry the same table:
+    the planner reads ONE per group, and every worker confirms its granule's table against the
+    planned fingerprint before using it (02 section 3, 12 section 7). Empty - the default -
+    means each granule is its own group, and the planner reads them all."""
 
     source: Literal["embedded", "file"]
     path: str
     key: str
     attributes: list[str]
+    identity: list[str] = Field(default_factory=list)
 
 
 class RoleSpec(Strict):
@@ -537,7 +546,7 @@ class RenderSpec(Strict):
 
 
 class OutputsSpec(Strict):
-    """`bucket` is a URI or, locally, the storage root (plan section 4)."""
+    """`bucket` is a URI or, locally, the storage root (06 section 4)."""
 
     bucket: str
     formats: list[Literal["cog", "gtiff", "netcdf"]] = Field(default_factory=lambda: ["cog"])
@@ -763,6 +772,8 @@ class Manifest(Strict):
             classes: ClassTable | None = None
             lumping: str | None = None
             dtype = layer.dtype
+            if layer.source in BUILTIN_SOURCES:
+                dtype = BUILTIN_SOURCES[layer.source]
             if layer.kind == "categorical":
                 dtype = dtype or "uint16"
                 if name in enums:

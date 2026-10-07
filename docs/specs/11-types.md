@@ -550,7 +550,12 @@ span both.
 The embedded table does not make that go away. What it does is make it **detectable and
 mechanically solvable**, where an external table would have made it silent:
 
-1. **Fingerprint every granule's table** at plan time.
+1. **Fingerprint every granule's table** — at plan time one per `class_table.identity` group
+   ([02 §3](02-granule-index.md)), and again by each worker for the granule it reads, against the
+   fingerprint the plan assigned it (`ClassTableProbe`, `confirm_class_table`,
+   [12 §7](12-data-access.md)). The fingerprint is over column values only, never over where the
+   table was read from, so a table read over byte ranges with h5py and one read from the staged
+   file with netCDF4 must — and are tested to — fingerprint alike.
 2. **All identical** → the common case. Proceed; record the fingerprint in provenance.
 3. **They differ** → the run spans vintages. Fail loudly by default; under
    `allow_mixed_vintage` accept them only if each resolves fully into the product enumeration,

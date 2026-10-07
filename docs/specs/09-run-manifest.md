@@ -84,6 +84,8 @@ inputs:
         path: /mineral_metadata
         key: index
         attributes: [name, record, library, group, url]
+        identity: [collection_version, build_version]   # granules sharing these share a table:
+                                                        # the plan reads one per group (02 §3)
     mineral_depth:  {collection: EMITL2BMIN,  var: group_1_band_depth}
     mineral_uncert: {collection: EMITL2BMIN,  asset: MINUNCERT, var: group_1_band_depth_unc}
     mask:           {collection: EMITL2AMASK, version: "002", var: mask}   # EMITL2AMASK is published
@@ -236,9 +238,13 @@ budget and not `warn` stops there — frozen index, report and verdict written, 
 false` in `plan.json`, no worker context, no work lists — so against a catalogue source it
 downloads nothing ([12 §4](12-data-access.md)); `warn` proceeds through inspection and
 staging. `require_approval` refuses too, naming `stratum approve` as the later slice
-([08 §3](08-execution.md)); `warn` proceeds with the exceedance reported. Only `max_tiles` and
-`max_granules` gate today; vCPU-hours are reported as "not estimated" until per-stage constants
-exist ([08 §2](08-execution.md)). Two selection rules sit in front of the count: the query bbox
+([08 §3](08-execution.md)); `warn` proceeds with the exceedance reported. `max_tiles` and
+`max_granules` gate there. `max_vcpu_hours` gates a second time, after the work lists exist,
+against the plan's central CPU-hour estimate ([08 §2](08-execution.md), *The run estimate*): an
+over-budget plan is then fully written, work lists included, and `stratum run` refuses it the
+same way. The report also carries the estimate's Lambda dollars, downloads and bytes written.
+Whether the chosen executor can run the plan — disk, credentials, the worker function — is not a
+budget question and not in the plan; it is preflight ([08 §1](08-execution.md)). Two selection rules sit in front of the count: the query bbox
 is the AOI's enclosing box, but the selection is then **clipped to the AOI's tiles** and the
 granules in the gap are reported as a "meets a tile of the AOI" filter row, so `granule_count`
 and the budget count what a work item can actually read ([02 §6](02-granule-index.md)); and an
@@ -289,7 +295,11 @@ Everything below fails in the plan stage, loudly, while it is cheap:
 - **the vintage check** is that fingerprint agreement. A disagreement fails the plan unless
   `allow_mixed_vintage: true` is set with a documented reason, and then only if every raw table
   resolves fully into the enumeration ([13 §3](13-snapshot-schema.md)); `build_version` is
-  reported, not pinned ([02 §3](02-granule-index.md));
+  reported, not pinned ([02 §3](02-granule-index.md)). The plan reads one table per
+  `class_table.identity` group, or every granule's without one; each worker confirms its own
+  granule's table before use ([12 §7](12-data-access.md));
+- every `class_table.identity` name is a granule column or an attribute some contributing
+  granule carries;
 - budget present and non-infinite.
 
 ### Where each check lives

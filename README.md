@@ -80,12 +80,9 @@ locally or browse it on GitHub Pages.
 | [`docs/index.html`](docs/index.html) | The documentation site — concepts, running a mosaic, reading data, writing plugins, scaling, reference |
 | [`docs/specs/`](docs/specs/) | Component specifications, `00`–`13`. **Authoritative** — contracts, invariants, citations |
 | [`docs/decisions/`](docs/decisions/) | Architecture decision records |
-| [`docs/notes/heritage.md`](docs/notes/heritage.md) | Internal: prior art, where the historical code lives, why choices were made |
-| [`docs/notes/2026-09-02-first-slice-plan.md`](docs/notes/2026-09-02-first-slice-plan.md) | Internal: the build contract the first slice was written against — scope, module boundaries, internal signatures |
 | [`refs/`](refs/) | Reference material from the existing pipelines, kept verbatim |
 
-The site documents the tool. The specs state the contracts. Heritage and rationale stay in
-`docs/notes/`. Keeping them in step is the first rule in [`CLAUDE.md`](CLAUDE.md).
+The site documents the tool. The specs state the contracts. Keeping them in step is the first rule in [`CLAUDE.md`](CLAUDE.md).
 
 ## Relationship to existing code
 
@@ -96,15 +93,12 @@ The site documents the tool. The specs state the contracts. Heritage and rationa
 | `EMIT-AMD` | Precedent for deferred reduction and for the lumping/colour config. Cluster-specific; not reusable directly. |
 | `tetracorder-lite` | Upstream L2B producer. Its reference matrix is the source of the class table each granule embeds. |
 
-File-level detail — which script does what, and which observations in it drove a design choice —
-is in [`docs/notes/heritage.md`](docs/notes/heritage.md).
-
 ## Not only EMIT
 
 Colorado School of Mines (with CMU and U. Wisconsin's Macrostrat) is independently building the
 same thing: tiling Tetracorder mineral maps into state- and country-wide mosaics, with a QGIS
 data stream, moving to AVIRIS-5, and aiming at cross-scale work from EMIT's 60 m down to UAV
-imagery at 6–10 cm. See [the tag-up notes](docs/notes/2026-08-28-mines-tagup.md).
+imagery at 6–10 cm.
 
 That makes "a framework, not an EMIT program" a present requirement rather than an aspiration.
 Multi-instrument support is a design constraint from the start — which is also why input roles and

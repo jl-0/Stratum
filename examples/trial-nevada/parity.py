@@ -1,5 +1,5 @@
 """Parity check: Stratum's `MinViewZenith` product against SpectralUtil's fused GLT
-(first-slice plan section 1; heritage: the V002 `build_obs_nc` mosaic stands in for a V002 cell).
+(the V002 `build_obs_nc` mosaic stands in for a V002 cell).
 
 Runs from the repo root, after `stratum run -m examples/trial-nevada/manifest-parity.yaml`:
 

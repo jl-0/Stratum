@@ -81,11 +81,12 @@ inputs:
     mineral:
       collection: EMITL2BMIN      # the MIN file (the collection's first asset) is implied
       var: group_1_mineral_id     # the group-1 mineral class per pixel
-      class_table:                # the product's own class table, read from every granule
+      class_table:                # the product's own class table, read per identity group
         source: embedded          # embedded in the file, never a checked-in CSV
         path: /mineral_metadata   # the NetCDF group holding it
         key: index                # the column the pixel values refer to
         attributes: [name, record, library, group, url]   # matched on these, never on the integer
+        identity: [collection_version, build_version]   # granules sharing these share one table; the plan reads one each
     mineral_depth: {collection: EMITL2BMIN, var: group_1_band_depth}   # absorption depth of that class
   # Band indices are 0-BASED into the L1B OBS `obs` variable, whose bands are:
   #   0 path length, 1 to-sensor azimuth, 2 to-sensor zenith, 3 to-sun azimuth,

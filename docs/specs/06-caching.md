@@ -98,7 +98,7 @@ snapshot key): format 2 added `observed.tif`, so a snapshot written before it is
 a hit `stack_snapshots` cannot read. Bump it whenever the set changes. A directory artifact's sidecar is
 `{hash16}/.inputs.json` *inside* it; a file artifact's is `{hash16}.inputs.json` beside it. Nothing
 else may be written into a snapshot directory: `read_snapshot` discovers layers by globbing
-`*.tif`. The plan note ([§4](../notes/2026-09-02-first-slice-plan.md)) fixes the layout.
+`*.tif`.
 
 ---
 

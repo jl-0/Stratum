@@ -25,7 +25,55 @@ from stratum.index import role_asset, role_uri
 from stratum.regrid import read_glt
 from stratum.resolve.context import NullAux, PlanContext
 from stratum.resolve.gather import Gathered, gather
-from stratum.types import BlockRef, Coords, Epoch, GranuleRef, ObsWindow, SensorWindow, VarSpec
+from stratum.types import (
+    BlockRef,
+    Coords,
+    Epoch,
+    GranuleRef,
+    ObsWindow,
+    SensorWindow,
+    VarSpec,
+    acquired_seconds,
+)
+
+
+class ClassTableMismatch(ValueError):
+    """A granule's own class table is not the one the planner assigned it (02 section 3)."""
+
+
+#: (granule_id, role, expected fingerprint) this process has already confirmed. A granule
+#: reaches many blocks; its table is checked on the first and trusted for the rest. The
+#: fingerprint is in the key so a second plan in the same process expecting a different table
+#: checks again rather than inheriting the first plan's verdict.
+_CONFIRMED: set[tuple[str, str, str]] = set()
+
+
+def confirm_class_table(plan: PlanContext, granule: GranuleRef, role: str, reader: Any,
+                        rctx: Any) -> None:
+    """Refuse a granule whose embedded class table does not fingerprint as the table its remap
+    was resolved from. The planner may read one table per `class_table.identity` group and
+    assume the rest (12 section 7); this is where that assumption is checked, on the file the
+    worker has open anyway, before a single class from it is used."""
+    probe = plan.table_probes.get(role)
+    if probe is None:
+        return
+    layers = [layer.name for layer in plan.schema.layers
+              if layer.kind == "categorical" and layer.source == role]
+    if not layers:
+        return
+    expected = plan.remaps[layers[0]][granule.granule_id].raw_fingerprint
+    if (granule.granule_id, role, expected) in _CONFIRMED:
+        return
+    table = reader.class_table(rctx, probe.path, probe.key, probe.attributes)
+    found = table.fingerprint() if table is not None else None
+    if found != expected:
+        raise ClassTableMismatch(
+            f"granule {granule.granule_id!r}, role {role!r}: its class table "
+            f"{'is missing' if found is None else f'fingerprints {found}'}, but the plan "
+            f"assigned {expected} (build_version {granule.build_version!r}). The manifest's "
+            "class_table.identity does not determine the table for this granule: widen it, or "
+            "remove it so the planner reads every granule (02 section 3)")
+    _CONFIRMED.add((granule.granule_id, role, expected))
 
 
 @dataclass
@@ -212,6 +260,7 @@ def read_observation(ctx: ObsContext) -> Observation | None:
             spec = reader.variables(rctx).get(binding.var)
             if spec is None:
                 raise KeyError(f"{uri}: no variable {binding.var!r} for role {role!r}")
+            confirm_class_table(plan, granule, role, reader, rctx)
             specs[role] = spec
             read[role] = reader.read(rctx, binding.var, sw)
     finally:
@@ -283,6 +332,11 @@ def read_observation(ctx: ObsContext) -> Observation | None:
     # 13 section 3 rule 3: the remap is applied at the gather, where the granule is known
     layers: dict[str, np.ndarray] = {}
     for layer in plan.schema.layers:
+        if layer.source == "acquired":
+            # framework-provided (13 section 2): the same value in every cell this look reaches
+            layers[layer.name] = np.full(glt.shape[:2], acquired_seconds(granule.datetime),
+                                         dtype=np.float64)
+            continue
         values = _select_bands(bands[layer.source], layer.bands, layer.name)
         if layer.kind == "categorical":
             try:
@@ -298,5 +352,5 @@ def read_observation(ctx: ObsContext) -> Observation | None:
     return Observation(obs=obs, layers=layers)
 
 
-__all__ = ["ObsContext", "Observation", "apply_remap", "block_coords", "is_lonlat",
-           "read_observation"]
+__all__ = ["ClassTableMismatch", "ObsContext", "Observation", "apply_remap", "block_coords",
+           "confirm_class_table", "is_lonlat", "read_observation"]

@@ -14,7 +14,7 @@ import numpy as np
 
 from stratum.types import BandSpec, ClassTable, LayerSpec, SnapshotSchema
 
-# Delivered dtypes and nodata (first-slice plan section 4; 11 section 2).
+# Delivered dtypes and nodata (11 section 2).
 CATEGORICAL_DTYPE = "uint16"
 CATEGORICAL_NODATA = 65535        # 0 is the `none` class and is real data
 CONTINUOUS_DTYPE = "float32"      # nodata NaN
@@ -286,12 +286,15 @@ def delivered_bands(schema: SnapshotSchema, *,
             nb = int(band_counts[layer.name])
         what = params.method + (f" over epochs concordant with {params.conditional_on}"
                                 if params.conditional_on else " over valid epochs")
-        out.append(BandSpec(layer.name, CONTINUOUS_DTYPE, f"{layer.name}: {what}",
-                            nodata=float("nan"), bands=nb))
+        dtype = "float64" if layer.dtype == "float64" else CONTINUOUS_DTYPE
+        out.append(BandSpec(layer.name, dtype, f"{layer.name}: {what}",
+                            nodata=float("nan"), bands=nb,
+                            units="s since 1970-01-01 UTC" if layer.source == "acquired"
+                            else "unitless"))
         out.append(BandSpec(f"{layer.name}_n", COUNT_DTYPE,
                             f"{layer.name}: epochs aggregated", units="count"))
         if params.spread:
-            out.append(BandSpec(f"{layer.name}_spread", CONTINUOUS_DTYPE,
+            out.append(BandSpec(f"{layer.name}_spread", dtype,
                                 f"{layer.name}: {params.spread} over the same epochs",
                                 nodata=float("nan"), bands=nb))
     out.append(N_EPOCHS)

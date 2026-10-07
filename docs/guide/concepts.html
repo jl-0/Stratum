@@ -504,7 +504,8 @@ columns.</p>
         source: embedded          <span class="c"># embedded | file</span>
         path: /mineral_metadata   <span class="c"># group within the product</span>
         key: index                <span class="c"># column matching pixel values</span>
-        attributes: [name, record, library, group, url]</code></pre>
+        attributes: [name, record, library, group, url]
+        identity: [collection_version, build_version]   <span class="c"># what defines one table</span></code></pre>
 
 <p>Prefer <code>source: embedded</code> whenever a product offers it. The table then travels with
 the data it describes and cannot drift from it.</p>
@@ -519,8 +520,8 @@ different vintages.</p>
 <p>Stratum handles this in two ways, and both are things you configure rather than code:</p>
 
 <ol>
-<li><strong>Refuse mixed vintages</strong> at plan time, by fingerprinting every contributing
-granule's class table. This is automatic and required — see <a href="running.html#vintage">Running a
+<li><strong>Refuse mixed vintages</strong> at plan time, by fingerprinting the contributing
+granules' class tables — <a href="#class-table-reads">which ones</a>. This is automatic and required — see <a href="running.html#vintage">Running a
 mosaic</a>. Pinning a <code>build_version</code> is an optional filter, not the guard: one
 collection already spans eight builds with no change to its classes.</li>
 <li><strong>Refer to classes by attribute</strong> wherever you name one — in the classes file a
@@ -533,12 +534,65 @@ classes:
   - {id: 1, name: goethite, members: [{library: sprlb06, record: 882,  group: 1},
                                       {library: splib06, record: 5736, group: 1}]}</code></pre>
 
-<p>At plan time Stratum fingerprints every contributing granule's class table. If they all agree,
+<p>At plan time Stratum fingerprints the contributing granules' class tables. If they all agree,
 it proceeds and records the fingerprint in provenance. If they differ, it fails and tells you —
 unless you have explicitly permitted mixed vintages, in which case every table must still resolve
 fully into the enumeration, and it reports any entry it cannot resolve unambiguously.</p>
 
 <p>An entry that matches zero or multiple rows is a plan-time error, never a guess.</p>
+
+<h3 id="class-table-reads">Which tables the plan reads, and why</h3>
+
+<p>Planning is more than laying out work. Reading class tables is the one point where the planner
+opens real granules and checks the science before any compute is spent. It reads tables for the
+<strong>contributing granules</strong>: the ones that survive, in order,</p>
+
+<ol>
+<li>the index query — the role's collection, the AOI's bounding box, <code>time.start</code> to
+<code>time.end</code>;</li>
+<li>every <code>granule_filter</code>, with its <code>on_missing</code> policy;</li>
+<li>dropping granules that touch no tile of the AOI, and granules lacking a file for any role the
+run reads;</li>
+<li>the epoch check — every survivor falls in an epoch.</li>
+</ol>
+
+<p>This happens before any per-pixel choice: the scorer picks between observations cell by cell at
+resolve time, so at plan time every survivor might contribute. The tables are needed for three
+things:</p>
+
+<div class="tw"><table>
+<thead><tr><th>Use</th><th>What goes wrong without it</th></tr></thead>
+<tbody>
+<tr><td>The vintage check: do the tables agree?</td><td>Two class lists blended into one map that looks entirely plausible</td></tr>
+<tr><td>The remap: each table resolved into the product's enumeration</td><td>A raw integer read as the wrong class</td></tr>
+<tr><td><code>classes: source</code>: the table <em>becomes</em> the product's enumeration</td><td>No legend to publish</td></tr>
+</tbody>
+</table></div>
+
+<p><strong><code>identity</code> decides how many tables that is.</strong> It names the index fields
+that define one table — a granule column (<code>collection_version</code>,
+<code>build_version</code>, <code>product_version</code>, <code>day_night</code>,
+<code>collection</code>) or a catalogue attribute. Granules agreeing on all of them are assumed to
+carry the same table, so the planner reads <strong>one per group</strong>: a US West year spanning
+a handful of builds is a handful of reads, not one per granule. Omit <code>identity</code> and
+every granule's table is read.</p>
+
+<ul>
+<li><strong>The assumption is checked.</strong> Before a worker uses a granule's classes it reads
+that granule's own table and compares it with the one the plan assigned. A mismatch fails the item
+and names the granule, so a wrong <code>identity</code> costs a failed run, never a wrong map.</li>
+<li><strong>Different groups are still compared at plan time.</strong> A reprocessing changes the
+build, so it forms a new group, its table is read, and the vintage check refuses the mix before
+anything runs.</li>
+<li><strong>A granule missing an identity value</strong> is its own group, and its table is read.</li>
+<li><strong><code>identity</code> is not a filter.</strong> Every build stays in the run; pin one
+with <code>granule_filter</code> if that is what you want.</li>
+</ul>
+
+<p>Reading a table does not download the granule. Against a catalogue the planner reads only the
+bytes the table occupies, over HTTP range requests — about half a megabyte of a 45&nbsp;MB file —
+and leaves the full download to the worker that needs the pixels. See
+<a href="reading-data.html">Reading data</a> for what the plan does download.</p>
 
 <h2 id="outputs">What a run produces</h2>
 

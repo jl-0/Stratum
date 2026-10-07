@@ -1,4 +1,4 @@
-"""Product blocks -> one tile (first-slice plan section 4; 06 section 4 layout).
+"""Product blocks -> one tile (06 section 4 layout).
 
 A product block is a directory of single-band GeoTIFFs, `{band}.tif`, one per delivered
 `BandSpec`, covering the block's CORE window (no halo). `write_product_block` writes one from the
@@ -55,7 +55,7 @@ def write_product_block(out_dir: Path, arrays: Mapping[str, np.ndarray],
     out_dir.mkdir(parents=True, exist_ok=True)
     if block.halo:
         raise ValueError(f"product block {block.name} has halo {block.halo}; product blocks are "
-                         "core windows (first-slice plan section 4)")
+                         "core windows (06 section 4)")
     win = block.core_window
     transform = block.transform                 # halo 0: the core window's transform
     paths: list[Path] = []

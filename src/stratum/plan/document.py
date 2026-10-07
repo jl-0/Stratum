@@ -1,7 +1,6 @@
-"""`plan.json` and the work lists: what a worker needs beyond the manifest (first-slice plan
-section 4), and how a worker rebuilds its `PlanContext` from them.
+"""`plan.json` and the work lists: what a worker needs beyond the manifest, and how a worker rebuilds its `PlanContext` from them.
 
-The run directory (plan section 4, storage layout):
+The run directory (06 section 4):
 
     {run_dir}/manifest.merged.yaml   the document that was hashed
     {run_dir}/index.parquet          the frozen candidate set (02 section 6)
@@ -32,7 +31,13 @@ from stratum.ancillary import AuxSource
 from stratum.cache import CacheRoot
 from stratum.classes import Remap
 from stratum.plugins import resolve
-from stratum.resolve import AliasBinding, PlanContext, PluginBinding, RoleBinding
+from stratum.resolve import (
+    AliasBinding,
+    ClassTableProbe,
+    PlanContext,
+    PluginBinding,
+    RoleBinding,
+)
 from stratum.storage import Workspace, local_workspace
 from stratum.time import DeliveryPeriod
 from stratum.types import (
@@ -232,6 +237,8 @@ def context_to_doc(ctx: PlanContext) -> dict[str, Any]:
         # never re-hashes - it reads the digest the key was built from, which is also what makes
         # the key the SAME key in every process.
         "aux_sources": {a: src.to_doc() for a, src in sorted(ctx.aux_sources.items())},
+        "table_probes": {r: {"path": t.path, "key": t.key, "attributes": list(t.attributes)}
+                         for r, t in sorted(ctx.table_probes.items())},
     }
 
 
@@ -271,6 +278,11 @@ def context_from_doc(doc: Mapping[str, Any], root: Path | Workspace) -> PlanCont
         # what it was.
         aux_sources={a: AuxSource.from_doc(a, d)
                      for a, d in dict(doc.get("aux_sources", {})).items()},
+        # `.get` for the same reason: a plan written before workers confirmed class tables
+        # carries none, and reads back as one whose planner read every table itself
+        table_probes={r: ClassTableProbe(path=t["path"], key=t["key"],
+                                         attributes=tuple(t["attributes"]))
+                      for r, t in dict(doc.get("table_probes", {})).items()},
     )
 
 

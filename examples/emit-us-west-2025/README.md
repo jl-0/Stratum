@@ -8,8 +8,8 @@ All of it, as of 17 September 2026. Six manifests, all of them run.
 
 | file | what it is |
 |---|---|
-| `manifest.yaml` | The delivered product: the **eleven western states**, all of 2025, both mineral groups ungrouped, three groupings over them, and four OBS bands from whichever granule won each cell. **Validates. ~$33-92 of Lambda — §3.** Full CONUS is the same manifest with a wider `bbox`. |
-| `manifest-proof.yaml` | **The same configuration on one tile — 28 s.** 27 bands, 5 class tables, one publish. This is the one to run first. |
+| `manifest.yaml` | The delivered product: the **eleven western states**, all of 2025, both mineral groups ungrouped, three groupings over them, four OBS bands from whichever granule won each cell, and **which granule each group's answer came from** (§8). **Validates. ~$33-92 of Lambda — §3.** Full CONUS is the same manifest with a wider `bbox`. |
+| `manifest-proof.yaml` | **The same configuration on one tile — 37 s.** 29 data bands, 5 class tables, one publish. This is the one to run first. |
 | `manifest-proof-native.yaml` | Both groups ungrouped, nothing else. 26 s. |
 | `manifest-proof-alteration.yaml` / `-iron-oxide` / `-mineral-family` | One grouping each, for comparing a grouping against the ungrouped layer. 24-32 s. |
 | `manifest-proof-bands.yaml` | The multi-band carry, proved two ways — §4. |
@@ -20,7 +20,7 @@ nothing. Run one:
 
 ```
 pixi run stratum validate -m examples/emit-us-west-2025/manifest.yaml            # no data, no login
-pixi run stratum run      -m examples/emit-us-west-2025/manifest-proof.yaml       # one tile, 28 s
+pixi run stratum run      -m examples/emit-us-west-2025/manifest-proof.yaml       # one tile, 37 s
 ```
 
 `algorithm.excalidraw` is the whole algorithm on one canvas — the six stages, the four data
@@ -419,6 +419,54 @@ budget:
 That is 42 one-degree tiles and tens of GB rather than 442. Always `stratum index build` first
 (metadata only, no login, seconds), then `plan` to see the real granule count and staged bytes
 before anything large downloads.
+
+## 8. Provenance: which granule each cell came from (1 Oct 2026 tag-up)
+
+The 1 Oct tag-up agreed to "walk before run" on interactivity: visualise minerals and groupings
+first, then grow toward clicking a pixel to reach its source granule and spectrum. The science
+lead attached one condition: **track the right data through the process now**, so the viewer can
+change later without a reprocessing run. A published mosaic that lacks per-cell provenance cannot
+recover it, because a reducer cannot rebuild evidence a snapshot never stored.
+
+Hence `run_id: us-west-2025-grouping-r2`, snapshot `us-west-2025-grouping-v2`, and two new layers:
+
+```yaml
+    acquired_1: {kind: continuous, source: acquired,
+                 aggregate: {method: best, conditional_on: mineral_1_native}}
+    acquired_2: {kind: continuous, source: acquired,
+                 aggregate: {method: best, conditional_on: mineral_2_native}}
+```
+
+`acquired` is provided by the framework, not by a role. It is the winning look's start time in
+Unix seconds UTC, stored as `float64` because float32 rounds to 128 s. Every tile also gets
+`granules.json`, which maps each value to its granule id. Conditioned on each group's own winner,
+the value is the best-scoring week **among those that voted for the delivered class**: a look that
+actually saw it. `acquired_N_n` comes free: the number of weeks that agreed.
+
+**Measured on the proof tile** (`manifest-proof.yaml`, real 2025 granules, 7 Oct 2026):
+
+- every cell with a delivered class has a time and every cell without one has none: 3,114,632
+  cells for group 1 and 3,175,896 for group 2;
+- 16 and 17 distinct granules respectively. All 17 `granules.json` rows name exactly one granule;
+- of 20,000 random cells per group, **0** lie outside the bounding box of the granule named for
+  them;
+- adjacent scenes in one orbit start **12 s apart** (`…T194925…_007`, `…T194937…_008`). That is
+  why the band is float64: float32 would merge them.
+
+**What it costs.** Two `float64` layers add 16 bytes a cell to the 34 the snapshot already
+carries. The run estimate scales resolve, reduce and publish by bytes a cell, so it will report
+those stages up to about 1.5× higher. `best` is in fact one of the cheapest reductions, so treat
+that as an upper bound. The proof tile's estimate was ~37 s, and it ran in 37.1 s. `plan` reports
+the full run's figure.
+
+**The test site.** `mountain-pass-ca` is now in [`../zones.yaml`](../zones.yaml): a rare-earth
+carbonatite where EMIT detects the Nd absorptions, with a 2023–2025 band-depth time series that
+shows real change at the concentrator. It lies inside this AOI (tile −116, 35). Its box is the
+district's public location, **unverified**, because the collaborator's slides give names only;
+replace it with their site polygons before treating it as a regression baseline. Two caveats:
+whether this product can see REE at all depends on whether the delivered L2B carries the
+Tetracorder 6 Nd group, and an annual vote is exactly the kind of reducer that could smooth the
+concentrator's change away.
 
 ## 7. Generated files, and which of them the framework reads
 

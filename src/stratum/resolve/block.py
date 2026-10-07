@@ -40,7 +40,7 @@ from stratum.types import (
 # ------------------------------------------------------------------------------------ work item
 @dataclass(frozen=True)
 class ResolveItem:
-    """A parsed resolve work item (plan section 4). `block` carries the scorer's halo."""
+    """A parsed resolve work item. `block` carries the scorer's halo."""
 
     tile: TileRef
     epoch: Epoch
@@ -332,7 +332,7 @@ def snapshot_key(item: Mapping[str, Any], plan: PlanContext) -> CacheKey:
     """The key `resolve_block` writes (or would write) the item's snapshot under, computed the
     same way - candidates, GLT window hit test, masked-observation hashes - without resolving.
     The reduce stage recomputes its inputs' keys through this so a missing snapshot is found
-    before anything is read (06 section 2; first-slice plan section 4)."""
+    before anything is read (06 section 2)."""
     parsed = ResolveItem.parse(item, plan)
     return _snapshot_key(plan, parsed, reached_observations(plan, parsed))
 

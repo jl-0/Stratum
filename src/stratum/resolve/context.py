@@ -1,5 +1,5 @@
-"""What a resolve worker needs beyond the work item: `PlanContext` (first-slice plan section 4,
-"plan.json carries everything a worker needs that is not in the manifest").
+"""What a resolve worker needs beyond the work item: `PlanContext`: plan.json
+carries everything a worker needs that is not in the manifest.
 
 Every field is plain data or an already-constructed plugin instance, so the plan stage can
 build one from `plan.json` + the manifest and a process-pool worker can build its own from the
@@ -31,6 +31,7 @@ from stratum.cache import CacheRoot
 from stratum.classes import Remap
 from stratum.hooks import PixelMask, Scorer
 from stratum.types import (
+    BUILTIN_SOURCES,
     AssetHandle,
     AuxAccessor,
     AuxTable,
@@ -46,8 +47,8 @@ AUX_NOT_IN_SLICE = "aux is not in the first slice (05)"
 
 
 class NullAux(AuxAccessor):
-    """The AuxAccessor of the first slice: every alias is undeclared (first-slice plan
-    section 1, "AuxAccessor exists, every declared alias raises 'not implemented'")."""
+    """The AuxAccessor of the first slice: every alias is undeclared, and every
+    declared alias raises 'not implemented'."""
 
     def raster(self, alias: str, *, date: datetime | None = None,
                epoch: Epoch | None = None) -> np.ndarray:
@@ -102,6 +103,18 @@ class RoleBinding:
         get = spec.get if isinstance(spec, Mapping) else lambda k, d=None: getattr(spec, k, d)
         return cls(collection=str(get("collection")), var=str(get("var")), asset=get("asset"),
                    space=str(get("space") or "sensor"), resampling=get("resampling"))
+
+
+@dataclass(frozen=True)
+class ClassTableProbe:
+    """Where a categorical role's granules carry their class table (11 section 9), so a worker
+    can confirm each granule's table against the fingerprint the planner assigned it before
+    using its classes (02 section 3, 12 section 7). The planner may read one table per
+    `class_table.identity` group and assume the rest; this is what makes that safe."""
+
+    path: str
+    key: str
+    attributes: tuple[str, ...]
 
 
 @dataclass(frozen=True)
@@ -180,7 +193,7 @@ class PlanContext:
     aliases         alias name -> AliasBinding, from `inputs.band_aliases`, match already
                     resolved to an index.
     geolocation_role
-                    The role whose `loc` built the GLTs (03 section 3, plan section 5). The GLT
+                    The role whose `loc` built the GLTs (03 section 3). The GLT
                     indexes THAT role's sensor array, so its VarSpec.shape is the sensor shape a
                     sensor-space mask sees when the role is read.
     schema          The run's SnapshotSchema, classes resolved (13); `layers_hash` keys snapshots.
@@ -201,6 +214,9 @@ class PlanContext:
     reducer         The Reducer plugin and its key identity, or None for the built-in reducer
                     (04 section 5, 06 section 2). None is the usual case: the schema's
                     `aggregate` vocabulary covers everything named so far.
+    table_probes    role name -> ClassTableProbe for every categorical role: resolve reads the
+                    granule's own table and refuses it unless its fingerprint is the one its remap
+                    was resolved from. Empty (a hand-built context) checks nothing.
     aux_sources     alias -> AuxSource for every source the manifest declared (05 section 5),
                     already staged and digested by the planner. Empty for a run with no aux,
                     which is what keeps such a run's keys bit-identical to a run before aux
@@ -225,6 +241,7 @@ class PlanContext:
     reader_lookup: Callable[[str], GranuleReader] | None = None
     aux_sources: Mapping[str, AuxSource] = field(default_factory=dict)
     reducer: PluginBinding | None = None
+    table_probes: Mapping[str, ClassTableProbe] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         for name in self.aliases:
@@ -252,7 +269,7 @@ class PlanContext:
             raise NotImplementedError(
                 f"scorer {self.scorer.ref!r} has capability "
                 f"{self.scorer.instance.capability!r}; only 'streaming' is in this slice "
-                "(04 section 4, first-slice plan section 1)")
+                "(04 section 4)")
 
     # ------------------------------------------------------------------------------ plugins
     @property
@@ -302,7 +319,8 @@ class PlanContext:
         masks' `required_roles`, each resolved through aliases to its role. Manifest order."""
         wanted: set[str] = set()
         for layer in self.schema.layers:
-            wanted.add(self.role_of(layer.source))
+            if layer.source not in BUILTIN_SOURCES:
+                wanted.add(self.role_of(layer.source))
         for name in self.scorer.instance.required_roles:
             wanted.add(self.role_of(name))
         for m in self.masks:
@@ -343,6 +361,6 @@ class PlanContext:
 
 
 __all__ = [
-    "AUX_NOT_IN_SLICE", "AliasBinding", "NullAux", "PlanContext", "PluginBinding", "RoleBinding",
+    "AUX_NOT_IN_SLICE", "AliasBinding", "ClassTableProbe", "NullAux", "PlanContext", "PluginBinding", "RoleBinding",
     "Store", "plugin_version",
 ]

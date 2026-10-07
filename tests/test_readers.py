@@ -120,6 +120,41 @@ def test_class_table_from_embedded_group(make_granule):
     assert table.fingerprint().startswith("sha256:")
 
 
+def _ranged(path: Path, tmp_path: Path):
+    """`path` served over HTTP byte ranges by the fake session `test_store` uses."""
+    from test_store import URL, _ranged_store
+
+    store, _ = _ranged_store(tmp_path / "assets", body=path.read_bytes())
+    return store.open_ranged(URL).warm(L2BMin.range_prefetch)
+
+
+ATTRS = ["name", "record", "library", "group", "url"]
+
+
+def test_class_table_over_ranges_fingerprints_as_netcdf4_does(make_granule, tmp_path):
+    """The planner reads a table over byte ranges with h5py; the worker re-reads it from the
+    staged file with netCDF4 and refuses the granule unless the fingerprints agree (12 section
+    7). So the two must decode every column to the same values."""
+    path = make_granule("EMIT_L2B_MIN_001_a.nc")
+    reader, ctx = _open(path)
+    with ctx:
+        local = reader.class_table(ctx, "/mineral_metadata", "index", ["name", "library", "group"])
+    asset = _ranged(path, tmp_path)
+    rctx = reader.open(asset)
+    try:
+        remote = reader.class_table(rctx, "/mineral_metadata", "index",
+                                    ["name", "library", "group"])
+        assert reader.class_table(rctx, "/no_such_group", "index", []) is None
+        with pytest.raises(KeyError, match="bogus"):
+            reader.class_table(rctx, "/mineral_metadata", "index", ["bogus"])
+        with pytest.raises(NotImplementedError, match="byte ranges"):
+            reader.variables(rctx)
+    finally:
+        rctx.close()
+    assert remote.entries.equals(local.entries)
+    assert remote.fingerprint() == local.fingerprint()
+
+
 def test_minuncert_is_read_by_the_same_reader(make_granule):
     reader, ctx = _open(make_granule("EMIT_L2B_MINUNCERT_001_a.nc", kind="minuncert"))
     with ctx:
@@ -265,6 +300,22 @@ def test_reference_granule_geolocation_glt_and_class_table(ref_granule):
     assert table.entries.num_rows == 294
     assert table.entries.column("index").to_pylist() == list(range(1, 295))
     assert table.entries.column_names == ["index", "name", "record", "library", "group", "url"]
+
+
+def test_reference_granule_class_table_over_ranges(ref_granule, tmp_path):
+    """The same parity on a real delivered granule, and the cost the prefetch was sized for:
+    [observed] /mineral_metadata sits at the end of the file, so the head and the tail cover it."""
+    reader, ctx = _open(ref_granule)
+    with ctx:
+        local = reader.class_table(ctx, "/mineral_metadata", "index", ATTRS)
+    asset = _ranged(ref_granule, tmp_path)
+    rctx = reader.open(asset)
+    try:
+        remote = reader.class_table(rctx, "/mineral_metadata", "index", ATTRS)
+    finally:
+        rctx.close()
+    assert remote.fingerprint() == local.fingerprint()
+    assert asset.bytes < asset.size // 20
 
 
 def test_trial_minuncert_companion(trial_data):

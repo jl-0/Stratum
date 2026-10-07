@@ -13,7 +13,7 @@ from stratum.manifest.models import CONFIG_MAPPERS, Manifest
 from stratum.plugins import resolve
 from stratum.publish.cogs import check_formats
 from stratum.reduce import SchemaError, product_bands
-from stratum.types import BandSpec
+from stratum.types import BUILTIN_SOURCES, BandSpec
 
 
 def _instantiate(kind: str, ref: str, params: dict[str, Any], where: str,
@@ -170,6 +170,10 @@ def validate_static(m: Manifest) -> list[str]:
     collide = set(inputs.roles) & set(inputs.band_aliases)
     if collide:
         problems.append(f"inputs: {sorted(collide)} are both a role and a band alias")
+    reserved = inputs.names & set(BUILTIN_SOURCES)
+    if reserved:
+        problems.append(f"inputs: {sorted(reserved)} is a framework-provided source and cannot "
+                        "name a role or a band alias (13 section 2)")
     for alias, spec in inputs.band_aliases.items():
         if spec.role not in inputs.roles:
             problems.append(f"inputs.band_aliases.{alias}: role {spec.role!r} is not declared")
@@ -186,7 +190,7 @@ def validate_static(m: Manifest) -> list[str]:
                             f"{m.grid.block_size}")
         if getattr(scorer, "capability", "streaming") != "streaming":
             problems.append(f"scorer {m.scorer.ref}: capability "
-                            f"{scorer.capability!r} is a later slice (plan section 1)")
+                            f"{scorer.capability!r} is a later slice")
     for i, mask in enumerate(m.pixel_mask):
         inst = _instantiate("mask", mask.ref, mask.params, f"pixel_mask[{i}]", problems)
         if inst is not None:
@@ -204,8 +208,16 @@ def validate_static(m: Manifest) -> list[str]:
     layers = m.snapshot.layers
     for name, layer in layers.items():
         where = f"snapshot.layers.{name}"
-        if layer.source not in inputs.names:
-            problems.append(f"{where}: source {layer.source!r} is neither a role nor a band alias")
+        if layer.source in BUILTIN_SOURCES:
+            want = BUILTIN_SOURCES[layer.source]
+            if layer.kind != "continuous" or layer.bands is not None \
+                    or layer.dtype not in (None, want):
+                problems.append(f"{where}: source {layer.source!r} is provided by the framework "
+                                f"as one continuous {want} band; declare kind: continuous with "
+                                "no bands or dtype (13 section 2)")
+        elif layer.source not in inputs.names:
+            problems.append(f"{where}: source {layer.source!r} is neither a role nor a band "
+                            f"alias, nor one of the framework's {sorted(BUILTIN_SOURCES)}")
         elif layer.kind == "categorical":
             role = inputs.roles.get(layer.source)
             if role is not None and role.class_table is None and layer.classes is not None:
@@ -239,8 +251,8 @@ def validate_static(m: Manifest) -> list[str]:
                 problems.append(f"snapshot.layers.{name}: match_on {missing} are not in "
                                 f"inputs.roles.{layers[name].source}.class_table.attributes")
 
-    # -- what this slice cannot execute is refused here, not in a worker (first-slice plan
-    #    section 1; 09 section 5 "a typo fails in the planner, not in workers")
+    # -- what this slice cannot execute is refused here, not in a worker (09 section 5,
+    #    "a typo fails in the planner, not in workers")
     for alias, spec in m.aux.items():
         problems.extend(_aux_source_problems(alias, spec))
     problems.extend(_role_space_problems(m))

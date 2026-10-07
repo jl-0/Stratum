@@ -134,7 +134,7 @@ def _normalise_patterns(
     patterns: Mapping[str, Mapping[str, Any]],
 ) -> dict[str, tuple[str | None, dict[str, str]]]:
     """collection -> (pinned collection_version | None, {asset: glob}). Two shapes accepted:
-    the primary `{collection: {asset: glob}}` (first-slice plan section 4) and the long form
+    the primary `{collection: {asset: glob}}` and the long form
     `{collection: {version: "001", assets: {asset: glob}}}` when the version must be pinned
     explicitly. An asset literally named `assets` therefore needs the long form."""
     out: dict[str, tuple[str | None, dict[str, str]]] = {}

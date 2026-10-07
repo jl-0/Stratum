@@ -50,6 +50,18 @@ def _set_asset_cache(path: str | None) -> None:
         os.environ[ASSET_CACHE_ENV] = str(Path(path).expanduser().resolve())
 
 
+def _preflight(doc: dict, executor: str, workers: int | None) -> bool:
+    """Print the executor's preflight checks against a plan (08 section 1); True if any failed."""
+    from stratum import console
+    from stratum.executors.preflight import failed, preflight, render
+
+    if executor == "slurm":
+        return False
+    checks = preflight(doc, executor, workers=workers)
+    click.echo("\n" + console.render_markdown(render(checks, executor)), nl=False)
+    return bool(failed(checks))
+
+
 def _run_dir(run: str, root: str | None) -> Path:
     """`--run` is a run directory, or a run id under `{root}/runs/`."""
     p = Path(run)
@@ -75,12 +87,15 @@ def main() -> None:
 @click.option("--asset-cache", type=click.Path(), default=None,
               help="Node-local directory the plan stages remote assets into (12 section 4); "
                    "default $STRATUM_ASSET_CACHE, else {root}/assets. Name the same one on run.")
+@click.option("--executor", type=click.Choice(["local", "slurm", "aws"]), default="local",
+              help="Which executor's preflight checks to run against the plan: disk and wall "
+                   "time for local; credentials, the worker function and cost for aws.")
 @click.option("--json", "as_json", is_flag=True, help="Print the plan summary as JSON.")
 @click.option("--plain", is_flag=True, help="Unstyled output. Implied when stdout is not a terminal, or NO_COLOR is set.")
 @click.option("-v", "--verbose", is_flag=True,
               help="Show INFO log records as well as warnings: which reader opened each role, the Earthdata auth path taken, index reuse.")
 def plan(manifest: str, patch: tuple[str, ...], out: str | None, asset_cache: str | None,
-         as_json: bool, plain: bool, verbose: bool) -> None:
+         executor: str, as_json: bool, plain: bool, verbose: bool) -> None:
     """Resolve a manifest, freeze the granule set, write the work list, report the fan-out."""
     from stratum import console
     from stratum.plan import plan_run
@@ -98,6 +113,8 @@ def plan(manifest: str, patch: tuple[str, ...], out: str | None, asset_cache: st
         click.echo(f"\nplan written to {console.emphasis(str(result.run_dir))}")
     if result.over_budget:
         click.echo("OVER BUDGET: " + "; ".join(result.budget_problems), err=True)
+        sys.exit(2)
+    if not as_json and _preflight(result.document, executor, None):
         sys.exit(2)
 
 
@@ -147,6 +164,8 @@ def run(manifest: str | None, patch: tuple[str, ...], from_provenance: str | Non
         click.echo(console.warn("OVER BUDGET: ") + "; ".join(result.budget_problems), err=True)
         if result.refused:
             sys.exit(2)
+    if _preflight(result.document, executor, workers):
+        raise click.ClickException("preflight failed; nothing was dispatched")
     if dry_run:
         return
     try:

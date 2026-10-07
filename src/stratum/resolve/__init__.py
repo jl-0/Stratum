@@ -5,7 +5,7 @@
     read_observation  steps 5-15 for one granule over one block -> block-space ObsWindow
     resolve_block     one work item: streaming argmax, snapshot directory, cache key
     write_snapshot / read_snapshot / stack_snapshots   snapshot IO (13, 11 section 8)
-    PlanContext       what a worker needs beyond the work item (plan section 4)
+    PlanContext       what a worker needs beyond the work item
 """
 from __future__ import annotations
 
@@ -24,6 +24,7 @@ from stratum.resolve.block import (
 from stratum.resolve.context import (
     AUX_NOT_IN_SLICE,
     AliasBinding,
+    ClassTableProbe,
     NullAux,
     PlanContext,
     PluginBinding,
@@ -32,6 +33,7 @@ from stratum.resolve.context import (
 )
 from stratum.resolve.gather import Gathered, gather
 from stratum.resolve.observation import (
+    ClassTableMismatch,
     ObsContext,
     Observation,
     apply_remap,
@@ -54,7 +56,8 @@ from stratum.resolve.snapshot import (
 
 __all__ = [
     "AUX_NOT_IN_SLICE", "CATEGORICAL_DTYPE", "CATEGORICAL_NODATA", "CONTINUOUS_DTYPE",
-    "SCORE_NAME", "VALID_NAME", "AliasBinding", "Gathered", "NullAux", "ObsContext",
+    "SCORE_NAME", "VALID_NAME", "AliasBinding", "ClassTableMismatch", "ClassTableProbe",
+    "Gathered", "NullAux", "ObsContext",
     "Observation", "PlanContext", "PluginBinding", "ResolveItem", "Resolved", "RoleBinding",
     "apply_remap", "block_coords", "candidates", "empty_layer", "gather", "glt_key_for",
     "layer_dtype", "layer_nodata", "observation_inputs", "plugin_version", "reached_observations",

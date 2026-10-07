@@ -108,6 +108,39 @@ multi-year run, and "one build per run" would flag every long run as mixed. Requ
 - if the reprocessing is published as a new collection version, as `EMITL3ASA.002` was, a role
   pins one with `version:` (§5) and the check is trivially satisfied.
 
+#### Which tables the planner reads: `class_table.identity`
+
+The argument above runs one way: **different builds do not mean different tables.** It says
+nothing against the converse, and the converse is what makes the check affordable. If granules
+sharing a build share a table, the build splits the archive *more* finely than the tables do, so
+reading one table per build can never merge two tables that differ — it can only read the same
+table several times. [observed] Every comparison so far agrees: three US West 2025 granules from
+builds `010621`, `010624` and `010627` carry one 294-row table; the Nevada example's two builds,
+`010634` and `010635`, carry one fingerprint (2026-10-06).
+
+So the manifest says what defines a table, per categorical role:
+
+```yaml
+class_table: {source: embedded, path: /mineral_metadata, key: index,
+              attributes: [name, record, library, group, url],
+              identity: [collection_version, build_version]}
+```
+
+- the planner groups contributing granules by their `identity` values and reads **one table per
+  group**; the group takes its fingerprint, and the vintage check above runs across groups exactly
+  as it ran across granules ([12 §7](12-data-access.md));
+- the assumption is **checked, not trusted**: each worker reads its own granule's table from the
+  verified file before using a class from it and fails the item on a different fingerprint, so a
+  wrong `identity` costs a failed run, never a wrong map;
+- a granule missing any identity value is its own group; with no `identity` every granule is, and
+  the planner reads them all — the conservative default;
+- `identity` is not a pin and does not filter. A run spanning eight builds reads eight tables and
+  proceeds when they agree.
+
+What this gives up: a table that changes *within* an identity group is caught by the first worker
+to read such a granule rather than by the plan. Reprocessing changes the build, so the case the
+vintage check exists for is still a plan-time failure.
+
 **Verified against CMR (2026-09-01).** `SOFTWARE_BUILD_VERSION` and `SOFTWARE_DELIVERY_VERSION`
 are granule-level `AdditionalAttributes`, exposed before download, so the index build is a metadata
 query and not a header scan. The file additionally carries `product_version` (`V001`) and a

@@ -14,3 +14,11 @@ bingham-canyon: [-112.6, 40.2, -111.8, 40.9]        # Oquirrh Mountains, Utah
 cuprite-nv: [-117.6, 37.2, -117.0, 37.8]            # Cuprite / Goldfield, Nevada
 leadville-co: [-106.7, 39.0, -105.9, 39.6]          # Leadville mining district, Colorado
 south-central-az: [-111.8, 31.9, -110.4, 33.1]      # Tucson - Globe - Safford porphyry belt
+
+# A known-mine REGRESSION site (1 Oct 2026 tag-up): an active rare-earth carbonatite where EMIT
+# detects the Nd absorptions, with an eight-zone facility map and a 2023-2025 band-depth time
+# series showing real change at the concentrator - so a temporal reducer must report it, not
+# smooth it away. UNVERIFIED: the collaborator's slides give names only, no coordinates; this is
+# the district's public location (~35.48 N, 115.53 W) with a margin. Replace it with the
+# collaborator's site polygons before using it as a regression baseline.
+mountain-pass-ca: [-115.60, 35.43, -115.46, 35.53]  # Mountain Pass REE mine, California

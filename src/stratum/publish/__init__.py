@@ -40,6 +40,7 @@ from stratum.publish.mappers import (
     write_images,
 )
 from stratum.publish.period import (
+    GRANULES_NAME,
     Published,
     band_class_tables,
     layer_class_tables,
@@ -47,6 +48,7 @@ from stratum.publish.period import (
     product_class_table,
     product_dir,
     publish_period,
+    write_granules,
 )
 from stratum.publish.provenance import (
     build_provenance,
@@ -65,6 +67,7 @@ from stratum.publish.stitch import read_band, stitch, write_product_block
 __all__ = [
     "COG_MEDIA_TYPE",
     "COG_MIN_BLOCKSIZE",
+    "GRANULES_NAME",
     "RAMPS",
     "AlphaFrom",
     "CategoricalMapper",
@@ -99,6 +102,7 @@ __all__ = [
     "write_classes",
     "write_data_cogs",
     "write_geotiff",
+    "write_granules",
     "write_image",
     "write_images",
     "write_legend",

@@ -18,6 +18,9 @@ from stratum.access.store import (
     CachedAsset,
     ChecksumMismatch,
     LocalAsset,
+    RangedAsset,
+    RangedFile,
+    RangeUnsupported,
     UntrustedScheme,
     asset_cache_for,
     asset_cache_path,
@@ -30,7 +33,7 @@ from stratum.access.store import (
 __all__ = [
     "ASSET_CACHE_ENV", "TRUSTED_HOSTS", "AssetCacheUnconfigured", "AssetFetchError",
     "AssetStore", "AssetStoreError", "CMRSource", "CachedAsset", "ChecksumMismatch",
-    "LocalAsset", "LocalSource",
+    "LocalAsset", "LocalSource", "RangeUnsupported", "RangedAsset", "RangedFile",
     "SourceError", "UntrustedScheme", "asset_cache_for", "asset_cache_path",
     "clear_cache", "is_local", "is_trusted_host", "local_path", "read_header", "reader_for",
     "reader_ref", "to_uri",

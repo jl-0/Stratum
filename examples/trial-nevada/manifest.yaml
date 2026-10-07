@@ -1,4 +1,4 @@
-# The first-slice trial run (first-slice plan section 2): one tile, one epoch, MinViewZenith,
+# The first-slice trial run: one tile, one epoch, MinViewZenith,
 # staged granules on local disk. Run from the repo root:
 #
 #     pixi run stratum run -m examples/trial-nevada/manifest.yaml
@@ -55,6 +55,7 @@ inputs:
         path: /mineral_metadata
         key: index
         attributes: [name, record, library, group, url]
+        identity: [collection_version, build_version]
     mineral_depth: {collection: EMITL2BMIN, var: group_1_band_depth}
   # Band indices are 0-BASED into the L1B OBS `obs` variable, whose bands are:
   #   0 path length, 1 to-sensor azimuth, 2 to-sensor zenith, 3 to-sun azimuth,

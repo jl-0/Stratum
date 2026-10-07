@@ -45,7 +45,8 @@ inputs:
       collection: EMITL2BMIN
       var: group_1_mineral_id
       class_table: {source: embedded, path: /mineral_metadata, key: index,
-                    attributes: [name, record, library, group, url]}
+                    attributes: [name, record, library, group, url],
+                    identity: [collection_version, build_version]}
     mineral_depth: {collection: EMITL2BMIN, var: group_1_band_depth}
 
 granule_filter: []            # no cloud fraction in a local index (02 section 4)

@@ -117,8 +117,7 @@ Two inherited behaviours worth knowing (`mosaic.py`, `get_subgrid_from_bounds` a
 `remove_negatives`): the target grid is subset to the `loc` bounding box **before** the query, so
 cells whose centres fall outside the granule's outermost points are never assigned even within
 `max_distance`; and `clean_contiguous=True` zeroes *any* cell — a positive hit too — with three or
-more flagged cells in its 3 × 3, all three bands. On the trial tile the second removed nothing
-([notes/heritage.md](../notes/heritage.md), "First measurements").
+more flagged cells in its 3 × 3, all three bands. On the trial tile the second removed nothing.
 
 ### Three methods
 
@@ -161,7 +160,7 @@ inverse nearest query against cell centres) while the product's table sits at (�
 cell, about 11 m west and 22 m south. The offset is constant within a granule and varies between
 granules, so it is geometry-dependent rather than a fixed convention. An off-by-one crop (±1.000
 cell), a half-cell corner-versus-centre convention, and a forward scatter are each ruled out by
-measurement ([notes/heritage.md](../notes/heritage.md), "The EMIT ortho lattice"). **So `adopt` is
+measurement. **So `adopt` is
 not a faster route to the same answer; it is the producer's answer.** Why their registration
 differs, and which is preferable, is open.
 

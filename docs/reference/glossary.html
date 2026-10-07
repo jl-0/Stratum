@@ -433,7 +433,8 @@ cell at all, before masks and the scorer.
 
 <dt id="vintage"><span id="v"></span>Vintage</dt>
 <dd>Which version of an upstream product a granule is, as its <a href="#class-table">class
-table</a> reveals. Stratum fingerprints every contributing granule's table and refuses a run that
+table</a> reveals. Stratum fingerprints the contributing granules' tables &mdash; one per
+<code>class_table.identity</code> group, each worker re-checking its own &mdash; and refuses a run that
 mixes vintages, because the same integer can mean different minerals in two of them.
 <a href="../guide/running.html#vintage">Mixed vintages are refused</a></dd>
 

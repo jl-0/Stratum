@@ -485,7 +485,7 @@ def test_hash_and_run_id_move_with_the_classes_file_content(tmp_path):
 
 
 def test_this_slice_refuses_unreachable_aux_and_netcdf_statically(tmp_path):
-    """First-slice plan section 1: what no worker can execute fails in `stratum validate`.
+    """What no worker can execute fails in `stratum validate`.
 
     Aux itself runs now, so the refusals are narrower - a scheme the asset store cannot stage,
     and date templating that would need a catalogue listing. A DECLARED alias that a plugin

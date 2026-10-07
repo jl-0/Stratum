@@ -73,6 +73,7 @@ inputs:
         path: /mineral_metadata
         key: index
         attributes: [name, record, library, group, url]
+        identity: [collection_version, build_version]
     mineral_depth:  {collection: EMITL2BMIN,  var: group_1_band_depth}
     mineral_uncert: {collection: EMITL2BMIN,  asset: MINUNCERT, var: group_1_band_depth_unc}
     mask:           {collection: EMITL2AMASK, version: "002", var: mask}   # EMITL2AMASK is published

@@ -57,7 +57,7 @@ sequenceDiagram
 <thead><tr><th></th><th>The planner</th><th>A worker</th></tr></thead>
 <tbody>
 <tr><td><strong>Runs</strong></td><td>Once per run</td><td>Once per work item &mdash; thousands of times</td></tr>
-<tr><td><strong>Entry</strong></td><td><a class="src" data-sym="def plan_run" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/plan/run.py#L777">plan_run</a></td><td><a class="src" data-sym="def exec_item" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/executors/worker.py#L235">exec_item</a></td></tr>
+<tr><td><strong>Entry</strong></td><td><a class="src" data-sym="def plan_run" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/plan/run.py#L875">plan_run</a></td><td><a class="src" data-sym="def exec_item" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/executors/worker.py#L236">exec_item</a></td></tr>
 <tr><td><strong>Reads</strong></td><td>The manifest, the index, and a handful of real granules</td><td><code>plan.json</code>, one work list line, and the assets that line names</td></tr>
 <tr><td><strong>Decides</strong></td><td>Everything: tiles, epochs, granules, plugins, schema, class lumping, fan-out</td><td>Nothing. It executes a decision already recorded</td></tr>
 <tr><td><strong>Writes</strong></td><td>The run directory</td><td>One cache artifact, and one outcome line</td></tr>
@@ -112,7 +112,7 @@ sequenceDiagram
 
 <h2 id="plan">3. What planning decides, in order</h2>
 
-<p><a class="src" data-sym="def plan_run" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/plan/run.py#L777">plan_run</a>
+<p><a class="src" data-sym="def plan_run" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/plan/run.py#L875">plan_run</a>
 is about two hundred lines of sequence, and the order is load-bearing.</p>
 
 <div class="tw">
@@ -127,7 +127,7 @@ is about two hundred lines of sequence, and the order is load-bearing.</p>
 <tr><td class="num">6</td><td>Drop granules that meet no tile, then granules lacking a role's asset</td><td>The AOI is its <em>tiles</em>, not the box around them — a granule in the gap between two distant zones can be read by no work item, so it must not be frozen, counted or budgeted</td></tr>
 <tr><td class="num">7</td><td>Freeze the survivors to <code>index.parquet</code> and hash the file</td><td>The candidate set is now immutable for the life of the run</td></tr>
 <tr><td class="num">8</td><td><strong>The budget gate</strong></td><td><strong>Before</strong> the data-dependent checks, because against a catalogue source those download real bytes, and a run that is going to be refused must not pay for one</td></tr>
-<tr><td class="num">9</td><td><code>inspect_granules</code>: open real granules, resolve band aliases, resolve per-granule class lumping, check table vintages</td><td>The only place the planner touches pixels; staged assets become cache hits for the run</td></tr>
+<tr><td class="num">9</td><td><code>inspect_granules</code>: open real granules, resolve band aliases, read one class table per <code>class_table.identity</code> group (<code>identity_groups</code>), resolve per-granule class lumping, check table vintages</td><td>The only place the planner opens granules, and it reads no pixels. One file per role is staged; class tables are range-read (<code>AssetStore.open_ranged</code>) in a thread pool, then parsed serially &mdash; libhdf5 is not thread-safe. Each worker re-checks its granule's table (<code>confirm_class_table</code>)</td></tr>
 <tr><td class="num">10</td><td>Validate <code>outputs</code> against the resolved schema</td><td>A render that cannot work should fail now, not after regrid has run for an hour</td></tr>
 <tr><td class="num">11</td><td>Build the <code>PlanContext</code>, then the four work lists</td><td>The fan-out is now fully determined</td></tr>
 <tr><td class="num">12</td><td>Write <code>plan.json</code>, the work lists, and <code>report.md</code></td><td>Everything a worker will ever need is now on disk</td></tr>
@@ -139,7 +139,7 @@ is about two hundred lines of sequence, and the order is load-bearing.</p>
   <span class="label">Step 8 before step 9 is not an accident</span>
   <p>Swapping them would make an over-budget plan download granules before refusing. The comment
   at
-  <a class="src" data-sym="the budget gate (09 section 4) comes BEFORE" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/plan/run.py#L909">plan/run.py:776</a>
+  <a class="src" data-sym="the budget gate (09 section 4) comes BEFORE" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/plan/run.py#L1007">plan/run.py:776</a>
   says so explicitly; treat it as a constraint on any reordering.</p>
 </div>
 
@@ -162,7 +162,7 @@ which is what you ship. A run directory is disposable; the cache is not.</p>
 <h2 id="work-lists">4. The four work lists</h2>
 
 <p>A work item is one JSON object on one line, and it is the entire input to a worker besides
-<code>plan.json</code>. <a class="src" data-sym="def build_work_lists" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/plan/run.py#L1058">build_work_lists</a>
+<code>plan.json</code>. <a class="src" data-sym="def build_work_lists" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/plan/run.py#L1174">build_work_lists</a>
 emits all four in a single pass over the tiles.</p>
 
 <div class="tw">
@@ -286,8 +286,8 @@ leaves either nothing or a temp name, never a half-artifact that the next run wo
 <table>
 <thead><tr><th>Raised</th><th>Means</th><th>Surfaces as</th></tr></thead>
 <tbody>
-<tr><td><a class="src" data-sym="class PlanError" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/plan/document.py#L57">PlanError</a></td><td>The manifest, the data or the index make the run impossible</td><td>A clean CLI message; nothing is written</td></tr>
-<tr><td><a class="src" data-sym="class BudgetExceeded" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/plan/document.py#L61">BudgetExceeded</a></td><td>Fan-out exceeds the manifest's budget and <code>on_exceed</code> is not <code>warn</code></td><td>Exit 2, with the plan and report still written so you can see <em>why</em></td></tr>
+<tr><td><a class="src" data-sym="class PlanError" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/plan/document.py#L62">PlanError</a></td><td>The manifest, the data or the index make the run impossible</td><td>A clean CLI message; nothing is written</td></tr>
+<tr><td><a class="src" data-sym="class BudgetExceeded" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/plan/document.py#L66">BudgetExceeded</a></td><td>Fan-out exceeds the manifest's budget and <code>on_exceed</code> is not <code>warn</code></td><td>Exit 2, with the plan and report still written so you can see <em>why</em></td></tr>
 <tr><td><code>FileNotFoundError</code> from a handler</td><td>An upstream stage did not run for this item</td><td>One failed outcome record, naming the missing key path and the stage to run</td></tr>
 <tr><td><a class="src" data-sym="class ExecutionError" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/executors/local.py#L41">ExecutionError</a></td><td>One or more items of a stage failed</td><td>The stage stops the run; up to ten failures listed, plus the first traceback in full</td></tr>
 <tr><td><code>FilterError</code></td><td>A <code>granule_filter</code> met missing metadata under <code>on_missing: fail</code></td><td>Wrapped into a <code>PlanError</code> — a policy decision, not a traceback</td></tr>

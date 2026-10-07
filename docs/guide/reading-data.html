@@ -371,12 +371,21 @@ later blocks   <span class="c">same worker        -&gt; asset cache hit; no seco
   a granule never fetches it, and a granule no block reaches is never downloaded at all.</p>
 </div>
 
-<p>One exception, and it is deliberate: <code>stratum plan</code> validates the manifest against
-real granules, and against the archive that means downloading what it inspects &mdash; one geometry
-file for the sample-asset check, and every contributing granule's mineral file, because the class
-table it fingerprints lives inside the file. Those land in the same asset cache the workers use
-and are cache hits for the run, so the total download does not change; the first plan is simply
-where part of it happens. The plan report says how many files and how many bytes.</p>
+<p>One exception, and it is kept small: <code>stratum plan</code> validates the manifest against
+real granules. It downloads one file per role for the variable checks, into the same asset cache
+a local run's workers use. Class tables it does <em>not</em> download: a table lives inside the
+granule, so the planner reads just the bytes it occupies over HTTP range requests &mdash; about
+half a megabyte of a 45&nbsp;MB file &mdash; one table per
+<a href="concepts.html#class-table-reads"><code>class_table.identity</code></a> group. Those bytes
+are not cached and are never used for a pixel; the worker that reads the granule downloads and
+verifies the whole file, and confirms its table before using it. The plan report's <em>Remote
+reads at plan time</em> section says how many files and bytes were staged and how many tables
+were range-read.</p>
+
+<p>Under <code>--executor aws</code> the planner's cache is on the machine that ran
+<code>stratum plan</code>, and every Lambda stages into its own disk, so anything the plan
+downloads is downloaded again by a worker. That is why the plan reads tables over ranges rather
+than staging them.</p>
 
 <h3 id="asset-cache">The asset cache</h3>
 

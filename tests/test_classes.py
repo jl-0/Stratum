@@ -175,7 +175,7 @@ def test_example_enumeration_against_the_reference_granule():
     assert (r.lookup[1:] > 0).all()
 
 
-def test_ids_fit_below_the_uint16_nodata_sentinel():  # 11 section 2; plan section 4
+def test_ids_fit_below_the_uint16_nodata_sentinel():  # 11 section 2
     m = (Member({"library": "x", "record": 1, "group": 1}),)
     Enumeration("t", "1", ("library", "record", "group"), "fail", (ClassDef(MAX_ID, "a", m),))
     with pytest.raises(EnumerationError, match="65535 as nodata"):

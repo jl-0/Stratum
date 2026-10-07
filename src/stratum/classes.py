@@ -22,8 +22,8 @@ from stratum.types import ClassTable, canonical_hash
 NONE_ID = 0
 NONE_NAME = "none"
 UNMAPPED = -1
-# Categorical layers and products are stored as uint16 with 65535 as nodata (11 section 2,
-# first-slice plan section 4), so a product id must fit below that sentinel: an id of 65535
+# Categorical layers and products are stored as uint16 with 65535 as nodata (11 section 2),
+# so a product id must fit below that sentinel: an id of 65535
 # would read back as nodata and anything larger would wrap silently on the cast.
 MAX_ID = 65534
 

@@ -1,5 +1,5 @@
-"""One publish work item: `{"tile": [tx, ty], "period": [start, end]}` (first-slice plan
-section 4) -> `products/{run_id}/{tx}_{ty}/{period}/` with data COGs, images, legends,
+"""One publish work item: `{"tile": [tx, ty], "period": [start, end]}` ->
+`products/{run_id}/{tx}_{ty}/{period}/` with data COGs, images, legends,
 `classes.json` and `item.json`.
 
 This is the sequence the stage runs; every step is a public function the executor may also call
@@ -7,18 +7,32 @@ on its own. The manifest `outputs` block arrives as a plain dict; the manifest m
 """
 from __future__ import annotations
 
+import json
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+import numpy as np
+
 from stratum.publish.cogs import check_formats, raster_format, write_data_cogs
 from stratum.publish.legend import write_classes, write_legend
 from stratum.publish.mappers import build_mappers, write_images
+from stratum.publish.provenance import iso_utc
 from stratum.publish.stac import stamp, write_stac_item
 from stratum.publish.stitch import stitch
 from stratum.reduce import product_bands
-from stratum.types import BlockRef, ClassTable, Epoch, SnapshotSchema, TileRef
+from stratum.types import (
+    BlockRef,
+    ClassTable,
+    Epoch,
+    GranuleRef,
+    SnapshotSchema,
+    TileRef,
+    acquired_seconds,
+)
+
+GRANULES_NAME = "granules.json"
 
 
 @dataclass(frozen=True)
@@ -31,6 +45,7 @@ class Published:
     legends: dict[str, Path] = field(default_factory=dict)
     classes: Path | None = None
     class_files: dict[str, Path] = field(default_factory=dict)
+    granules: Path | None = None
     item: Path | None = None
 
 
@@ -40,7 +55,7 @@ def period_dirname(period: Epoch) -> str:
 
 
 def product_dir(products_dir: Path, tile: TileRef, period: Epoch) -> Path:
-    """`{products_dir}/{tx}_{ty}/{period}` (06 section 4; first-slice plan section 4)."""
+    """`{products_dir}/{tx}_{ty}/{period}` (06 section 4)."""
     return Path(products_dir) / f"{tile.tx}_{tile.ty}" / period_dirname(period)
 
 
@@ -85,6 +100,35 @@ def product_class_table(schema: SnapshotSchema) -> ClassTable | None:
     return tables[0] if len(fps) == 1 else None
 
 
+def write_granules(out_dir: Path, stack: Any, schema: SnapshotSchema,
+                   granules: Mapping[str, GranuleRef]) -> Path | None:
+    """`granules.json`: every `acquired` value delivered in this tile, beside the granule it
+    names (10 section 3). The band says WHEN the winning look was taken; this says WHICH granule
+    that was, so a viewer can go cell -> granule -> spectrum without the frozen index. None when
+    the schema delivers no `acquired` layer."""
+    names = [layer.name for layer in schema.layers
+             if layer.source == "acquired" and layer.aggregate.method != "none"
+             and any(b.name == layer.name for b in stack.specs)]
+    if not names:
+        return None
+    by_second: dict[float, list[GranuleRef]] = {}
+    for ref in granules.values():
+        by_second.setdefault(acquired_seconds(ref.datetime), []).append(ref)
+    seen: set[float] = set()
+    for name in names:
+        values = np.asarray(stack[name], dtype=np.float64)
+        seen.update(float(v) for v in np.unique(values[np.isfinite(values)]))
+    rows = []
+    for s in sorted(seen):
+        refs = sorted(by_second.get(s, []), key=lambda r: r.granule_id)
+        rows.append({"acquired": s, "datetime": iso_utc(refs[0].datetime) if refs else None,
+                     "granule_ids": [r.granule_id for r in refs]})
+    path = Path(out_dir) / GRANULES_NAME
+    path.write_text(json.dumps({"layers": names, "units": "s since 1970-01-01 UTC",
+                                "granules": rows}, indent=1) + "\n")
+    return path
+
+
 def render_colors(outputs: Mapping[str, Any], layer: str) -> Mapping[str, Sequence[int]] | None:
     """The `colors` of the categorical render on `layer`, if any, so the data COG's colour table
     matches the image (07 section 2)."""
@@ -99,7 +143,8 @@ def publish_period(out_dir: Path, product_dirs: Sequence[tuple[BlockRef, Path]],
                    period: Epoch, schema: SnapshotSchema, outputs: Mapping[str, Any], *,
                    run_id: str, manifest_hash: str, band_counts: Mapping[str, int] | None = None,
                    run_dir: Path | None = None, tags: Mapping[str, Any] | None = None,
-                   reducer: Any | None = None) -> Published:
+                   reducer: Any | None = None,
+                   granules: Mapping[str, GranuleRef] | None = None) -> Published:
     """Stitch, write data COGs, render, write legends, classes and the STAC item for one
     (tile, period). `band_counts` is `stratum.reduce.band_counts(snaps)` for a schema whose
     multi-band widths it alone cannot state; it is ignored when `reducer` is given, because a
@@ -149,6 +194,9 @@ def publish_period(out_dir: Path, product_dirs: Sequence[tuple[BlockRef, Path]],
     class_files = ({} if class_table is not None
                    else {n: write_classes(out_dir, tb, layer=n) for n, tb in by_layer.items()})
 
+    granules_path = (write_granules(out_dir, stack, schema, granules)
+                     if granules is not None else None)
+
     item = None
     if outputs.get("stac", True):
         item = write_stac_item(out_dir, run_id=run_id, manifest_hash=manifest_hash, tile=tile,
@@ -158,6 +206,6 @@ def publish_period(out_dir: Path, product_dirs: Sequence[tuple[BlockRef, Path]],
                                colors_by_band=colors_by_band or None,
                                data_paths=data, images=images, legends=legends,
                                classes_path=classes, classes_paths=class_files or None,
-                               run_dir=run_dir, fmt=fmt)
+                               granules_path=granules_path, run_dir=run_dir, fmt=fmt)
     return Published(out_dir=out_dir, data=data, images=images, legends=legends, classes=classes,
-                     class_files=class_files, item=item)
+                     class_files=class_files, granules=granules_path, item=item)

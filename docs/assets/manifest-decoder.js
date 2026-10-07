@@ -196,6 +196,10 @@
     'class_table': { cat: 'binding', short: 'Where this product keeps its own class list.',
       body: '<p>Read from the granule being processed rather than a checked-in CSV, so it cannot drift from the pixels it describes.</p>',
       gotcha: 'Classes are matched on ATTRIBUTES, never on the integer. Raw values are positional and differ between vintages.' },
+    'identity': { cat: 'binding', short: 'The index fields that define one class table.',
+      body: '<p>Granules agreeing on every field listed - <code>build_version</code>, say - are assumed to carry the same table, so the planner reads <b>one</b> per group instead of one per granule, over byte ranges rather than downloading the file. Omit it and every granule’s table is read.</p>',
+      gotcha: 'An assumption, and checked: every worker re-reads its own granule’s table before using a class from it, and fails the item if it differs. A wrong identity costs a failed run, never a wrong map.',
+      invalidates: 'Nothing. It changes how the plan reads tables, not which tables a granule has.' },
 
     /* ---------------- aux ---------------- */
     'uri': { cat: 'aux', short: 'Where the source is. One, or a list.',

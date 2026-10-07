@@ -5,9 +5,7 @@ Cost-function-driven mosaic engine for imaging spectroscopy. **The first slice e
 plan through publish, and — the same day — a run from NASA's CMR catalogue with granules
 downloaded over HTTPS on first touch (`examples/emit-cmr-nevada/`). **The cloud slice followed**
 (2026-09-14, 525 tests): an `s3://` storage root, a container image, a Lambda worker and
-`--executor aws`. `docs/specs/` is still the contract; the build contract the first slice was
-written against is
-[`docs/notes/2026-09-02-first-slice-plan.md`](docs/notes/2026-09-02-first-slice-plan.md).
+`--executor aws`. `docs/specs/` is the contract.
 
 Read [`docs/specs/00-overview.md`](docs/specs/00-overview.md) before doing anything substantive;
 it fixes the vocabulary the rest of the repo assumes.
@@ -27,7 +25,7 @@ one.
 |---|---|---|
 | **Specs** | `docs/specs/*.md` | The contract. Carries citations, invariants, open questions. **Authoritative.** |
 | **Site** | `docs/*.html` | How the tool works and how to use it. |
-| **Heritage** | `docs/notes/heritage.md` | Prior art, where the old code lives, why choices were made. **Internal.** |
+| **Local notes** | `docs/notes/` | Prior art, meeting notes, why choices were made. **Git-ignored and never committed — and never cited, linked or named from any tracked file** (specs, site, code comments, READMEs). Anything in a note that becomes a contract is restated in a spec on its own terms. |
 | **Code** | `src/stratum/`, `plugins/stratum-emit/src/stratum_emit/` | **Authoritative for signatures.** `11-types.md` is the narrative around them, not a second copy. |
 
 **When you make a design decision, record it in the same commit that makes it.**
@@ -70,7 +68,7 @@ statement on the page becomes false.
 | Any CLI surface | [`docs/reference/cli.html`](docs/reference/cli.html) |
 | Any ADR | [`docs/decisions/index.html`](docs/decisions/index.html) |
 | Any spec's **open questions** | [`docs/status.html`](docs/status.html) |
-| A finding about an existing pipeline | [`docs/notes/heritage.md`](docs/notes/heritage.md) — **not** the site |
+| A finding about an existing pipeline | the local notes (`docs/notes/`, uncited) — **not** the site |
 
 The last row is the one most easily forgotten. `status.html` rolls up every spec's open questions,
 so resolving one means striking it there too — otherwise the page slowly fills with questions
@@ -92,9 +90,8 @@ claims are load-bearing and several turned out to be wrong on first pass.
    a spec and a plausible story.
 3. **Verify before propagating.** Reports from subagents, meeting transcripts, and recollections
    have all been wrong here. Check the source.
-4. **Voice transcripts have unreliable attribution.** See the caveat in
-   [`docs/notes/2026-08-28-mines-tagup.md`](docs/notes/2026-08-28-mines-tagup.md) — attribute by
-   content, keep timestamps, confirm anything load-bearing.
+4. **Voice transcripts have unreliable attribution.** Attribute by content, keep timestamps,
+   confirm anything load-bearing. Transcripts stay outside the repository.
 
 ---
 
@@ -114,6 +111,11 @@ Established by reading code and data. Do not re-derive; do not assume the opposi
   and exposed before download (verified 2026-09-01), but `EMITL2BMIN.001` already spans eight
   builds with no Tetracorder change. The vintage check is the embedded class-table fingerprint;
   build version is filterable and reported — see [`02-granule-index.md` §3](docs/specs/02-granule-index.md).
+  It is still a valid **grouping**: different builds need not mean different tables, and one build
+  is assumed — and so far observed — to have one table, so `class_table.identity: [collection_version, build_version]` has the plan read
+  one table per build, and every worker confirms its own granule's table before using it
+  (`confirm_class_table`). Do not "simplify" that confirmation away: it is what makes the
+  sampling safe, and the only check a range-read (unverified) table ever gets against verified bytes.
 - **A tile is the cells whose centres fall inside its nominal bounds.** So any resolution tiles
   without overlap or gap; when `tile_size` is not a whole number of cells (1° at 0.0003° is 3333.33)
   tiles differ by one cell and their bounds miss the round number by under a cell. The example grid
@@ -126,8 +128,7 @@ Established by reading code and data. Do not re-derive; do not assume the opposi
   one-sided). The cause is measured: a `kdtree` GLT is exactly centred on the cell (mean offset
   0.000) while the product's table sits (-0.18, -0.37) cell off, varying by granule. Off-by-one,
   half-cell and forward-scatter are each ruled out — do not re-propose them. Adopting is the
-  producer's registration, not a faster route to ours —
-  [`heritage.md`](docs/notes/heritage.md), "The EMIT ortho lattice".
+  producer's registration, not a faster route to ours.
 - **FRCOV is on EMIT's ortho lattice, not ours.** Cell 0.000542232520256367° &mdash; the same one
   lattice as OBS and MIN &mdash; which against a one-arcsecond grid is a ratio of 1.952, so the
   ortho role path is a genuine resample and not an `adopt`-style crop. `resampling` is required
@@ -221,8 +222,22 @@ Established by reading code and data. Do not re-derive; do not assume the opposi
   a local run or by an index build (a CMR search is anonymous), and re-logins once on 401/403.
   Errors name strategies and exception types, never a token or password. The asset cache is
   `$STRATUM_ASSET_CACHE`, else `{root}/assets` — `--asset-cache` on `run`/`exec` sets the
-  variable so spawned workers inherit it; the planner downloads one geometry asset plus every
-  contributing granule's class-table asset into it, and the run hits them.
+  variable so spawned workers inherit it; the planner stages one asset per role into it (the
+  variable checks) and range-reads class tables without staging them (`open_ranged`); only a local
+  run's workers hit what the plan staged — a Lambda stages into its own disk. Before 2026-10-06 the
+  plan staged every contributing granule's MIN file: 82 GB for US West, all downloaded again in AWS.
+- **`acquired` is float64 on purpose, and it IS the granule id.** The one framework-provided layer
+  source (13 §2): the winning look's start, Unix seconds. Adjacent EMIT scenes start 12 s apart and
+  float32 rounds 2020s timestamps to 128 s, so a float32 copy silently merges granules. Per-tile
+  `granules.json` maps value -> granule id. Do not swap it for a run-local granule index: that
+  index changes when the granule set does, which would invalidate (or worse, mislabel) cached
+  snapshots - the timestamp is intrinsic to the granule, so adding 2026 never reprocesses 2025.
+- **The run estimate is fitted, not guessed — and partly wrong in a known way.** Constants come from
+  the recorded cold run `nevada-regrid-cost-probe-20260917-d095b352` (regrid 6.56 + 23.44 s x tile
+  cover, resolve 0.074 + 0.080 s per candidate, reduce 8.65 s, publish 3.87 s, at 10 bytes a cell).
+  On US West the total (126 CPU-h, $55) lands inside the README's hand estimate, but resolve is
+  under- and reduce over-stated because ortho warps and aux are unpriced (08 §7 q7). Refit from a
+  run that has them rather than nudging constants. Preflight is environment, never `plan.json`.
 - **Terraform never builds; a plugin is never a Terraform resource.** `make image` builds and
   pushes, and `terraform/deployment/` points a Lambda at the digest. A project ships a Python
   distribution with `stratum.*` entry points and writes no HCL — [`ADR-0003`](docs/decisions/ADR-0003-image-build-and-digest.md).
@@ -308,8 +323,8 @@ docs/decisions/    ADR digest (HTML) + the ADRs themselves (Markdown)
 docs/status.html   what is implemented, what is open
 docs/assets/       stratum.css, stratum.js - the only shared chrome
 docs/specs/        00-13, numbered by dependency order   <- authoritative
-docs/notes/        heritage.md, meeting notes, archived proposal,
-                   2026-09-02-first-slice-plan.md (the build contract)  <- internal
+docs/notes/        LOCAL ONLY, git-ignored: heritage and meeting notes. Pages publishes all
+                   of docs/, so nothing here is committed, and nothing tracked cites it
 refs/              verbatim external artifacts - do not edit
 trial-data/        local granules for trial runs - git-ignored, never committed
 ```
@@ -323,8 +338,7 @@ tile list - and exists to exercise multi-tile fan-out, publish and STAC (719 wor
 `examples/zones.yaml` is the AOI zone registry.
 The first-slice trial over the same tile from a local directory (`examples/trial-nevada/`, with
 the SpectralUtil `build_obs_nc` parity script) IS tracked - its manifests and `parity.py` are
-source - but it cannot run without `trial-data/`, which is git-ignored and never committed. Its
-measurements live in `docs/notes/heritage.md`.
+source - but it cannot run without `trial-data/`, which is git-ignored and never committed.
 
 ---
 
@@ -536,7 +550,7 @@ fresh. It still does not belong there. A user reading `guide/plugins.html` needs
 `PixelMask` returns a boolean and a `Scorer` returns a number — not which prior pipeline conflated
 them.
 
-| Belongs on the site | Belongs in `notes/heritage.md` |
+| Belongs on the site | Belongs in the local notes, or nowhere |
 |---|---|
 | What a field does, what it defaults to | Why the default is that value |
 | A constraint the user must satisfy | Which pipeline taught us the constraint |
@@ -546,12 +560,12 @@ them.
 
 Concretely: **no guide or reference page should name V002, EMIT-AMD, `pipeline.sh`, `watch.sh`
 or a cluster path.** If you are about to write "unlike the existing pipeline", stop — either state
-the rule on its own terms, or put the comparison in `heritage.md`.
+the rule on its own terms, or keep the comparison in the local notes.
 
 **A library the code actually calls is a different thing, and may be named.** `SpectralUtil`
 performs the nearest-neighbour search a run depends on, so `guide/algorithms.html` says so and
 links the line. The test is tense, not vocabulary: *what the code does today* belongs on the site;
-*which prior pipeline taught us to do it that way* belongs in `heritage.md`.
+*which prior pipeline taught us to do it that way* does not.
 
 `status.html` is the one exception, and only for naming a **parity or validation target** ("the
 first slice must reproduce the existing V002 output"). That is a statement about project state,
@@ -568,12 +582,13 @@ The same rules as the specs, plus two:
   tense, concrete.
 - **No personal names anywhere a reader outside the team will see** — not on the site, not in the
   specs, not in an ADR, not in `README.md`. Attribute to a role instead ("the science lead", "SDS
-  engineering"). Meeting notes under `docs/notes/` are records and keep their attribution.
+  engineering"). Meeting records keep their attribution, which is why they stay out of the
+  repository.
 - **Status chips are load-bearing.** `locked` means someone may build on it. Do not mark something
   locked to look decisive.
 
-`refs/` holds things we did not write: a real L2B granule, AMD's `config.yml`, a meeting
-transcript. **Never edit them.** They are evidence.
+`refs/` holds things we did not write: a real L2B granule and AMD's `config.yml`. **Never edit
+them.** They are evidence.
 
 `refs/EMIT_L2B_MIN_*.nc` (~52 MB) is **present locally but excluded by `.gitignore`** — an open
 decision, not an oversight. It is the ground truth behind `11-types.md` and the obvious reader
@@ -643,9 +658,7 @@ The agreed scope was deliberately narrow:
 > V002 cell. **No** blocks, caching, Step Functions, Batch, or manifest patching.
 
 What was built relaxes two of those on purpose — blocks and cache keys exist from the start so
-the two non-negotiable tests are real — and is recorded in
-[`docs/notes/2026-09-02-first-slice-plan.md`](docs/notes/2026-09-02-first-slice-plan.md) §1
-(in / out) and §4 (the internal signatures). In: manifest, index, `LocalSource`, the four EMIT
+the two non-negotiable tests are real. In: manifest, index, `LocalSource`, the four EMIT
 readers, KD-tree regrid wrapping SpectralUtil, streaming resolve with sensor- and map-space masks,
 the schema-driven reducer, publish (data COGs, categorical/continuous mappers, legends, STAC,
 provenance), the `local` executor and the CLI. Added the same day, beyond the contract:
@@ -655,7 +668,7 @@ spec section named: S3 *assets* (the DAAC credential exchange), prepared assets,
 `stack`/`tile` scorers, `Reducer` plugins, `threshold`/`composite` mappers, `stratum render`,
 patches, `approve`, `slurm`.
 No V002 output was available locally; a SpectralUtil `build_obs_nc` parity run stands in and
-matches cell for cell (`docs/notes/heritage.md`, "First measurements").
+matches cell for cell.
 
 The two tests are non-negotiable and now exist
 ([ADR-0001 §10](docs/decisions/ADR-0001-tech-stack.md)):

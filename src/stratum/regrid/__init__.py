@@ -56,7 +56,7 @@ cell, so this is three orders looser than the noise and six orders tighter than 
 
 # --------------------------------------------------------------------------------------- geometry
 def resolve_max_distance(grid: GridDef, max_distance: float | None) -> float:
-    """The threshold actually used, which is what enters the cache key (plan section 4)."""
+    """The threshold actually used, which is what enters the cache key (06 section 2)."""
     if max_distance is None:
         return MAX_DISTANCE_FACTOR * grid.diagonal
     if max_distance <= 0:

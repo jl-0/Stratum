@@ -11,7 +11,7 @@ import math
 from abc import ABC, abstractmethod
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal, Protocol
 
@@ -409,6 +409,20 @@ class Aggregation:
 
     def canonical(self) -> dict[str, Any]:
         return {"method": self.method, "params": dict(sorted(self.params.items()))}
+
+
+#: Layer sources the FRAMEWORK provides (13 section 2): not a role, not a band alias, never read
+#: from a file. name -> storage dtype. `acquired` is the observation's acquisition start in Unix
+#: seconds, UTC: float64, because float32 cannot hold a 2020s timestamp to the second, and
+#: exact to the second is what makes it name the granule - an EMIT scene's start time is
+#: unique. It is the per-cell provenance that a pixel -> granule -> spectrum click-through needs
+#: and that a published mosaic cannot recover later (04 section 4, "Derived snapshot bands").
+BUILTIN_SOURCES: Mapping[str, str] = {"acquired": "float64"}
+
+
+def acquired_seconds(when: datetime) -> float:
+    """A granule's `acquired` value: Unix seconds, UTC; a naive datetime is UTC."""
+    return (when if when.tzinfo is not None else when.replace(tzinfo=UTC)).timestamp()
 
 
 @dataclass(frozen=True)

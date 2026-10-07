@@ -19,7 +19,7 @@
 # manifest with `aoi.bbox: [-125, 24, -66, 50]`, the 153-tile WorldCover list, and roughly 4x
 # everything; see README.md section 3.
 
-run_id: us-west-2025-grouping-r1
+run_id: us-west-2025-grouping-r2      # r2: + per-cell provenance (acquired_1/_2)
 description: US West 2025 annual mineral grouping - group 1 and group 2 as separate mosaics, three
   enumerations over the same detections
 
@@ -94,6 +94,7 @@ inputs:
         path: /mineral_metadata
         key: index
         attributes: [name, record, library, group, url]
+        identity: [collection_version, build_version]
     depth_1: {collection: EMITL2BMIN, var: group_1_band_depth}
 
     # ---- group 2: 2.0-2.5 micron, vibrational overtones (clays, micas, carbonates, sulfates) --
@@ -108,6 +109,7 @@ inputs:
         path: /mineral_metadata
         key: index
         attributes: [name, record, library, group, url]
+        identity: [collection_version, build_version]
     depth_2: {collection: EMITL2BMIN, var: group_2_band_depth}
 
     mask: {collection: EMITL2AMASK, version: "002", var: mask}
@@ -234,7 +236,7 @@ scorer:
 # a plugin can combine two categorical layers; it is not this product's reducer.
 
 snapshot:
-  name: us-west-2025-grouping-v1
+  name: us-west-2025-grouping-v2
   layers:
     # ---- the pre-grouping core, both groups. "We would need to retain the mosaic of the level 2B
     # mineralogy itself before grouping... that is what people want."  `classes: source` means the
@@ -317,6 +319,28 @@ snapshot:
       source: geometry
       bands: [0, 2, 4, 9]
       aggregate: {method: best}
+
+    # ---- PROVENANCE: which look each group's answer came from. The 1 Oct 2026 tag-up set one
+    # condition on "walk before run": track the right data through the process NOW, so the viewer
+    # can grow a pixel -> granule -> spectrum click-through later without a reprocessing run. A
+    # published mosaic cannot recover this afterwards - a reducer cannot rebuild evidence the
+    # snapshot never stored (04 section 4).
+    #
+    # `acquired` is provided by the framework, not a role: the winning look's start time, Unix
+    # seconds UTC, float64 so it is exact to the second - and since an EMIT scene's start time is
+    # unique, it names the granule. Each tile's `granules.json` maps every value back to its
+    # granule id. Conditional on each group's own winner, and `best`: of the weeks that voted
+    # for the delivered class, the best-scoring one - the barest, best-lit look that saw it.
+    # A viewer then reads the L2A reflectance from that granule at the cell (its own GLT finds
+    # the pixel). `acquired_N_n` comes free: how many weeks agreed with the winner.
+    acquired_1:
+      kind: continuous
+      source: acquired
+      aggregate: {method: best, conditional_on: mineral_1_native}
+    acquired_2:
+      kind: continuous
+      source: acquired
+      aggregate: {method: best, conditional_on: mineral_2_native}
 
 outputs:
   bucket: ./out

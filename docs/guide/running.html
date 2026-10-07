@@ -156,16 +156,18 @@ above are unchanged. What changes is where the time goes:</p>
 <thead><tr><th>Step</th><th>What it does against the archive</th><th>Downloads</th></tr></thead>
 <tbody>
 <tr><td><code>stratum index build</code></td><td>Queries the catalogue for the manifest's area and time range; writes footprints, times, cloud cover, builds, URLs and checksums. Anonymous; a few seconds</td><td>Nothing</td></tr>
-<tr><td><code>stratum plan</code></td><td>Selects and filters, then validates against real files: one geometry file, and every contributing granule's mineral file for the class-table check. This is the first login</td><td>Those files, into the asset cache</td></tr>
-<tr><td><code>stratum run</code></td><td>Re-plans (all cache hits), then regrid fetches each remaining geometry file on first touch in parallel; resolve, reduce and publish fetch nothing more</td><td>The rest of the geometry files</td></tr>
+<tr><td><code>stratum plan</code></td><td>Selects and filters, then validates against real files: one file per role for the variable checks, and one class table per <a href="concepts.html#class-table-reads"><code>identity</code> group</a>, read over HTTP range requests without downloading the file. This is the first login</td><td>One file per role, into the asset cache; about half a megabyte per class table, not kept</td></tr>
+<tr><td><code>stratum run</code></td><td>Re-plans (cache hits), then regrid fetches each remaining geometry file on first touch in parallel, and resolve fetches each mineral file it reads, confirming that file's class table before using it</td><td>The rest of the files</td></tr>
 </tbody>
 </table>
 </div>
 
 <p>Downloads land in <code>{outputs.bucket}/assets/</code> unless <code>--asset-cache</code> or
 <code>STRATUM_ASSET_CACHE</code> says otherwise, are verified against the catalogue checksum, and
-are reused by every later run. The plan report's <em>Assets staged at plan time</em> section says
-how many files and bytes the plan fetched; a cloud filter is meaningful here because the
+are reused by every later run <em>on the same machine</em>: under <code>--executor aws</code> each
+worker stages into its own disk, so the plan keeps its downloads to the few files it must open.
+The plan report's <em>Remote reads at plan time</em> section says how many files and bytes the plan
+staged and how many class tables it range-read; a cloud filter is meaningful here because the
 catalogue carries cloud cover for every granule. <code>examples/emit-cmr-nevada/</code> in the
 repository is this run over one tile and eight months, with its README recording the measured
 sizes and times. See <a href="reading-data.html#cmr">From NASA's archive</a> and
@@ -208,6 +210,8 @@ prints:</p>
 
 ### Class-table fingerprints (the vintage check)
 - mineral: `sha256:fc392354…` on 14 granule(s)
+  - read from 1 sample(s), one per collection_version/build_version; the rest are assumed to match and each worker confirms its own
+    - collection_version=001, build_version=010635: `sha256:fc392354…` from `…`, 14 granule(s)
 
 ## Fan-out
 
@@ -222,12 +226,62 @@ prints:</p>
 
 - tiles: 1 / 4
 - granules: 14 / 500
-- vcpu hours: not estimated / 20.0
+- vcpu hours: ~… (estimated) / 20.0
 - status: within budget (on_exceed: fail)</code></pre>
 
 <p>Exit code <code>2</code> means the plan is valid but over budget; the run directory is still
-written so you can read why. vCPU-hours are not estimated yet — only the tile and granule
-ceilings gate.</p>
+written so you can read why. All three ceilings gate: tiles and granules before any granule is
+opened, CPU-hours once every work item is known.</p>
+
+<h3 id="estimate">What it will cost</h3>
+
+<p>Every report carries a rough order of magnitude — read it before you run. This is the real one
+for <code>examples/emit-cmr-nevada</code>, one tile and eight months:</p>
+
+<pre><code>## Estimate (rough order of magnitude, x0.5 to x2)
+
+| stage | items | CPU time | longest item |
+|---|---|---|---|
+| regrid | 33 | 10 min | 30.0 s |
+| resolve | 146 | 1 min | 0.8 s |
+| reduce | 25 | 4 min | 8.7 s |
+| publish | 1 | 4 s | 3.9 s |
+
+- compute: ~15 min CPU (7 min - 29 min)
+- on Lambda at 4096 MB: ~$0.11 ($0.05 - $0.21) for 205 invocations
+- downloads (each needed file once): 5.0 GB
+- written to the storage root: 229.8 MB (glt 51.5 MB, snapshots 140.8 MB, ...)</code></pre>
+
+<p>Each stage's time is its items' pixels and bytes times a constant measured on a real run:
+regrid scales with how much of the tile each granule covers, resolve with how many granules
+compete for each block, reduce and publish with the cells and the bytes per cell your snapshot
+layers carry. The report names the run the constants came from. Treat it as a factor-of-two
+number: a manifest with aux rasters, an ortho role or masks costs more in resolve than the model
+prices. <code>budget.max_vcpu_hours</code> is checked against the central figure.</p>
+
+<h3 id="preflight">Can this machine, or this deployment, run it?</h3>
+
+<p>The plan proves the manifest and the data, and says nothing about where the run will execute.
+<code>stratum run</code> checks that next, after planning and before dispatching anything, and
+refuses on a failure; <code>stratum plan --executor aws</code> (or <code>local</code>, the default)
+prints the same checks:</p>
+
+<div class="tw">
+<table>
+<thead><tr><th>Executor</th><th>Checks</th></tr></thead>
+<tbody>
+<tr><td><code>local</code></td><td>The storage root's disk holds what the run will write (a local root is never evicted, so this fails); the asset cache's disk against the download volume (a warning — the cache evicts and re-downloads); wall time at your core count</td></tr>
+<tr><td><code>aws</code></td><td>Your AWS credentials are live <em>now</em>; <code>$STRATUM_LAMBDA_FUNCTION</code> exists; its timeout clears the longest estimated item; <code>--workers</code> fits its reserved concurrency; the cost re-priced at its real memory</td></tr>
+</tbody>
+</table>
+</div>
+
+<pre><code>## Preflight (aws)
+
+- FAIL credentials: ExpiredToken: refresh the session (aws sso login / a new token) before dispatching</code></pre>
+
+<p>Preflight cannot tell which version of Stratum the deployed image carries. Redeploy the image
+after updating Stratum, before a cloud run.</p>
 
 <div class="key">
   <span class="label">Review this in the pull request</span>
@@ -308,8 +362,9 @@ know which you want, say so.</p>
 
 <div class="warn">
   <span class="label">Checked at plan time</span>
-  <p>Stratum fingerprints the class table embedded in every contributing granule. If they do not
-  all agree, <code>stratum plan</code> fails unless the manifest explicitly opts in with
+  <p>Stratum fingerprints the class tables embedded in the contributing granules — one per
+  <a href="concepts.html#class-table-reads"><code>class_table.identity</code></a> group, or every
+  granule's when the role declares no identity. If they do not all agree, <code>stratum plan</code> fails unless the manifest explicitly opts in with
   <code>allow_mixed_vintage: true</code> and a <code>mixed_vintage_reason</code>, and then only
   when every table resolves into an explicit classes file — <code>classes: source</code> cannot
   span vintages.</p>
@@ -322,7 +377,14 @@ and is not. Nothing in the data announces the problem, so Stratum refuses rather
 <p>The check is on the class table, not on a build number. One collection already carries eight
 software builds with no change to its classes, so <code>build_version</code> is a filter you may
 apply and never the guard. The plan output states every build the run consumed and the fingerprint
-it validated.</p>
+it validated, and, per identity group, which granule its table was read from.</p>
+
+<p>Builds still matter as a <em>grouping</em>: granules of one build carry one table, so naming
+<code>build_version</code> in <code>identity</code> lets the plan read one table per build instead
+of one per granule. That is an assumption, and each worker checks it on the granule it opens; a
+granule whose table differs from its group's fails its work item with
+<code>ClassTableMismatch</code>, naming the granule. Remove <code>identity</code> (every table is
+then read at plan time) or add a field to it.</p>
 
 <h2 id="masks">Masking pixels</h2>
 

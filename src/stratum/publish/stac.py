@@ -120,6 +120,7 @@ def build_stac_item(*, run_id: str, manifest_hash: str, tile: TileRef, period: E
                     colors_by_band: Mapping[str, Mapping[str, Sequence[int]]] | None = None,
                     classes_path: Path | None = None,
                     classes_paths: Mapping[str, Path] | None = None,
+                    granules_path: Path | None = None,
                     out_dir: Path | None = None,
                     run_dir: Path | None = None, collection_href: str = "../../collection.json",
                     extra_properties: Mapping[str, Any] | None = None,
@@ -201,6 +202,11 @@ def build_stac_item(*, run_id: str, manifest_hash: str, tile: TileRef, period: E
     if classes_path is not None or class_table is not None:
         assets["classes"] = {"href": href(classes_path, "./classes.json"), "type": JSON_MEDIA_TYPE,
                              "title": "product class table", "roles": ["metadata"]}
+
+    if granules_path is not None:
+        assets["granules"] = {"href": href(granules_path, "./granules.json"),
+                              "type": JSON_MEDIA_TYPE, "roles": ["metadata"],
+                              "title": "acquired -> granule id, for every acquired value here"}
 
     links: list[dict[str, Any]] = [
         {"rel": "self", "href": f"./{ITEM_NAME}", "type": JSON_MEDIA_TYPE},

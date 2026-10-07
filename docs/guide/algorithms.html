@@ -113,7 +113,7 @@ of metadata: URLs, footprints, times, cloud cover, checksums. It reads no pixel 
 <tr>
   <td>Resolve the AOI</td>
   <td>AOI bbox → the set of tiles on the grid lattice that intersect it; time range → epochs</td>
-  <td><a class="src" data-sym="plan_run" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/plan/run.py#L777">plan/run.py:677</a></td>
+  <td><a class="src" data-sym="plan_run" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/plan/run.py#L875">plan/run.py:677</a></td>
 </tr>
 <tr>
   <td>Filter</td>
@@ -135,7 +135,7 @@ of metadata: URLs, footprints, times, cloud cover, checksums. It reads no pixel 
   <td>The surviving granule set is written to the run directory and hashed. Every later stage
       reads the frozen set, never the live catalogue, so a re-run cannot silently include a
       granule that appeared since</td>
-  <td><a class="src" data-sym="# -- freeze (02 section 6)" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/plan/run.py#L906">plan/run.py:773</a></td>
+  <td><a class="src" data-sym="# -- freeze (02 section 6)" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/plan/run.py#L1004">plan/run.py:773</a></td>
 </tr>
 </tbody>
 </table>
@@ -318,14 +318,14 @@ falling back, since a silent fallback would mix two derivations under one cache 
   <td>The bounding box of the sensor pixels this GLT window names:
       <code>[min|gy|-1, max|gy|) × [min|gx|-1, max|gx|)</code>. This is the only part of the
       granule that is read</td>
-  <td><a class="src" data-sym="covering" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/types.py#L541">types.py:541</a></td>
+  <td><a class="src" data-sym="covering" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/types.py#L555">types.py:541</a></td>
 </tr>
 <tr>
   <td class="num">4</td>
   <td>Read</td>
   <td>Each role (geometry, mineral, mask…) read over that window as a masked array — fill values
       arrive already masked</td>
-  <td><a class="src" data-sym="read_observation" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/resolve/observation.py#L165">observation.py:110</a></td>
+  <td><a class="src" data-sym="read_observation" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/resolve/observation.py#L213">observation.py:110</a></td>
 </tr>
 <tr>
   <td class="num">5</td>
@@ -333,7 +333,7 @@ falling back, since a silent fallback would mix two derivations under one cache 
   <td>Every <code>PixelMask</code> evaluated in the granule's own geometry, combined by
       conjunction — cheaper here than on the map, and some masks (slit artefacts, edge trims)
       only make sense in sensor space</td>
-  <td><a class="src" data-sym="for mask in plan.sensor_mask" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/resolve/observation.py#L250">observation.py:177</a></td>
+  <td><a class="src" data-sym="for mask in plan.sensor_mask" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/resolve/observation.py#L299">observation.py:177</a></td>
 </tr>
 <tr>
   <td class="num">6</td>
@@ -349,7 +349,7 @@ falling back, since a silent fallback would mix two derivations under one cache 
       <code>bands</code> like a gathered role and its nodata joins <code>valid</code> &mdash; but
       never <code>interpolated</code>, which means "the GLT reached beyond
       <code>max_distance</code>" and has no meaning for a warp</td>
-  <td><a class="src" data-sym="def read_ortho_roles" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/resolve/observation.py#L121">observation.py</a></td>
+  <td><a class="src" data-sym="def read_ortho_roles" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/resolve/observation.py#L169">observation.py</a></td>
 </tr>
 <tr>
   <td class="num">6b</td>
@@ -363,14 +363,14 @@ falling back, since a silent fallback would mix two derivations under one cache 
   <td class="num">7</td>
   <td>Map-space masks</td>
   <td>Masks that need map geometry or ancillary rasters, on the block, by conjunction</td>
-  <td><a class="src" data-sym="for mask in plan.map_masks:" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/resolve/observation.py#L280">observation.py:200</a></td>
+  <td><a class="src" data-sym="for mask in plan.map_masks:" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/resolve/observation.py#L329">observation.py:200</a></td>
 </tr>
 <tr>
   <td class="num">8</td>
   <td>Class remap</td>
   <td>The granule's own class ids → the run's, by the lookup array plan built. A value with no
       mapping is marked invalid rather than guessed</td>
-  <td><a class="src" data-sym="values = apply_remap(values," href="https://github.com/jl-0/Stratum/blob/main/src/stratum/resolve/observation.py#L295">observation.py:215</a></td>
+  <td><a class="src" data-sym="values = apply_remap(values," href="https://github.com/jl-0/Stratum/blob/main/src/stratum/resolve/observation.py#L349">observation.py:215</a></td>
 </tr>
 <tr>
   <td class="num">9</td>
@@ -430,7 +430,7 @@ the frozen granule set rather than by whatever the filesystem returned
 
 <p>What lands on disk is the snapshot: each schema layer's winning value, the winning
 <code>score</code>, and <code>valid</code>.
-<a class="src" data-sym="write_snapshot" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/resolve/snapshot.py#L72">snapshot.py:72</a></p>
+<a class="src" data-sym="write_snapshot" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/resolve/snapshot.py#L75">snapshot.py:72</a></p>
 
 <h2 id="reduce">6. Reduce — combining epochs</h2>
 

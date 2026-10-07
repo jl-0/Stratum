@@ -14,7 +14,8 @@ from __future__ import annotations
 import dataclasses
 import logging
 from collections import Counter
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
@@ -33,6 +34,8 @@ from stratum.access import (
     CachedAsset,
     CMRSource,
     LocalSource,
+    RangedAsset,
+    RangeUnsupported,
     asset_cache_for,
     reader_for,
     to_uri,
@@ -71,6 +74,7 @@ from stratum.plan.document import (
     write_plan,
     write_work,
 )
+from stratum.plan.estimate import bbox_overlap, estimate, fmt_bytes, fmt_hours, layer_bytes_per_cell
 from stratum.plugins import resolve
 from stratum.publish import build_mappers, check_formats
 from stratum.reduce import validate_schema
@@ -82,6 +86,7 @@ from stratum.regrid import (
 )
 from stratum.resolve import (
     AliasBinding,
+    ClassTableProbe,
     PlanContext,
     PluginBinding,
     RoleBinding,
@@ -91,6 +96,8 @@ from stratum.resolve import (
 from stratum.resolve.observation import is_lonlat
 from stratum.storage import Workspace
 from stratum.types import (
+    BUILTIN_SOURCES,
+    AssetHandle,
     BlockRef,
     ClassTable,
     Epoch,
@@ -367,7 +374,8 @@ def roles_needed(m: Manifest, scorer: PluginBinding, masks: Sequence[PluginBindi
     """The roles a granule must provide to contribute: everything resolve reads (schema
     sources, scorer and mask `required_roles`, through aliases) plus the geolocation role regrid
     reads `loc` from. Manifest order."""
-    wanted = {role_of(m, layer.source) for layer in m.snapshot.layers.values()}
+    wanted = {role_of(m, layer.source) for layer in m.snapshot.layers.values()
+              if layer.source not in BUILTIN_SOURCES}
     wanted.update(role_of(m, r) for r in scorer.instance.required_roles)
     for mk in masks:
         wanted.update(role_of(m, r) for r in getattr(mk.instance, "required_roles", ()))
@@ -386,7 +394,11 @@ class Inspection:
     remaps: dict[str, dict[str, Remap]]
     class_tables: dict[str, dict[str, list[str]]]     # layer -> fingerprint -> granule ids
     sensor_shape: tuple[int, ...]
+    # layer -> {identity, groups: [{identity, sampled, fingerprint, granules}]}, for a layer
+    # whose role declares `class_table.identity`; absent when every granule was read
+    table_sampling: dict[str, dict[str, Any]] = field(default_factory=dict)
     staged: list[dict[str, Any]] = field(default_factory=list)   # remote assets fetched at plan
+    ranged: list[dict[str, Any]] = field(default_factory=list)   # ...and those only range-read
 
 
 class _Opener:
@@ -399,19 +411,31 @@ class _Opener:
         self.store, self.readers = store, readers
         self.contexts: dict[str, Any] = {}
         self.staged: list[dict[str, Any]] = []
+        #: remote assets read over byte ranges and never staged (12 section 4)
+        self.ranged: list[dict[str, Any]] = []
         self._seen: set[str] = set()
 
     def open(self, collection: str, uri: str, checksum: str | None = None
              ) -> tuple[GranuleReader, Any]:
+        if uri in self.contexts:
+            return self.readers[collection], self.contexts[uri]
+        return self.open_handle(collection, uri, self.store.open(uri, checksum=checksum))
+
+    def open_handle(self, collection: str, uri: str, handle: AssetHandle
+                    ) -> tuple[GranuleReader, Any]:
+        """`open` with the handle already obtained - staged, or a warmed `RangedAsset`."""
         reader = self.readers[collection]
         ctx = self.contexts.get(uri)
         if ctx is None:
-            handle = self.store.open(uri, checksum=checksum)
-            if isinstance(handle, CachedAsset) and uri not in self._seen:
+            if uri not in self._seen and isinstance(handle, CachedAsset | RangedAsset):
                 self._seen.add(uri)
-                path = handle.path()
-                self.staged.append({"uri": uri, "path": str(path),
-                                    "bytes": path.stat().st_size if path else 0})
+                if isinstance(handle, RangedAsset):
+                    self.ranged.append({"uri": uri, "requests": handle.requests,
+                                        "bytes": handle.bytes, "size": handle.size})
+                else:
+                    path = handle.path()
+                    self.staged.append({"uri": uri, "path": str(path),
+                                        "bytes": path.stat().st_size if path else 0})
             ctx = self.contexts[uri] = reader.open(handle)
         return reader, ctx
 
@@ -637,7 +661,12 @@ def inspect_granules(m: Manifest, refs: Mapping[str, GranuleRef], readers: Mappi
         band_counts: dict[str, int] = {}
         remaps: dict[str, dict[str, Remap]] = {}
         class_tables: dict[str, dict[str, list[str]]] = {}
+        table_sampling: dict[str, dict[str, Any]] = {}
         for layer in m.snapshot_schema().layers:
+            if layer.source in BUILTIN_SOURCES:      # framework-provided: no role, one band
+                band_counts[layer.name] = 1
+                layers.append(layer)
+                continue
             src_role = role_of(m, layer.source)
             spec = specs[src_role]
             if layer.kind == "continuous":
@@ -664,18 +693,26 @@ def inspect_granules(m: Manifest, refs: Mapping[str, GranuleRef], readers: Mappi
             binding = RoleBinding.from_spec(roles[layer.source])
             tables: dict[str, ClassTable] = {}
             by_granule: dict[str, str] = {}
-            # every contributing granule's class-table asset is needed (the vintage check);
-            # against a catalogue source that is one download per granule, so they are staged
-            # together through a thread pool rather than one at a time (12 section 7)
-            assets = _role_assets(refs, order, binding)
-            with console.progress(f"staging {layer.name} class tables", len(assets)) as advance:
-                store.prefetch(assets, workers=PLAN_FETCH_WORKERS, on_done=advance)
-            for gid in order:
+            # one table per identity group (`class_table.identity`, 02 section 3): the first
+            # granule of each group is read and the rest are assumed to match - an assumption
+            # every worker checks before it uses a granule (12 section 7). No identity: every
+            # granule is its own group and all of them are read. Against a catalogue source
+            # each read is a download, so the samples are staged through a thread pool
+            groups = identity_groups(refs, order, table_spec.identity)
+            samples = [gids[0] for gids in groups.values()]
+            what = (f"{len(samples)} sample(s) for {len(order)} granule(s), one per "
+                    f"{'/'.join(table_spec.identity)}" if table_spec.identity
+                    else f"every one of {len(order)} granule(s)")
+            with console.progress(f"reading {layer.name} class tables: {what}",
+                                  len(samples)) as advance:
+                handles = _class_table_handles(store, readers[binding.collection], refs,
+                                               samples, binding, advance)
+            sampling: list[dict[str, Any]] = []
+            for ident, gids in groups.items():
+                gid = gids[0]
                 uri = role_uri(refs[gid], binding)
                 assert uri is not None  # needed roles were filtered on asset availability
-                key = role_asset(refs[gid], binding)
-                reader, ctx = opener.open(binding.collection, uri,
-                                          refs[gid].checksums.get(key) if key else None)
+                reader, ctx = opener.open_handle(binding.collection, uri, handles[gid])
                 table = reader.class_table(ctx, table_spec.path, table_spec.key,
                                            table_spec.attributes)
                 if table is None:
@@ -683,9 +720,18 @@ def inspect_granules(m: Manifest, refs: Mapping[str, GranuleRef], readers: Mappi
                                     f"{table_spec.path!r} (11 section 9)")
                 fp = table.fingerprint()
                 tables.setdefault(fp, table)
-                by_granule[gid] = fp
+                for g in gids:
+                    by_granule[g] = fp
+                if table_spec.identity:
+                    sampling.append({"identity": dict(zip(table_spec.identity, ident[1:],
+                                                          strict=True))
+                                     if ident[0] == "key" else None,
+                                     "sampled": gid, "fingerprint": fp, "granules": len(gids)})
             class_tables[layer.name] = {fp: [g for g, f in by_granule.items() if f == fp]
                                         for fp in tables}
+            if table_spec.identity:
+                table_sampling[layer.name] = {"identity": list(table_spec.identity),
+                                              "groups": sampling}
             enum = enums.get(layer.name)
             if enum is None:                      # classes: source
                 enum = identity_enumeration(tables[by_granule[order[0]]])
@@ -701,21 +747,73 @@ def inspect_granules(m: Manifest, refs: Mapping[str, GranuleRef], readers: Mappi
                             extends=tuple(m.snapshot.extends))
     validate_schema(schema)
     return Inspection(schema=schema, aliases=aliases, band_counts=band_counts, remaps=remaps,
-                      class_tables=class_tables, sensor_shape=sensor_shape,
-                      staged=list(opener.staged))
+                      class_tables=class_tables, table_sampling=table_sampling,
+                      sensor_shape=sensor_shape,
+                      staged=list(opener.staged), ranged=list(opener.ranged))
 
 
-def _role_assets(refs: Mapping[str, GranuleRef], order: Sequence[str],
-                 binding: RoleBinding) -> list[tuple[str, str | None]]:
-    """`(uri, checksum)` of one role's asset on each granule, for `AssetStore.prefetch`."""
-    out: list[tuple[str, str | None]] = []
+#: `GranuleRef` columns a `class_table.identity` may name; any other name is a catalogue
+#: attribute (`GranuleRef.attributes`), e.g. `SOFTWARE_DELIVERY_VERSION`.
+IDENTITY_COLUMNS = ("collection", "collection_version", "build_version", "product_version",
+                    "day_night")
+
+
+def identity_groups(refs: Mapping[str, GranuleRef], order: Sequence[str],
+                    identity: Sequence[str]) -> dict[tuple[str, ...], list[str]]:
+    """Granules grouped by their values of `identity`, in `order`; the first of each group is
+    the one the planner reads (02 section 3). A granule missing any value is its own group -
+    an unknown identity is never assumed to match. Empty `identity`: one group per granule.
+    A name that is neither a column nor an attribute of any granule is a typo and fails."""
+    if identity:
+        unknown = [n for n in identity if n not in IDENTITY_COLUMNS
+                   and not any(n in refs[g].attributes for g in order)]
+        if unknown:
+            raise PlanError(f"class_table.identity names {unknown}, which is neither a granule "
+                            f"column {list(IDENTITY_COLUMNS)} nor an attribute any contributing "
+                            "granule carries (02 section 3)")
+    groups: dict[tuple[str, ...], list[str]] = {}
     for gid in order:
+        ref = refs[gid]
+        values = [getattr(ref, n) if n in IDENTITY_COLUMNS else ref.attributes.get(n)
+                  for n in identity]
+        if identity and all(v not in (None, "") for v in values):
+            key: tuple[str, ...] = ("key", *(str(v) for v in values))
+        else:
+            key = ("granule", gid)
+        groups.setdefault(key, []).append(gid)
+    return groups
+
+
+def _class_table_handles(store: AssetStore, reader: GranuleReader,
+                         refs: Mapping[str, GranuleRef], gids: Sequence[str],
+                         binding: RoleBinding, on_done: Callable[[], None]
+                         ) -> dict[str, AssetHandle]:
+    """The network half of the class-table reads, in a thread pool (12 section 7). A reader
+    declaring `range_prefetch` gets an unstaged `RangedAsset` with those ranges already fetched
+    - the table without the file; any other reader, or a server refusing ranges, gets the
+    asset staged as before. Parsing is left to the caller, serially: the format libraries share
+    a libhdf5 that is not thread-safe."""
+    prefetch = getattr(reader, "range_prefetch", None)
+
+    def one(gid: str) -> tuple[str, AssetHandle]:
         uri = role_uri(refs[gid], binding)
-        if uri is None:
-            continue
+        assert uri is not None
         key = role_asset(refs[gid], binding)
-        out.append((uri, refs[gid].checksums.get(key) if key else None))
-    return out
+        checksum = refs[gid].checksums.get(key) if key else None
+        try:
+            if prefetch is not None:
+                handle = store.open_ranged(uri, checksum=checksum)
+                if isinstance(handle, RangedAsset):
+                    try:
+                        return gid, handle.warm(prefetch)
+                    except RangeUnsupported:
+                        pass
+            return gid, store.open(uri, checksum=checksum)
+        finally:
+            on_done()
+
+    with ThreadPoolExecutor(max_workers=PLAN_FETCH_WORKERS) as pool:
+        return dict(pool.map(one, gids))
 
 
 def _resolve_tables(m: Manifest, layer: str, enum: Enumeration, tables: Mapping[str, ClassTable],
@@ -988,9 +1086,12 @@ def plan_run(manifest_path: Path | str, out_dir: Path | str | None = None,
         aliases=inspection.aliases, geolocation_role=geolocation_role, schema=inspection.schema,
         scorer=scorer, masks=masks, remaps=inspection.remaps, max_distance=max_distance,
         regrid_method=m.grid.regrid_method, regrid_algo_version=REGRID_ALGO_VERSION,
-        reader_overrides=overrides, aux_sources=aux_sources, reducer=reducer)
+        reader_overrides=overrides, aux_sources=aux_sources, reducer=reducer,
+        table_probes={name: ClassTableProbe(path=r.class_table.path, key=r.class_table.key,
+                                            attributes=tuple(r.class_table.attributes))
+                      for name, r in m.inputs.roles.items() if r.class_table is not None})
 
-    # -- work lists (plan section 4)
+    # -- work lists (08 section 1)
     work = build_work_lists(ctx, refs, tiles, epochs, periods, aoi_boxes, geolocation_role)
     for stage in STAGES:
         write_work(run_dir, stage, work[stage])
@@ -999,6 +1100,14 @@ def plan_run(manifest_path: Path | str, out_dir: Path | str | None = None,
     counts = {"tiles": len(tiles), "epochs": len(epochs), "periods": len(periods),
               "blocks": len(blocks), "granules": len(refs), "granules_queried": n_queried,
               **{f"work_{s}": len(work[s]) for s in STAGES}}
+
+    # -- the ROM (08 section 2): what this will cost, before it costs it. The second budget
+    #    gate: `max_vcpu_hours` can only be checked once every work item is known
+    rom = estimate_run(ctx, work, tiles, refs, selected, inspection, needed)
+    if m.budget.max_vcpu_hours is not None and rom["cpu_hours"] > m.budget.max_vcpu_hours:
+        budget_problems.append(f"an estimated {rom['cpu_hours']:.0f} CPU-hours exceed "
+                               f"budget.max_vcpu_hours {m.budget.max_vcpu_hours}")
+        doc["budget"].update(over=True, problems=budget_problems)
     doc.update({
         "inspected": True,
         "context": context_to_doc(ctx),
@@ -1009,8 +1118,15 @@ def plan_run(manifest_path: Path | str, out_dir: Path | str | None = None,
         "staging": {"asset_cache": str(asset_cache) if asset_cache is not None else None,
                     "assets": len(inspection.staged),
                     "bytes": int(sum(a["bytes"] for a in inspection.staged)),
-                    "uris": [a["uri"] for a in inspection.staged]},
+                    "uris": [a["uri"] for a in inspection.staged],
+                    # class tables read over byte ranges: nothing written to the cache
+                    "ranged": {"assets": len(inspection.ranged),
+                               "requests": int(sum(a["requests"] for a in inspection.ranged)),
+                               "bytes": int(sum(a["bytes"] for a in inspection.ranged)),
+                               "file_bytes": int(sum(a["size"] for a in inspection.ranged))}},
         "class_tables": inspection.class_tables,
+        "class_table_sampling": inspection.table_sampling,
+        "estimate": rom,
         # what a plugin may reach, and the CONTENT it was keyed on (05 section 5, 06 section 2)
         "aux": {"sources": {a: {"uri": src.uri, "kind": src.kind,
                                 "resampling": src.resampling, "digest": src.digest}
@@ -1058,7 +1174,7 @@ def strip_none(doc: Any) -> Any:
 def build_work_lists(ctx: PlanContext, refs: Mapping[str, GranuleRef], tiles: Sequence[TileRef],
                      epochs: Sequence[Epoch], periods: Iterable[Any], aoi_boxes: Sequence[Bbox],
                      geolocation_role: str) -> dict[str, list[dict[str, Any]]]:
-    """The four work lists (plan section 4):
+    """The four work lists (08 section 1):
 
     regrid   every (granule, tile) whose bbox meets the tile, with the geolocation role's asset;
     resolve  every (tile, epoch, block) whose block meets the AOI and has >= 1 candidate;
@@ -1090,10 +1206,14 @@ def build_work_lists(ctx: PlanContext, refs: Mapping[str, GranuleRef], tiles: Se
                 continue
             haloed = BlockRef(tile, block.bx, block.by, halo=halo)
             for epoch in epochs:
-                if candidates(ctx, haloed, epoch):
+                found = candidates(ctx, haloed, epoch)
+                if found:
+                    # `candidates` is for the estimate (08 section 2); a worker re-derives the
+                    # set itself and never reads this
                     resolve_items.append({"tile": [tile.tx, tile.ty],
                                           "epoch": epoch_to_doc(epoch),
-                                          "block": [block.bx, block.by]})
+                                          "block": [block.bx, block.by],
+                                          "candidates": len(found)})
                     per_block.setdefault((block.bx, block.by), []).append(epoch)
         for period in periods:
             any_block = False
@@ -1111,6 +1231,40 @@ def build_work_lists(ctx: PlanContext, refs: Mapping[str, GranuleRef], tiles: Se
                                 "period": [iso(period.start), iso(period.end)]})
     return {"regrid": regrid, "resolve": resolve_items, "reduce": reduce_items,
             "publish": publish}
+
+
+def estimate_run(ctx: PlanContext, work: Mapping[str, Sequence[Mapping[str, Any]]],
+                 tiles: Sequence[TileRef], refs: Mapping[str, GranuleRef], selected: Any,
+                 inspection: Inspection, needed: Sequence[str]) -> dict[str, Any]:
+    """`stratum.plan.estimate` over this plan's work lists: each regrid item's tile cover, each
+    resolve item's candidate count, the schema's bytes per cell, and the catalogue's file sizes
+    for every asset a role reads (`size:<asset>`, CMR only - None when any is unknown)."""
+    by_tile = {(t.tx, t.ty): t for t in tiles}
+    overlaps = [bbox_overlap(refs[it["granule_id"]].bbox, tile_lonlat_bounds(by_tile[tuple(it["tile"])]))
+                for it in work["regrid"]]
+    grid = ctx.grid
+    tile_cells = (round(grid.tile_size / abs(grid.resolution[0]))
+                  * round(grid.tile_size / abs(grid.resolution[1])))
+    wanted = {(ctx.roles[r].collection, ctx.roles[r].asset) for r in needed}
+    total, unknown = 0, 0
+    for row in selected.itertuples(index=False):
+        assets, attrs = dict(row.assets), dict(row.attributes)
+        for collection, asset in wanted:
+            if collection != row.collection or not assets:
+                continue
+            size = attrs.get(f"size:{asset or min(assets)}")
+            if size is None:
+                unknown += 1
+            else:
+                total += int(size)
+    return estimate(tile_cells=tile_cells, block_cells=grid.block_size ** 2,
+                    bytes_per_cell=layer_bytes_per_cell(inspection.schema.layers,
+                                                        inspection.band_counts),
+                    regrid_overlaps=overlaps,
+                    resolve_candidates=[int(it.get("candidates", 1)) for it in work["resolve"]],
+                    reduce_items=len(work["reduce"]), publish_items=len(work["publish"]),
+                    ortho_roles=sum(1 for r in needed if ctx.roles[r].space == "ortho"),
+                    download_bytes=None if unknown else total)
 
 
 # ---------------------------------------------------------------------------------------- report
@@ -1147,15 +1301,34 @@ def render_report(doc: Mapping[str, Any]) -> str:
     elif not doc["class_tables"]:
         lines.append("- no categorical layers")
     for layer, tables in doc["class_tables"].items():
+        sampling = (doc.get("class_table_sampling") or {}).get(layer)
         for fp, gids in tables.items():
             lines.append(f"- {layer}: `{fp}` on {len(gids)} granule(s)")
+        if sampling is None:
+            lines.append(f"  - read from every granule ({layer}'s role declares no "
+                         "class_table.identity)")
+            continue
+        ident = "/".join(sampling["identity"])
+        lines.append(f"  - read from {len(sampling['groups'])} sample(s), one per {ident}; "
+                     "the rest are assumed to match and each worker confirms its own")
+        for g in sampling["groups"]:
+            label = (", ".join(f"{k}={v}" for k, v in g["identity"].items())
+                     if g["identity"] else f"{ident} unknown")
+            lines.append(f"    - {label}: `{g['fingerprint']}` from `{g['sampled']}`, "
+                         f"{g['granules']} granule(s)")
     staging = doc.get("staging") or {}
+    ranged = staging.get("ranged") or {}
+    if staging.get("assets") or ranged.get("assets"):
+        lines += ["", "### Remote reads at plan time (12 section 7)", ""]
     if staging.get("assets"):
-        lines += ["", "### Assets staged at plan time (12 section 7)", "",
-                  (f"- {staging['assets']} remote asset(s), {staging['bytes'] / 1e6:.0f} MB, "
-                   f"into `{staging['asset_cache']}` - one geometry asset for the sample-asset "
-                   "check plus every contributing granule's class-table asset for the vintage "
-                   "check; all are cache hits for the run")]
+        lines.append(f"- staged: {staging['assets']} asset(s), {staging['bytes'] / 1e6:.0f} MB, "
+                     f"into `{staging['asset_cache']}` - the sample-asset check, and any class "
+                     "table that could not be range-read. A local run reuses them; a remote "
+                     "executor's workers stage their own")
+    if ranged.get("assets"):
+        lines.append(f"- range-read, not staged: {ranged['assets']} class table(s) in "
+                     f"{ranged['requests']} request(s), {ranged['bytes'] / 1e6:.1f} MB of "
+                     f"{ranged['file_bytes'] / 1e6:.0f} MB of files")
     if doc.get("partial_epochs"):
         lines += ["", "> **Dropped partial epoch(s):** " + ", ".join(doc["partial_epochs"])
                   + f" - shorter than `{doc['epoch']}`, so they would have voted on less "
@@ -1168,20 +1341,51 @@ def render_report(doc: Mapping[str, Any]) -> str:
     else:
         lines += ["| stage | work items |", "|---|---|"]
         lines += [f"| {s} | {c[f'work_{s}']} |" for s in STAGES]
+    rom = doc.get("estimate")
+    if rom:
+        lines += render_estimate(rom)
     status = ("OVER BUDGET" if b["over"] else "within budget")
+    vcpu = f"~{rom['cpu_hours']:.1f} (estimated)" if rom else "not estimated"
     lines += ["", "## Budget", "",
               f"- tiles: {c['tiles']} / {b['max_tiles']}",
               f"- granules: {c['granules']} / {b['max_granules']}",
-              f"- vcpu hours: not estimated / {b['max_vcpu_hours']}",
+              f"- vcpu hours: {vcpu} / {b['max_vcpu_hours']}",
               f"- status: {status} (on_exceed: {b['on_exceed']})"]
     lines += [f"  - {p}" for p in b["problems"]]
     return "\n".join(lines) + "\n"
 
 
+def render_estimate(rom: Mapping[str, Any]) -> list[str]:
+    """The report's ROM section: per-stage CPU time, Lambda dollars, downloads, disk."""
+    lo, hi = rom["range_factor"]
+    h = rom["cpu_hours"]
+    lam = rom["lambda"]
+    usd = lam["usd"]
+    written = rom["footprint_bytes"]
+    parts = ", ".join(f"{k} {fmt_bytes(v)}" for k, v in written.items() if v)
+    lines = ["", f"## Estimate (rough order of magnitude, x{lo:g} to x{hi:g})", "",
+             "| stage | items | CPU time | longest item |", "|---|---|---|---|"]
+    for stage in STAGES:
+        lines.append(f"| {stage} | {rom['items'][stage]} | "
+                     f"{fmt_hours(rom['cpu_seconds'][stage] / 3600)} | "
+                     f"{rom['longest_item_seconds'][stage]:.1f} s |")
+    lines += [
+        "",
+        f"- compute: ~{fmt_hours(h)} CPU ({fmt_hours(h * lo)} - {fmt_hours(h * hi)})",
+        (f"- on Lambda at {lam['memory_mb']} MB: ~${usd[1]:,.2f} (${usd[0]:,.2f} - "
+         f"${usd[2]:,.2f}) for {sum(rom['items'].values()):,} invocations"),
+        f"- downloads (each needed file once): {fmt_bytes(rom['download_bytes'])}",
+        f"- written to the storage root: {fmt_bytes(sum(written.values()))} ({parts})",
+        (f"- calibrated on {rom['calibration']}. A run with aux, ortho roles or masks the "
+         "calibration run lacked can sit at the top of the range or past it"),
+    ]
+    return lines
+
+
 __all__ = [
-    "PLAN_FETCH_WORKERS", "Inspection", "PlanResult", "block_lonlat_bounds",
-    "build_index_from_manifest", "build_work_lists", "check_index_scope", "index_path",
-    "index_scope", "inspect_granules", "instantiate", "is_uri",
+    "IDENTITY_COLUMNS", "PLAN_FETCH_WORKERS", "Inspection", "PlanResult", "block_lonlat_bounds",
+    "build_index_from_manifest", "build_work_lists", "check_index_scope", "identity_groups",
+    "index_path", "index_scope", "inspect_granules", "instantiate", "is_uri",
     "local_patterns", "local_source", "outputs_document", "pin_role_versions", "pin_versions",
     "plan_run", "render_report", "resolve_local", "roles_needed", "source_from_manifest",
     "source_patterns", "storage_root", "strip_none", "tile_lonlat_bounds", "workspace_for",

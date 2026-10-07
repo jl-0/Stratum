@@ -21,11 +21,12 @@ from __future__ import annotations
 
 import contextlib
 import hashlib
+import io
 import os
 import stat
 import threading
 import time
-from collections.abc import Callable, Iterable, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
@@ -70,6 +71,10 @@ DEFAULT_RESERVE_BYTES = 512 * 1024 * 1024
 #: An entry younger than this is never evicted, so a file another thread just opened is not
 #: pulled out from under it. `prefetch` is the only multi-threaded reader and it only writes.
 EVICT_GRACE_SECONDS = 60.0
+#: Block size of a range read (12 section 4). Measured on an EMIT L2B MIN granule
+#: (2026-10-06): 64 KiB reads the class table in 7 requests and ~370 KB; 8 MiB in 4-5 requests
+#: and ~25 MB at the same wall time, because the cost is round trips, not bytes.
+RANGE_BLOCK = 64 * 1024
 
 #: Retries after the first attempt, and the base of the exponential backoff in seconds.
 DEFAULT_RETRIES = 3
@@ -329,6 +334,122 @@ class CachedAsset(LocalAsset):
     checksum: str | None = None
 
 
+class RangeUnsupported(AssetStoreError):
+    """The server answered a Range request with the whole file (or no usable Content-Range).
+    The caller stages the asset instead (12 section 4)."""
+
+
+class RangedAsset:
+    """An AssetHandle over a remote asset that is NOT staged: a reader that can work from a file
+    object reads only the byte ranges it touches (12 section 4). `path()` is None, which is how
+    a reader that cannot tells the caller to stage instead. Nothing is checksum-verified - a
+    range is not the whole file - so a ranged read may inform the plan but never a pixel; the
+    worker that uses the granule reads it from verified bytes.
+
+    Fetched bytes are kept here, in aligned blocks, for the life of the handle, and adjacent
+    missing blocks go in one request. `warm()` fetches ranges up front: the planner calls it in
+    a thread pool so the network is parallel while the format library, which is not
+    thread-safe, parses serially from memory. The first request resolves Earthdata's redirect
+    once; later ones go straight to the signed URL it returned, with no credential."""
+
+    def __init__(self, uri: str, etag: str | None, checksum: str | None, store: AssetStore,
+                 *, block_size: int = RANGE_BLOCK) -> None:
+        self.uri, self.etag, self.checksum, self.store = uri, etag, checksum, store
+        self.block = int(block_size)
+        self.size = -1
+        self.requests = 0
+        self.bytes = 0
+        self._blocks: dict[int, bytes] = {}
+        self._url: str | None = None
+
+    def path(self) -> None:
+        return None
+
+    def vsi(self) -> str:
+        raise NotImplementedError(f"{self.uri!r} is range-read through fileobj(), not GDAL "
+                                  "(12 section 4)")
+
+    def warm(self, ranges: Sequence[tuple[int, int]] = ()) -> RangedAsset:
+        """Fetch the head - which also learns the size - and every `(offset, length)` range; a
+        negative offset counts from the end of the file. Raises `RangeUnsupported` when the
+        server will not serve ranges, before any reader has seen the handle."""
+        if self.size < 0:
+            self._fetch(0, 1)
+        for off, length in ranges:
+            start = off if off >= 0 else max(0, self.size + off)
+            self.ensure(start, min(self.size, start + length))
+        return self
+
+    def fileobj(self) -> RangedFile:
+        """A seekable, read-only file over the asset, sharing this handle's blocks."""
+        return RangedFile(self.warm())
+
+    def ensure(self, start: int, stop: int) -> None:
+        first, last = start // self.block, max(start, stop - 1) // self.block
+        missing = [b for b in range(first, last + 1) if b not in self._blocks]
+        while missing:
+            run = [missing.pop(0)]
+            while missing and missing[0] == run[-1] + 1:
+                run.append(missing.pop(0))
+            self._fetch(run[0], len(run))
+
+    def read(self, start: int, stop: int) -> bytes:
+        stop = min(stop, self.size)
+        if stop <= start:
+            return b""
+        self.ensure(start, stop)
+        out = bytearray()
+        pos = start
+        while pos < stop:
+            b, o = divmod(pos, self.block)
+            chunk = self._blocks[b][o:o + (stop - pos)]
+            out += chunk
+            pos += len(chunk)
+        return bytes(out)
+
+    def _fetch(self, first: int, count: int) -> None:
+        start = first * self.block
+        stop = start + count * self.block
+        if self.size >= 0:
+            stop = min(stop, self.size)
+        data, self.size, self._url = self.store._range(self.uri, start, stop, self._url)
+        self.requests += 1
+        self.bytes += len(data)
+        for i in range(count):
+            piece = data[i * self.block:(i + 1) * self.block]
+            if piece:
+                self._blocks[first + i] = piece
+
+
+class RangedFile(io.RawIOBase):
+    """A read-only, seekable cursor over a `RangedAsset` - what a format library is handed."""
+
+    def __init__(self, asset: RangedAsset) -> None:
+        super().__init__()
+        self.asset, self._pos = asset, 0
+
+    def readable(self) -> bool:
+        return True
+
+    def seekable(self) -> bool:
+        return True
+
+    def tell(self) -> int:
+        return self._pos
+
+    def seek(self, offset: int, whence: int = io.SEEK_SET) -> int:
+        base = {io.SEEK_SET: 0, io.SEEK_CUR: self._pos, io.SEEK_END: self.asset.size}[whence]
+        self._pos = max(0, base + offset)
+        return self._pos
+
+    def readinto(self, buf: Any) -> int:
+        view = memoryview(buf).cast("B")
+        data = self.asset.read(self._pos, self._pos + len(view))
+        view[:len(data)] = data
+        self._pos += len(data)
+        return len(data)
+
+
 class _EarthdataAuth:
     """The default `auth` callable: `earthdata_login()` on the first call, imported lazily so a
     local run never loads earthaccess; every later call is a re-login (`force=True`), which is
@@ -444,6 +565,20 @@ class AssetStore:
         if scheme == "https":
             return self._stage_https(uri, etag=etag, checksum=checksum)
         raise _unsupported(uri)
+
+    def open_ranged(self, uri: str, *, etag: str | None = None,
+                    checksum: str | None = None) -> AssetHandle:
+        """A handle that does NOT stage: for an https asset not already in the cache, a
+        `RangedAsset` whose reader fetches only the byte ranges it touches (12 section 4). A
+        local or already-cached asset is the ordinary handle, since reading it costs nothing.
+        For the planner's class-table reads (12 section 7); a worker always stages."""
+        if scheme_of(uri) != "https":
+            return self.open(uri, etag=etag, checksum=checksum)
+        if self.asset_cache is not None:
+            target = asset_cache_path(self.asset_cache, uri, checksum, etag)
+            if target.is_file():
+                return CachedAsset(uri=uri, etag=etag, local=target, checksum=checksum)
+        return RangedAsset(uri=uri, etag=etag, checksum=checksum, store=self)
 
     def stage(self, uri: str, *, checksum: str | None = None) -> Path:
         """This worker, this file, now. Identity for local assets; the cached copy otherwise."""
@@ -587,18 +722,18 @@ class AssetStore:
                 self._anonymous = self._session_factory(None)
             return self._anonymous
 
-    def _get(self, uri: str) -> Any:
+    def _get(self, uri: str, headers: Mapping[str, str] | None = None) -> Any:
         """One streaming GET, re-logging in once on 401/403 (trusted hosts only; an anonymous
         host has nothing to refresh). Returns a response whose status is not an auth failure;
         the caller checks the rest. A transport failure is `AssetFetchError(status=None)`."""
         trusted = is_trusted_host(uri, self.trusted_hosts)
         session = self._session_for() if trusted else self._anonymous_session()
-        resp = self._request(session, uri)
+        resp = self._request(session, uri, headers)
         if trusted and resp.status_code in _AUTH_STATUSES:
             first = resp.status_code
             resp.close()
             session = self._session_for(fresh=True, stale=session)
-            resp = self._request(session, uri)
+            resp = self._request(session, uri, headers)
             if resp.status_code in _AUTH_STATUSES:
                 resp.close()
                 raise AssetFetchError(uri, resp.status_code,
@@ -606,13 +741,61 @@ class AssetStore:
                                       "check the Earthdata credentials (08 section 5)")
         return resp
 
-    def _request(self, session: Any, uri: str) -> Any:
+    def _request(self, session: Any, uri: str, headers: Mapping[str, str] | None = None) -> Any:
+        extra = {"headers": dict(headers)} if headers else {}
         try:
-            return session.get(uri, stream=True, timeout=self.timeout)
+            return session.get(uri, stream=True, timeout=self.timeout, **extra)
         except Exception as e:  # narrowed by module below
             if _is_request_exception(e):
                 raise AssetFetchError(uri, None, type(e).__name__) from None
             raise
+
+    def _range(self, uri: str, start: int, stop: int,
+               signed: str | None) -> tuple[bytes, int, str | None]:
+        """Bytes `[start, stop)` of `uri`, the file's total size, and the URL to use next time.
+        The first call goes through `_get` - the trusted session, Earthdata's redirect - and
+        returns the URL the redirect ended at; later calls send `signed` an anonymous request,
+        because a signed URL needs no credential and must never be sent one. A refused signed
+        URL (expired) is re-resolved once. Transient failures retry as a download does."""
+        headers = {"Range": f"bytes={start}-{stop - 1}"}
+        for attempt in range(self.retries + 1):
+            try:
+                if signed is not None:
+                    resp = self._request(self._anonymous_session(), signed, headers)
+                    if resp.status_code in _AUTH_STATUSES:
+                        resp.close()
+                        signed = None
+                        resp = self._get(uri, headers)
+                else:
+                    resp = self._get(uri, headers)
+                try:
+                    if resp.status_code == 200:
+                        raise RangeUnsupported(f"{uri!r}: the server ignored the Range header "
+                                               "and would send the whole file")
+                    if resp.status_code != 206:
+                        raise AssetFetchError(uri, resp.status_code)
+                    total = str((getattr(resp, "headers", None) or {})
+                                .get("Content-Range", "")).rpartition("/")[2]
+                    if not total.isdigit():
+                        raise RangeUnsupported(f"{uri!r}: no file size in Content-Range")
+                    try:
+                        data = b"".join(resp.iter_content(chunk_size=self.chunk_size))
+                    except Exception as e:  # narrowed by module below
+                        if _is_request_exception(e):
+                            raise AssetFetchError(uri, None, type(e).__name__) from None
+                        raise
+                    final = getattr(resp, "url", None)
+                    nxt = (signed if signed is not None
+                           else final if final and final != uri
+                           and not is_trusted_host(final, self.trusted_hosts) else None)
+                    return data, int(total), nxt
+                finally:
+                    resp.close()
+            except AssetFetchError as e:
+                if not e.transient or attempt >= self.retries:
+                    raise
+                time.sleep(self.backoff * (2 ** attempt))
+        raise AssertionError("unreachable")
 
     def _download(self, uri: str, tmp: Path, expected: tuple[str, str] | None) -> None:
         resp = self._get(uri)

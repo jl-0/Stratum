@@ -193,3 +193,17 @@ framework, and then fails at run time rather than at install time.
 
 No new dependency enters the environment — `stratum` already required rasterio (§3, "aux
 warping"), and the lock file is unchanged.
+
+## Amendment, 2026-10-06 — `stratum-emit` adds h5py, for ranged class-table reads
+
+The planner reads each sampled granule's class table over HTTP byte ranges instead of staging
+the file ([12 §4](../specs/12-data-access.md)). netCDF4 cannot open a file object — its
+`#mode=bytes` remote open also failed against Earthdata's login redirect ("Unknown file format")
+— and h5py can, so `h5py>=3.10` is a declared dependency of `stratum-emit` and `h5py` a pixi
+(conda-forge) dependency of the workspace. It must link the **same libhdf5** as netCDF4: from
+conda-forge it does (h5py 3.13 against the existing hdf5 1.14.3; the lock moved only by h5py and
+its own pins). That libhdf5 is not built thread-safe, so the planner fetches ranges in parallel
+and parses serially.
+
+h5netcdf was measured and not chosen: 21 requests and ~1.3 MB per table against h5py's 7 and
+~370 KB, for the same values.
