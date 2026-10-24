@@ -153,6 +153,7 @@ carry plugins this table does not know about.
 | `slit_dust` | `SlitDust` | sensor | — | Drop 2–3 columns at cross-track centre. Mostly cleaned up upstream; off by default. |
 | `l2a_standard` | `L2AStandard` | map | `mask` role | Cloud, cirrus, water, spacecraft flags — AMD's `filter-clouds-1-4` semantics |
 | `soil_fraction` | `SoilFraction` | map | `frcov` role | Require soil fraction ≥ threshold. See §4. |
+| `cos_i` | `CosineI` | map | `cos_i` alias (L1B OBS band 8, 0-based) | Require cos(i) ≥ `min_cos_i` (0.3); non-finite is invalid. `i` is the angle between the sun and the local surface normal, so this drops sun-grazed slopes as well as low sun. `alias` renames the band it reads. |
 | `landcover` | `Landcover` | map | an **aux** alias | Drop cells whose land cover cannot carry a surface mineral signal — open water, built-up, closed canopy. Classes are named, not numbered; `codes` defaults to ESA WorldCover's and **must** be passed for any other product ([05 §7](05-ancillary-data.md) question 4). |
 
 **No along-track trimming.** EMIT is a push-broom collecting one continuous strip; granule
@@ -169,14 +170,23 @@ high vegetation — enter as further chain entries, several needing aux data rat
 
 ```python
 class Scorer(Protocol):
-    capability: Literal["streaming", "stack", "tile"]
+    capability: Literal["streaming", "stack", "tile"]   # absent -> "streaming"
     halo: int = 0
     required_roles: tuple[str, ...] = ()
     required_aux:   tuple[str, ...] = ()
+    # optional, read with getattr(..., ()):
+    # required_layers: tuple[str, ...] = ()   snapshot layers read through obs.layer(name)
+    # outputs: tuple[BandSpec, ...] = ()      per-cell values emit() delivers (below)
+    # def emit(self, obs, aux) -> Mapping[str, Array]
 
     def score(self, obs: ObsWindow, aux: AuxAccessor) -> FloatArray:
         """Higher wins. NaN marks a cell this observation may not occupy."""
 ```
+
+A class that declares no `capability` is a streaming scorer. `required_layers`, `outputs` and
+`emit` are optional and not members of the runtime-checkable `Protocol` (declaring them there would
+make them mandatory); every name in `required_layers` must be a snapshot layer that is not the
+scorer's own output, which `stratum validate` and the resolve context both check.
 
 ### What the scorer writes: the snapshot schema
 
@@ -216,42 +226,55 @@ artifacts, so declare what the reduction needs and not more.
 The schema's `layers_hash` enters the snapshot cache key ([06 §2](06-caching.md)): changing what a
 snapshot holds changes the artifact; changing how it is aggregated does not.
 
-### Derived snapshot bands — planned, not in v1
+### Scorer-emitted layers
 
-Schema layers copy existing bands from the winning observation. They cannot express a layer the
-scorer *computes* — a runner-up margin, per-candidate evidence, a broadcast acquisition timestamp.
-The intended shape is a layer with `source: scorer`, fed by an optional member:
+Schema layers copy existing bands from the winning observation. A layer the scorer *computes* — how
+many looks agreed on the winning class, the vote share behind it, a per-look quality figure — comes
+from two optional members and a schema spelling:
 
 ```python
-    outputs: tuple[BandSpec, ...] = ()          # NOT IMPLEMENTED
+    outputs: tuple[BandSpec, ...] = ()
 
     def emit(self, obs, aux) -> Mapping[str, Array]:
-        """Per-observation values for each declared output; the framework keeps
-        the winning row.  NOT IMPLEMENTED"""
+        """A value for each declared output, computed from the same obs score() saw."""
 ```
 
-Deferred deliberately. Copied layers cover the cases we can name today, and the derived form raises
-questions worth answering with a real workload in hand rather than in the abstract:
+```yaml
+snapshot:
+  layers:
+    mode_votes: {kind: continuous, source: scorer.mode_votes, aggregate: {method: best}}
+```
 
-- Several of the motivating bands are **framework-knowable, not scorer-derived** — `source_granule`,
-  `acquired` and `runner_up_score` are all things the selection loop already computes. Those may
-  belong as built-ins rather than as plugin output, which would leave `emit()` with a much narrower
-  job. **Settled for the first two (2026-10-07): `acquired` is a framework-provided layer source,
-  and it covers `source_granule` too** — to the second it names the granule, and `granules.json`
-  maps it back ([13 §2](13-snapshot-schema.md), [10 §3](10-provenance.md)). The 1 Oct 2026 tag-up
-  was the workload this list was waiting for: the science lead's condition for "walk before run"
-  on the viewer was that the provenance be tracked through the process now. `runner_up_score`
-  remains open.
-- Whether a `stack`-capability scorer may emit a band that is a property of the whole stack rather
-  than of one observation — a within-epoch median, say — blurs the scorer/reducer split and is
-  unresolved.
-- Per-candidate evidence, the strongest motivating case, needs a decision about representation
-  (one band per candidate? a ragged structure?) that is premature without a reducer that consumes it.
+| Aspect | Rule |
+|---|---|
+| Spelling | `source: scorer.<output>`. `scorer.` is a reserved prefix in the one namespace ([13 §2](13-snapshot-schema.md)): no role or alias may be named `scorer` or start with `scorer.`. |
+| What a layer may be | One continuous band. `outputs` entries are `BandSpec`s with unique names and dtype `float32` or `float64`; the layer declares `kind: continuous`, no `bands`, no `classes`, and `dtype` omitted or equal to the output's. The planner fills the layer's `dtype` from the `BandSpec`. A categorical output is not offered: it would need a per-granule class remap. |
+| When `emit` runs | Iff the schema has at least one `scorer.*` layer — a scorer whose outputs nobody declared is never asked — and then once per `score()` call, immediately after it, with the **same `obs` object** and no other call on the instance in between. A scorer may therefore memoise work in `score()` (keyed on `id(obs)`) and reuse it in `emit()`. On an empty `stack` block neither is called. |
+| Return | A mapping with **exactly** the declared output names; a missing or extra name is a `ValueError`. Values are numeric arrays; masked values become NaN. |
+| Shapes: streaming | `(H, W)` per call — a per-observation value. The framework records it wherever that observation takes the cell, so the snapshot holds the winner's value. |
+| Shapes: stack | `(N, H, W)` is per observation and the framework keeps the winning row. `(H, W)` is **per cell** — a property of the whole stack, such as the weighted vote count of the modal class — and is taken as-is. Anything else is a `ValueError` naming both accepted shapes. |
+| Where written | Only at cells some observation won; NaN elsewhere. `valid` is the snapshot's contract, and reduce masks on it anyway. |
+| Reduce, publish | A scorer layer is a continuous layer like any other: aggregated by its declared `aggregate`, delivered as `<layer>` and `<layer>_n`, renderable, usable as `alpha_from`. Nothing downstream knows where it came from. |
+| Cache identity | Through `layers_hash` only ([06 §2](06-caching.md)): `LayerSpec.identity()` already carries the layer's name, source and dtype, so adding, renaming, re-sourcing or re-typing a scorer layer moves every snapshot key. The code of `emit()` is covered by `scorer_version` exactly as `score()`'s is. A run without scorer layers has the keys it had before this existed. |
+
+**A whole-stack property is allowed (decided).** A `stack` scorer may emit a per-cell value that
+belongs to no single observation. It does not blur the scorer/reducer split: the value is still
+recorded per epoch, beside the winner, and how it aggregates through time is the reducer's business
+like every other layer.
+
+Still open:
+
+- `runner_up_score` is framework-knowable — the selection loop has it — and may belong as a
+  built-in source beside `acquired` rather than as plugin output. `acquired` already settled
+  `source_granule` (2026-10-07): to the second it names the granule, and `granules.json` maps it back
+  ([13 §2](13-snapshot-schema.md), [10 §3](10-provenance.md)).
+- Per-candidate evidence, the strongest motivating case for classify-last, needs a decision about
+  representation (one band per candidate? a ragged structure?) that is premature without a reducer
+  that consumes it. An output is one band per cell, so `emit()` cannot carry it.
 
 **Consequence to accept knowingly:** classify-last — aggregating per-candidate evidence across
-epochs and classifying the aggregate, rather than voting on labels — is **not expressible in v1**.
-A reducer cannot recover evidence a snapshot never stored. Reaching it means adding derived outputs
-and reprocessing snapshots, not merely writing a new reducer.
+epochs and classifying the aggregate, rather than voting on labels — is still **not expressible**.
+A reducer cannot recover evidence a snapshot never stored, and a scorer output is a single band.
 
 ### Execution modes
 
@@ -274,6 +297,29 @@ affordable.
 
 `tile` is the escape hatch. It routes to Batch and gives up block parallelism.
 
+**Built:** `streaming` and `stack`. `tile` is refused by `stratum validate` ("a later slice") and by
+the resolve context (`NotImplementedError`); any other value is refused as not a capability.
+
+#### `stack`, as built
+
+| Aspect | Rule |
+|---|---|
+| N | Every observation whose GLT reaches the block's halo window and whose read is not empty, in candidate order `(datetime, granule_id)` — exactly the set the snapshot key's `obs_keys` names. A look the masks emptied is still a row; its `valid` row is all false. |
+| Reads | One granule at a time, through the same read path as streaming, sensor and map masks applied per observation. Each result's block window is written into row *i* of `(N, H, W[, B])` buffers and the per-granule arrays are dropped. No granule is read twice and no full granule is ever held. |
+| What is kept | The roles the scorer's `required_roles` name (whole); an alias it names whose role is not kept (that one band, copied, so an 11-band array is not pinned by a one-band view); every schema layer's value; `valid`; `interpolated`. Aliases of a kept role are views of it. A continuous layer with no `bands` subset whose `source` is a kept role or alias holds no buffer of its own: its value *is* that band, so `obs.layer(name)` is served from the kept one. `obs[name]` for anything else raises `KeyError`, as it does for an undeclared name in streaming. |
+| Dtype | A buffer takes the first row's dtype and is promoted (`np.result_type`, value-preserving) when a later row brings a wider one — granules of different product versions need not agree — so no row is truncated by the buffer before the gather casts it. |
+| Read-only | Every kept buffer is read-only before the scorer sees it: one buffer backs `obs[...]`, every `obs.at(i)` view and the gather, so a write would change what the snapshot records. |
+| The call | `score(obs, aux)` once per block. Return `(N, H, W)`, row *i* for `obs.granules[i]`; anything else is a `ValueError`. Cast to `float32` with masked → NaN, as streaming. |
+| Argmax | Candidates are `valid & ~isnan(score)`. The highest candidate score wins; equal maxima go to the lowest row, the earliest look — what streaming's strict `>` yields. The maximum is found first and matched second, so a best of `-inf` still picks a candidate and never an invalid row 0. |
+| Gather | Every schema layer from the winning row at won cells, cast to the layer's dtype; the empty-layer band count rule is streaming's. |
+| Empty block | N = 0: `score()` is not called and the snapshot is the all-nodata one streaming writes. |
+| Halo | Buffers are the halo window; the score and argmax run over it; the result is trimmed to the core. Seam invariance holds by the same argument as streaming. |
+| Memory | `O(N × halo block × kept bytes per cell)`. `block_size` is the knob; the plan report prints the peak ([08 §2](08-execution.md)). |
+
+The invariant that guards it: a stack scorer that loops `for o in obs` over a streaming scorer
+writes snapshot files byte-identical to that streaming scorer's, ties, NaN, `-inf`, halo and masks
+included.
+
 ### `ObsWindow`
 
 Bands are addressed by role-derived alias, never index, so a scorer is portable across
@@ -287,9 +333,27 @@ obs.grid                  # this block's transform and CRS
 obs.coords.lon            # every cell's centre; also .lat, and .x/.y in the grid CRS
 obs.epoch                 # the epoch being resolved
 obs.n                     # observation count — 1 when streaming, N when stacked
+obs.layer("mineral_1")    # a snapshot layer's gathered value: product ids for a categorical layer
+obs.layer_classes("mineral_1")   # that layer's product class table: class NAME -> the id above
 ```
 
-In `stack` mode the same accessors return a leading observation axis: `(N, H, W)`.
+In `stack` mode the same accessors return a leading observation axis: `(N, H, W)`, and
+`obs.granule` is `None` — also at N = 1, so a stack scorer cannot silently depend on it;
+`obs.granules` holds all N. To work per observation without giving up the stack:
+
+```python
+for o in obs:             # each o is obs.at(i): (H, W) views of row i, o.granule set, o.n == 1
+    ...
+obs.at(-1)                # the latest look
+```
+
+These are views of the kept rows — no copy and no re-read. `obs.layer(name)` exists in both modes
+and only for scorers: layers are gathered after the map masks run, so a mask calling it gets
+`KeyError`. A mode over classes is a mode over **product ids**; with `classes: source` those are the
+raw keys. `obs.layer_classes(name)` is the categorical layer's product class table, the same in
+both modes, so a scorer takes class **names** as parameters and resolves them to ids itself
+([13 §3](13-snapshot-schema.md)); hard-coding an id would silently mean another class in the next
+vintage.
 
 ### Shipped scorers
 
@@ -303,7 +367,48 @@ lives, and `stratum plugins list` is the authority for the installed environment
 | `prefer_bare_earth` | `PreferBareEarth` | `frcov`, `solar_zenith` | The best-exposed, best-lit look. **No view-zenith term.** |
 | `bare_earth_nadir` | `BareEarthNadir` | `frcov`, `solar_zenith`, `view_zenith` | The same, plus a nadir term. `nadir_weight: 0` reproduces `prefer_bare_earth`. |
 | `low_vegetation_nadir` | `LowVegetationNadir` | `pv`, `solar_zenith`, `view_zenith` | Bare earth defined as green vegetation at most `max_pv` (0.40), ignoring NPV. Cover is `1 - PV`; same tie-breakers as `bare_earth_nadir`; `vegetated_weight` grades a greener look instead of refusing it. |
+| `mode_gated_select` | `ModeGatedSelect` | two categorical snapshot layers (`required_layers`); per weighted metric, the bands below | **`stack`.** The best look among those agreeing with the cell's joint (group 1, group 2) mode. See below. |
 | `cleanest_nadir` | `CleanestNadir` | `geometry`, **aux** `slope` + `snow` | Nadir-preferring, penalised for steep terrain, rejecting snow. **Cannot run yet**: it calls `aux.raster("snow", date=…)` and `temporal` date-keying is refused ([05 §2](05-ancillary-data.md)). |
+
+#### `mode_gated_select`
+
+A `stack` scorer: with `epoch: P1Y` its argmax is one selected scene per cell for the year, and
+`acquired` names it. Per block, over the N looks:
+
+| Step | Rule | Parameters (default) |
+|---|---|---|
+| Key | Each look's (group 1, group 2) product-id pair from `layers`. `g2_mask_classes` first turns group 2 into `none` where it is a listed class, leaving group 1 alone. | `layers` (`[mineral_1, mineral_2]`), `key` (`joint`; `independent` votes each group alone), `g2_mask_classes` (`[]`) |
+| Vote | A valid look votes when either group detects (id > 0) and neither holds a class in that group's `ignore` list; an ignored look still counts in `n_valid`. Under `joint`, a look detecting one group only votes `partial_vote_weight`. | `ignore` (`{g1: [], g2: []}`), `partial_vote_weight` (0.01) |
+| Mode | Most votes. Ties: `weighted` takes the key of the tied look with the lowest penalty + `partial_tie_penalty` if partial; `earliest`, `latest`; `nodata` leaves the cell unoccupied. A mode held by fewer than `min_count` looks leaves the cell unoccupied. No voter: no gate. | `tie_break` (`weighted`), `partial_tie_penalty` (0.05), `min_count` (1) |
+| Gate | `hard`: a look off the mode may not occupy the cell (NaN). `soft`: it is ranked with `soft_penalty` added. A look holding an `ignore`d class never matches, also where the cell has no mode, so the hard gate never delivers an ignored class. Under `independent`, a look must carry each group's mode (a group with no voter imposes nothing), so a hard gate can leave a cell where no single look carries both unoccupied. | `gate` (`hard`), `soft_penalty` (10) |
+| Penalty | Per metric a value in [0, 1], 0 best; a value the look cannot derive (below: id 0, grazing airmass, no `cloud_fraction`) scores 1. Fill in a band a weighted metric reads is not that case: required roles decide `valid`, so it removes the look from the vote and from selection, and a granule with no asset for the role is dropped at plan. `fixed` clips `(x - lo) / (hi - lo)` (flipped where higher is better); `rank` is the look's average rank among the cell's valid looks over (n − 1). Weighted sum with positive weights renormalised to 1. Score = −penalty. | `normalize` (`fixed`), `weights` (0.2 each), `bounds`, `aliases` |
+
+| Metric | Reads (alias) | Better | Bounds |
+|---|---|---|---|
+| `bd_unc` | `mineral_unc`, `mineral_2_unc` (mean; a group with id 0 ignored) | low | [0, 0.03] |
+| `fit` | `mineral_fit`, `mineral_2_fit` (same) | high | [0, 0.5] |
+| `banddepth` | `mineral_depth`, `mineral_2_depth` (mean) | high | [0, 0.5] |
+| `cloud_prob` | `cloud_prob` (V002 L2A MASK band 8) | low | [0, 1] |
+| `scene_cloudiness` | the granule's `cloud_fraction`; `None` scores 1 | low | [0, 1] |
+| `bare` | `frcov` | high | [0, 1] |
+| `sza` / `vza` | `solar_zenith` / `view_zenith` (clipped to [0, 90]) | low | [0, 70] / [0, 30] |
+| `path_length` | `path_length` (OBS band 0) | low | [402404, 452394] |
+| `airmass` | 1/cos(sza) + 1/cos(vza); cos ≤ 1e-3 is missing | low | [2, 4] |
+
+Every metric with a positive weight makes its aliases required, so a manifest lacking one fails
+`stratum validate`; weight 0 drops the metric and its bands (V001 has no cloud probability:
+`weights: {cloud_prob: 0}`). Class names in `ignore` and `g2_mask_classes` resolve through
+`obs.layer_classes`; an unknown name fails at resolve. Emitted outputs, all `float32`: per cell
+`mode_count` (looks on the mode), `mode_votes`, `n_voters`, `n_valid`, `agreement`
+(`mode_count / n_valid`), `runner_up_count` (`joint` only); per observation `selection_penalty`
+(the winner's is recorded). `g2_mask_classes` rewrites the key, never the gathered layer: the
+snapshot's group-2 layer holds the winner's raw class, and a manifest that must not deliver a
+masked class lists it in that layer's `aggregate.ignore` (the cell then delivers nodata there).
+Normalisation is fixed bounds or per-cell rank only: any statistic over
+a window would depend on `block_size` and break block-wise = tile-wise.
+`examples/emit-cmr-cuprite/manifest-mode-gated.yaml` is the worked manifest (one tile); the
+demonstration sites run it at the external tool's defaults (`examples/emit-cm-demo-sites/manifest-mode-gated.yaml`)
+and with `key: independent`, `gate: soft`, `normalize: rank` (`manifest-assistant-pick.yaml`).
 
 ### Worked examples
 
@@ -497,9 +602,9 @@ mineral group through `vote()` and only the *combination* is its own, so a cell 
 spoke gets precisely what the vocabulary would have delivered for that layer alone.
 
 > **What this does not reach.** Classify-last, named above, is still out — not because of the
-> reducer but because snapshots record only the winning observation. §4's derived outputs
-> (`source: scorer`, `emit()`) remain unimplemented, and a reducer cannot recover evidence a
-> snapshot never stored.
+> reducer but because snapshots record only the winning observation. §4's scorer-emitted layers
+> (`source: scorer.<output>`, `emit()`) carry one band per cell, not per-candidate evidence, and a
+> reducer cannot recover evidence a snapshot never stored.
 
 Mode-through-time, the Critical Minerals baseline, is a schema entry rather than a plugin:
 
@@ -735,3 +840,11 @@ Every failure below is detected in the plan stage, before compute is provisioned
    `SnapshotStack.score` is `(n_epochs, H, W)` and always populated ([11 §8](11-types.md)).
    `tie_break: highest_score` depends on it, and a winner-take-all reducer is expressible from it.
 3. Is `tile` capability worth supporting in v1, or should it be deferred until something needs it?
+4. `mode_gated_select` reads cloud probability as V002 L2A MASK band 8 (0-based) by index. The
+   band's reported name has not been read from a delivered `EMIT_L2A_MASK_002_*` file; once it
+   is, the example should select it with `match: {name: …}` and [11](11-types.md) should record
+   it **[observed]**.
+5. Under `mode_gated_select`'s `key: independent` with a hard gate, a cell where no single look
+   carries both groups' modes has no winner. Whether that is the right reading of "independent"
+   for a scorer that must pick one look, or whether each group should be selected separately
+   (which a single-winner scorer cannot do), is for the science team.

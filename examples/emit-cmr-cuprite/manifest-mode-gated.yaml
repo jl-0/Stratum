@@ -1,0 +1,217 @@
+# Stratum example: mode-gated selection over Cuprite - one scene per cell for the whole year,
+# chosen among the looks that agree with the cell's mineral consensus.
+#
+#     pixi run stratum validate -m examples/emit-cmr-cuprite/manifest-mode-gated.yaml
+#     pixi run stratum run      -m examples/emit-cmr-cuprite/manifest-mode-gated.yaml
+#
+# WHAT IT DOES. Every other manifest here picks a look per MONTH with a streaming scorer and then
+# votes the months. This one has ONE epoch - the year - and a `stack` scorer that sees every look
+# of the year at a cell at once (04 section 4):
+#
+#   1. masks first: detector edges, L2A cloud/cirrus/water/spacecraft flags, and cos(i) < 0.3
+#      (sun grazing the local slope). A masked look neither votes nor wins;
+#   2. the joint (group 1, group 2) class pair of every remaining look that detected something;
+#      the most common pair is the cell's MODE;
+#   3. the hard gate: a look whose pair is not the mode may not occupy the cell, however well it
+#      scores;
+#   4. among the looks that pass, the lowest weighted penalty wins - band-depth uncertainty, fit,
+#      band depth, cloud probability, scene cloudiness, bare soil, sun and view zenith, path
+#      length and airmass, each scaled to [0, 1] (0 best) and summed with equal weights.
+#
+# The winner's layers are what the snapshot records, so `acquired_1` names the one selected
+# granule per cell and `mineral_1`/`mineral_2` are its RAW classes - the mode itself under the
+# hard joint gate. With `g2_mask_classes` set they are not: the mask rewrites the key the scorer
+# votes on, never the gathered layer, so list the same names in `mineral_2`'s `aggregate.ignore`
+# (those cells then deliver nodata in group 2).
+#
+# FILL IS NOT A WORST SCORE. Every band a weighted metric reads is a required role, so fill in it
+# makes the look invalid - it neither votes nor wins - and a granule with no asset for it is
+# dropped at plan time. FRCOV is fill wherever its QC flags cloud, urban, water or snow/ice
+# (at Cuprite the granules with no FRCOV file are the ones max_cloud_fraction drops anyway, so
+# there it costs looks, not granules). To keep those looks voting, set `weights: {bare: 0}`
+# (the `frcov` role and its index entry can then go too). `mode_count`, `n_valid`, `agreement` and
+# `selection_penalty` come from the scorer itself (`source: scorer.<output>`).
+#
+# WHAT IT COSTS. Its own index (./index-mode-gated) because it adds the L2A MASK collection, which
+# the other manifests' ./index does not list; `stratum plan` builds it on first use. Beyond the
+# files the other Cuprite manifests already stage, it needs every granule's MINUNCERT file
+# (uncertainty and fit) and a V002 L2A MASK file (cloud flags and cloud probability).
+#
+# V001 MASK. Cloud probability exists only in the V002 L2A MASK (band 8, 0-based). To run against
+# V001 masks, drop `version: "002"` from the `mask` role, delete the `cloud_prob` alias and set
+# `weights: {cloud_prob: 0}`: a metric with a positive weight makes its band REQUIRED, and
+# `stratum validate` refuses a manifest that does not declare it.
+
+run_id: emit-cmr-cuprite-mode-gated
+description: Cuprite, all of 2025 as one epoch - joint-mode gate, then the best agreeing look
+
+grid:
+  crs: EPSG:4326                                                # geographic degrees
+  resolution: [0.000277777777777778, -0.000277777777777778]   # one arcsecond, as every Cuprite manifest
+  origin: [-180, -90]
+  tile_size: 0.5                  # the same half-degree tiles as manifest-joint.yaml
+  block_size: 450                 # the memory knob for a stack scorer: resolve keeps every look's
+                                  #   block window, so peak memory is ~ looks x 450^2 x the kept
+                                  #   bytes per cell. `stratum plan` prints the estimate; lower
+                                  #   block_size if it warns.
+
+aoi:
+  tiles: [[-235, 75]]             # lon [-117.5, -117.0), lat [37.5, 38.0): Cuprite (37.52 N,
+                                  #   117.23 W) - one tile, the proof tile for this scorer
+
+time:
+  start: 2025-01-01               # inclusive, UTC
+  end:   2026-01-01               # exclusive - a whole calendar year
+  epoch: P1Y                      # ONE epoch: the stack scorer sees the whole year at once, so the
+  deliver: P1Y                    #   consensus is over every look of the year, not per month
+
+inputs:
+  index_location: ./index-mode-gated   # NOT ./index: this one also lists the L2A MASK collection
+  source:
+    kind: cmr
+    provider: LPCLOUD
+    prefer: https
+    patterns:
+      EMITL2BMIN:
+        MIN: "EMIT_L2B_MIN_001_*.nc"
+        MINUNCERT: "EMIT_L2B_MINUNCERT_001_*.nc"   # band-depth uncertainty and fit, both groups
+      EMITL2BFRCOV:
+        FRCOVBARE: "EMIT_L2B_FRCOVBARE_001_*.tif"
+      EMITL1BRAD:
+        OBS: "EMIT_L1B_OBS_001_*.nc"               # never the 1.85 GB RAD file
+      EMITL2AMASK:
+        MASK: "EMIT_L2A_MASK_002_*.nc"             # V002: carries the cloud-probability band
+  roles:
+    geometry: {collection: EMITL1BRAD, asset: OBS, var: obs}
+    mineral:
+      collection: EMITL2BMIN
+      var: group_1_mineral_id
+      class_table:
+        source: embedded
+        path: /mineral_metadata
+        key: index
+        attributes: [name, record, library, group, url]
+        identity: [collection_version, build_version]
+    mineral_2:
+      collection: EMITL2BMIN
+      var: group_2_mineral_id
+      class_table:
+        source: embedded
+        path: /mineral_metadata
+        key: index
+        attributes: [name, record, library, group, url]
+        identity: [collection_version, build_version]
+    mineral_depth:   {collection: EMITL2BMIN, var: group_1_band_depth}
+    mineral_2_depth: {collection: EMITL2BMIN, var: group_2_band_depth}
+    mineral_unc:     {collection: EMITL2BMIN, asset: MINUNCERT, var: group_1_band_depth_unc}
+    mineral_2_unc:   {collection: EMITL2BMIN, asset: MINUNCERT, var: group_2_band_depth_unc}
+    mineral_fit:     {collection: EMITL2BMIN, asset: MINUNCERT, var: group_1_fit}
+    mineral_2_fit:   {collection: EMITL2BMIN, asset: MINUNCERT, var: group_2_fit}
+                                  # MINUNCERT writes 0, not fill, where a group detected nothing;
+                                  #   the scorer ignores that group's uncertainty and fit there
+    mask: {collection: EMITL2AMASK, version: "002", var: mask}   # published at collection version 002
+    frcov:
+      collection: EMITL2BFRCOV
+      asset: FRCOVBARE
+      var: EMIT_L2B_FRCOVBARE
+      resampling: nearest         # required for an ortho role. Nearest, not bilinear: bilinear
+                                  #   spreads FRCOV's fill one cell into its neighbours, and fill
+                                  #   invalidates the look (see FILL IS NOT A WORST SCORE above)
+  # 0-based bands of the L1B OBS `obs` variable: 0 path length, 1 to-sensor azimuth, 2 to-sensor
+  # zenith, 3 to-sun azimuth, 4 to-sun zenith, 5 phase, 6 slope, 7 aspect, 8 cosine i, 9 UTC time,
+  # 10 earth-sun distance.
+  band_aliases:
+    view_zenith:  {role: geometry, band: 2}
+    solar_zenith: {role: geometry, band: 4}
+    path_length:  {role: geometry, band: 0}
+    cos_i:        {role: geometry, band: 8}   # cosine of the local illumination angle
+    cloud_prob:   {role: mask, band: 8}       # V002 L2A MASK, 0-based band 8: cloud probability,
+                                              #   0-1. Not yet checked against a delivered file's
+                                              #   band names - switch to `match: {name: ...}` once it is
+
+granule_filter:
+  - {max_cloud_fraction: 0.8, on_missing: fail}
+
+pixel_mask:
+  - {ref: edge_trim, columns: 7}                                  # sensor-space; detector edges
+  - {ref: l2a_standard, flags: [cloud, cirrus, water, spacecraft]}
+  - {ref: cos_i, min_cos_i: 0.3}  # map-space: cos(i) < 0.3, or unknown, may not vote or win
+
+scorer:
+  ref: mode_gated_select          # capability: stack - one call per block with every look
+  params:                         # every value below is the default, spelled out
+    layers: [mineral_1, mineral_2]   # the two categorical SNAPSHOT layers the key is built from
+    key: joint                    # the (group 1, group 2) pair; `independent` votes each group alone
+    ignore: {g1: [], g2: []}      # class NAMES that abstain from the vote, per group; a look
+                                  #   holding one never occupies a cell under the hard gate
+    g2_mask_classes: []           # class NAMES turned into `none` in group 2's KEY only (group 1
+                                  #   kept; the delivered mineral_2 keeps the raw class)
+    min_count: 1                  # a mode held by fewer looks leaves the cell empty
+    tie_break: weighted           # equal votes: the key of the lowest-penalty look
+    partial_vote_weight: 0.01     # a look detecting ONE group votes this much
+    partial_tie_penalty: 0.05     # ... and is this much worse when breaking a tie
+    gate: hard                    # `soft` ranks non-mode looks with soft_penalty added instead
+    soft_penalty: 10.0
+    normalize: fixed              # clip each metric to its bounds; `rank` ranks the cell's looks
+    weights: {bd_unc: 0.2, fit: 0.2, banddepth: 0.2, cloud_prob: 0.2, scene_cloudiness: 0.2,
+              bare: 0.2, sza: 0.2, vza: 0.2, path_length: 0.2, airmass: 0.2}
+                                  # renormalised to sum to 1; 0 drops a metric and its bands
+    bounds: {bd_unc: [0, 0.03], fit: [0, 0.5], banddepth: [0, 0.5], sza: [0, 70],
+             vza: [0, 30], path_length: [402404, 452394], airmass: [2, 4]}
+
+snapshot:
+  name: emit-cmr-cuprite-mode-gated-v1
+  layers:
+    mineral_1:
+      kind: categorical
+      source: mineral
+      classes: source
+      aggregate: {method: vote, min_count: 1, ignore: []}
+                                  # one epoch, so the "vote" is the selected look's class: under
+                                  #   the hard joint gate it is the mode itself
+    mineral_2:
+      kind: categorical
+      source: mineral_2
+      classes: source
+      aggregate: {method: vote, min_count: 1, ignore: []}
+    depth_1:
+      kind: continuous
+      source: mineral_depth
+      aggregate: {method: best}
+    acquired_1:
+      kind: continuous
+      source: acquired            # the selected granule's start time (granules.json names it)
+      aggregate: {method: best}
+    mode_count:                   # looks whose pair is the mode
+      kind: continuous
+      source: scorer.mode_count
+      aggregate: {method: best}
+    n_valid:                      # looks that survived the masks, voters or not
+      kind: continuous
+      source: scorer.n_valid
+      aggregate: {method: best}
+    agreement:                    # mode_count / n_valid
+      kind: continuous
+      source: scorer.agreement
+      aggregate: {method: best}
+    selection_penalty:            # the selected look's penalty, 0 best
+      kind: continuous
+      source: scorer.selection_penalty
+      aggregate: {method: best}
+
+outputs:
+  bucket: ./out                   # shares the other Cuprite manifests' asset and GLT caches
+  formats: [gtiff]
+  stac: true
+  render:
+    mineral_1:
+      mapper: categorical
+      on_unmapped: grey
+      alpha_from: {band: agreement, domain: [0.25, 1.0], range: [60, 255]}
+                                  # fade cells where few of the year's looks agreed
+
+budget:
+  max_tiles: 1
+  max_granules: 100
+  max_vcpu_hours: 2
+  on_exceed: fail

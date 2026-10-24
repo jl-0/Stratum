@@ -47,7 +47,43 @@ class PixelMask(Protocol):
 @runtime_checkable
 class Scorer(Protocol):
     """Decides which observation wins a cell. What is recorded about the winner is the snapshot
-    schema's business, not the scorer's (04 section 4, 13)."""
+    schema's business, not the scorer's (04 section 4, 13).
+
+    `capability` defaults to "streaming" when a class does not declare it; the framework reads
+    it with `getattr(scorer, "capability", "streaming")`.
+
+    - streaming: `score` is called once per observation; bands are (H, W[, B]), `obs.granule`
+      is the look, the return is (H, W).
+    - stack: `score` is called ONCE per block with every observation of the epoch that reaches
+      it; bands, `obs.valid` and `obs.interpolated` are (N, H, W[, B]), row i is
+      `obs.granules[i]` (ordered by (datetime, granule_id)), `obs.granule` is None, and the
+      return is (N, H, W). `obs.at(i)` and `for o in obs` give per-observation views of the
+      same rows. The kept buffers are read-only.
+
+    In both, higher wins and NaN means "may not occupy this cell"; on a tie the earliest look
+    keeps the cell. Optional `required_layers: tuple[str, ...]` names the snapshot layers the
+    scorer reads through `obs.layer(name)`; it is read with `getattr(..., ())` and checked at
+    plan time.
+
+    Scorer-emitted layers (optional): `outputs: tuple[BandSpec, ...]` declares per-cell values
+    the scorer can deliver beside its score, and `emit(obs, aux) -> Mapping[str, array]`
+    computes them. A snapshot layer reaches one with `source: scorer.<output>`.
+    - `emit` runs iff the schema has at least one `scorer.*` layer, and then once per `score`
+      call, immediately after it, with the SAME `obs` object and no other call on the instance
+      in between - so a scorer may memoise work from `score` and reuse it in `emit`.
+    - It returns a mapping with exactly the declared output names.
+    - Streaming: each array is (H, W), a per-observation value; the framework records it where
+      that observation wins. Stack: (N, H, W) is per observation and the framework keeps the
+      winning row; (H, W) is per cell - a whole-stack property such as how many looks agreed -
+      and is taken as-is. Any other shape is an error.
+    - Values are written only where some observation won the cell, NaN elsewhere.
+    - Each output is one continuous float32 or float64 band. It enters the snapshot key through
+      `layers_hash` (the layer's name, source and dtype); the code that computes it is covered
+      by the scorer's version, exactly as `score` is (06 section 2).
+
+    Optional members are deliberately not declared below: this protocol is runtime-checkable,
+    and declaring them would make them mandatory.
+    """
 
     capability: Literal["streaming", "stack", "tile"]
     halo: int

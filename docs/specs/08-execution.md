@@ -227,6 +227,17 @@ agrees; the split does not — resolve comes out at 8.5 h against 19–127 h, be
 the ortho warp or aux reads, and reduce at 81 h against 24–59 h, because bytes per cell
 over-counts an eight-layer schema. The two errors partly cancel (§7, question 7).
 
+**A `stack` scorer's memory is reported, not refused.** A stack resolve item keeps one halo-block
+window per candidate observation ([04 §4](04-cost-functions.md)), so its peak is
+`max candidates × (block_size + 2 × halo)² × kept bytes per cell`, where kept bytes per cell are the
+scorer's kept roles (dtype size × band count), one band per copied alias, the snapshot layers
+less any served from a kept band, and one byte each for `valid` and `interpolated`. The plan records it as `estimate.stack_peak_bytes`
+(with `stack_max_candidates`) and the report prints `resolve (stack): ~… peak per item at …
+candidates; Lambda default … MB`, adding a `WARNING: … lower block_size` line above 75 % of the
+default Lambda memory. Nothing is refused: `block_size` is the knob, and no fitted model exists
+to refuse on. Resolve CPU is the same model as streaming — the reads are the same — and the
+scorer's own work over the stack is not priced, which the report says.
+
 `budget.max_vcpu_hours` is checked against the central estimate after the work lists exist — a
 second gate, since the first runs before any granule is opened ([09 §4](09-run-manifest.md)). An
 over-budget plan is still written, work lists and all, and `run_all` refuses it.

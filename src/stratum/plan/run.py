@@ -74,7 +74,15 @@ from stratum.plan.document import (
     write_plan,
     write_work,
 )
-from stratum.plan.estimate import bbox_overlap, estimate, fmt_bytes, fmt_hours, layer_bytes_per_cell
+from stratum.plan.estimate import (
+    DEFAULT_LAMBDA_MEMORY_MB,
+    bbox_overlap,
+    dtype_bytes,
+    estimate,
+    fmt_bytes,
+    fmt_hours,
+    layer_bytes_per_cell,
+)
 from stratum.plugins import resolve
 from stratum.publish import build_mappers, check_formats
 from stratum.reduce import validate_schema
@@ -92,12 +100,15 @@ from stratum.resolve import (
     RoleBinding,
     candidates,
     plugin_version,
+    scorer_capability,
+    scorer_outputs,
 )
 from stratum.resolve.observation import is_lonlat
 from stratum.storage import Workspace
 from stratum.types import (
     BUILTIN_SOURCES,
     AssetHandle,
+    BandSpec,
     BlockRef,
     ClassTable,
     Epoch,
@@ -108,6 +119,7 @@ from stratum.types import (
     SnapshotSchema,
     TileRef,
     VarSpec,
+    scorer_output,
 )
 
 log = logging.getLogger(__name__)
@@ -375,7 +387,7 @@ def roles_needed(m: Manifest, scorer: PluginBinding, masks: Sequence[PluginBindi
     sources, scorer and mask `required_roles`, through aliases) plus the geolocation role regrid
     reads `loc` from. Manifest order."""
     wanted = {role_of(m, layer.source) for layer in m.snapshot.layers.values()
-              if layer.source not in BUILTIN_SOURCES}
+              if layer.source not in BUILTIN_SOURCES and scorer_output(layer.source) is None}
     wanted.update(role_of(m, r) for r in scorer.instance.required_roles)
     for mk in masks:
         wanted.update(role_of(m, r) for r in getattr(mk.instance, "required_roles", ()))
@@ -398,6 +410,9 @@ class Inspection:
     # whose role declares `class_table.identity`; absent when every granule was read
     table_sampling: dict[str, dict[str, Any]] = field(default_factory=dict)
     staged: list[dict[str, Any]] = field(default_factory=list)   # remote assets fetched at plan
+    # role -> the VarSpec the sample granule reported; what a `stack` resolve keeps per cell is
+    # priced from these (08 section 2)
+    specs: dict[str, VarSpec] = field(default_factory=dict)
     ranged: list[dict[str, Any]] = field(default_factory=list)   # ...and those only range-read
 
 
@@ -565,7 +580,8 @@ def warp_aux_for_tiles(cache: CacheRoot, tiles: Sequence[TileRef],
 
 
 def inspect_granules(m: Manifest, refs: Mapping[str, GranuleRef], readers: Mapping[str, Any],
-                     needed: Sequence[str], geolocation_role: str, store: AssetStore) -> Inspection:
+                     needed: Sequence[str], geolocation_role: str, store: AssetStore, *,
+                     scorer_outputs: Sequence[BandSpec] = ()) -> Inspection:
     """The data-dependent checks of 09 section 5 / 12 section 7 against real granules, and the
     per-granule class resolution of 13 section 3 rule 2.
 
@@ -575,6 +591,8 @@ def inspect_granules(m: Manifest, refs: Mapping[str, GranuleRef], readers: Mappi
     - band aliases resolve to an index (`match:` against `VarSpec.band_attrs`);
     - continuous layers take their dtype (and, for `bands: None` on a multi-band source, their
       band count) from the VarSpec;
+    - a `scorer.<output>` layer is one band and takes its dtype from the scorer's declared
+      `BandSpec` (`scorer_outputs`), which is how a change to it reaches `layers_hash`;
     - every categorical layer's class table is read from EVERY contributing granule, tables are
       grouped by fingerprint, and each distinct table is resolved into the enumeration - or, for
       `classes: source`, the identity enumeration of the first granule's table.
@@ -667,6 +685,15 @@ def inspect_granules(m: Manifest, refs: Mapping[str, GranuleRef], readers: Mappi
                 band_counts[layer.name] = 1
                 layers.append(layer)
                 continue
+            output = scorer_output(layer.source)
+            if output is not None:                   # the scorer's emit(): one band, its dtype
+                spec_out = next((b for b in scorer_outputs if b.name == output), None)
+                if spec_out is None:
+                    raise PlanError(f"snapshot.layers.{layer.name}: the scorer declares no "
+                                    f"output {output!r} (04 section 4)")
+                band_counts[layer.name] = 1
+                layers.append(dataclasses.replace(layer, dtype=spec_out.dtype))
+                continue
             src_role = role_of(m, layer.source)
             spec = specs[src_role]
             if layer.kind == "continuous":
@@ -749,7 +776,7 @@ def inspect_granules(m: Manifest, refs: Mapping[str, GranuleRef], readers: Mappi
     return Inspection(schema=schema, aliases=aliases, band_counts=band_counts, remaps=remaps,
                       class_tables=class_tables, table_sampling=table_sampling,
                       sensor_shape=sensor_shape,
-                      staged=list(opener.staged), ranged=list(opener.ranged))
+                      staged=list(opener.staged), ranged=list(opener.ranged), specs=dict(specs))
 
 
 #: `GranuleRef` columns a `class_table.identity` may name; any other name is a catalogue
@@ -1062,7 +1089,8 @@ def plan_run(manifest_path: Path | str, out_dir: Path | str | None = None,
     #    contributing granule's class-table asset (the vintage check, 02 section 3) here,
     #    and those are cache hits for the run
     store = AssetStore(asset_cache)
-    inspection = inspect_granules(m, refs, readers, needed, geolocation_role, store)
+    inspection = inspect_granules(m, refs, readers, needed, geolocation_role, store,
+                                  scorer_outputs=scorer_outputs(scorer.instance))
     max_distance = resolve_max_distance(grid, m.grid.max_distance)
 
     # -- aux, staged and warped HERE rather than in a worker (05 section 5). A typo fails before
@@ -1257,14 +1285,50 @@ def estimate_run(ctx: PlanContext, work: Mapping[str, Sequence[Mapping[str, Any]
                 unknown += 1
             else:
                 total += int(size)
+    bytes_per_cell = layer_bytes_per_cell(inspection.schema.layers, inspection.band_counts)
+    stack_kept: int | None = None
+    halo_cells: int | None = None
+    if scorer_capability(ctx.scorer.instance) == "stack":
+        stack_kept = stack_kept_bytes_per_cell(ctx, inspection.specs, bytes_per_cell,
+                                               inspection.band_counts)
+        halo = int(getattr(ctx.scorer.instance, "halo", 0) or 0)
+        halo_cells = (grid.block_size + 2 * halo) ** 2
     return estimate(tile_cells=tile_cells, block_cells=grid.block_size ** 2,
-                    bytes_per_cell=layer_bytes_per_cell(inspection.schema.layers,
-                                                        inspection.band_counts),
+                    bytes_per_cell=bytes_per_cell,
+                    stack_kept_bytes_per_cell=stack_kept, halo_block_cells=halo_cells,
                     regrid_overlaps=overlaps,
                     resolve_candidates=[int(it.get("candidates", 1)) for it in work["resolve"]],
                     reduce_items=len(work["reduce"]), publish_items=len(work["publish"]),
                     ortho_roles=sum(1 for r in needed if ctx.roles[r].space == "ortho"),
                     download_bytes=None if unknown else total)
+
+
+def stack_kept_bytes_per_cell(ctx: PlanContext, specs: Mapping[str, VarSpec],
+                              layer_bytes: int, band_counts: Mapping[str, int] | None = None
+                              ) -> int:
+    """Bytes a `stack` resolve keeps per cell per observation (04 section 4): each role the
+    scorer keeps whole (dtype size x band count), one band of each alias it copies, the schema
+    layers - less those served from a kept band (`stack_shared_layers`), which hold no buffer
+    of their own - and one byte each for `valid` and `interpolated`."""
+    def size(role: str, whole: bool) -> int:
+        spec = specs.get(role)
+        if spec is None:
+            return 4
+        nb = int(spec.shape[2]) if whole and len(spec.shape) >= 3 else 1
+        return dtype_bytes(spec.dtype) * nb
+
+    keep_roles, copy_aliases = ctx.stack_keep()
+    total = sum(size(r, True) for r in keep_roles)
+    total += sum(size(role, False) for role in copy_aliases.values())
+    shared = set(ctx.stack_shared_layers())
+    if shared:
+        layer_bytes -= layer_bytes_per_cell(
+            [layer for layer in ctx.schema.layers if layer.name in shared], band_counts or {})
+    return total + max(layer_bytes, 0) + 2
+
+
+#: Above this fraction of the Lambda default memory the report warns about a stack resolve peak.
+STACK_MEMORY_WARN_FRACTION = 0.75
 
 
 # ---------------------------------------------------------------------------------------- report
@@ -1379,6 +1443,16 @@ def render_estimate(rom: Mapping[str, Any]) -> list[str]:
         (f"- calibrated on {rom['calibration']}. A run with aux, ortho roles or masks the "
          "calibration run lacked can sit at the top of the range or past it"),
     ]
+    if rom.get("stack_peak_bytes") is not None:
+        peak = rom["stack_peak_bytes"]
+        mb = DEFAULT_LAMBDA_MEMORY_MB
+        lines.append(f"- resolve (stack): ~{fmt_bytes(peak)} peak per item at "
+                     f"{rom['stack_max_candidates']} candidates; Lambda default {mb} MB. The "
+                     "scorer's own work over the stack is not priced")
+        if peak > STACK_MEMORY_WARN_FRACTION * mb * 1024 * 1024:
+            lines.append(f"- WARNING: the stack resolve peak is over "
+                         f"{STACK_MEMORY_WARN_FRACTION:.0%} of the Lambda default memory; "
+                         "lower block_size")
     return lines
 
 

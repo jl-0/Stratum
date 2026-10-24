@@ -72,14 +72,27 @@ one axis.</p>
     n: int                        <span class="c"># 1 streaming, N stacked</span>
     block: BlockRef | <span class="k">None</span>        <span class="c"># None in sensor space</span>
     sensor_window: SensorWindow | <span class="k">None</span>   <span class="c"># set in sensor space; carries row0/col0</span>
-    granule: GranuleRef | <span class="k">None</span>    <span class="c"># None in stack mode</span>
+    granule: GranuleRef | <span class="k">None</span>    <span class="c"># None whenever stacked, even N = 1</span>
     granules: Sequence[GranuleRef]
+    stacked: bool                 <span class="c"># True for the window a stack scorer receives</span>
     epoch: Epoch                  <span class="c"># the epoch being resolved</span>
     sensor_shape: tuple[int, int] | <span class="k">None</span>   <span class="c"># FULL (downtrack, crosstrack) of the variable; sensor space only</span>
     band_attrs: Mapping[str, Mapping[str, Sequence]]   <span class="c"># per role/alias, what the reader reported per band</span>
 
     <span class="k">def</span> __getitem__(self, alias: str) -&gt; np.ndarray:
         <span class="c">"""Band by alias. (H, W) streaming, (N, H, W) stacked; (H, W, B) for a multi-band role."""</span>
+
+    <span class="k">def</span> layer(self, name: str) -&gt; np.ndarray:
+        <span class="c">"""A snapshot layer's gathered value; product ids for a categorical layer. Scorers only."""</span>
+
+    <span class="k">def</span> layer_classes(self, name: str) -&gt; ClassTable:
+        <span class="c">"""A categorical layer's product class table: class name -&gt; the id layer() returns."""</span>
+
+    <span class="k">def</span> at(self, i: int) -&gt; ObsWindow:
+        <span class="c">"""Observation i of a stacked window, as (H, W) views. No copy, no re-read."""</span>
+
+    <span class="k">def</span> __iter__(self) -&gt; Iterator[ObsWindow]:
+        <span class="c">"""obs.at(i) for every row when stacked; the window itself otherwise."""</span>
 
     @property
     <span class="k">def</span> coords(self) -&gt; Coords:
@@ -103,15 +116,20 @@ its own geometry against a declared vector source.</p>
 <tbody>
 <tr><th>Calls to your method</th><td>Once per granule</td><td>Once per block</td></tr>
 <tr><th>Band shape</th><td><code>(H, W)</code></td><td><code>(N, H, W)</code></td></tr>
-<tr><th><code>granule</code></th><td>The granule</td><td><code>None</code></td></tr>
-<tr><th><code>granules</code></th><td>One element</td><td>All N, ordered by acquisition time</td></tr>
-<tr><th>Memory</th><td>O(block)</td><td>O(block &times; N)</td></tr>
+<tr><th><code>valid</code>, <code>interpolated</code></th><td><code>(H, W)</code></td><td><code>(N, H, W)</code></td></tr>
+<tr><th><code>coords</code>, <code>grid</code>, <code>block</code>, <code>epoch</code></th><td>One per block</td><td>The same, shared by every row</td></tr>
+<tr><th><code>granule</code></th><td>The granule</td><td><code>None</code>, also at N = 1</td></tr>
+<tr><th><code>granules</code></th><td>One element</td><td>All N, ordered by acquisition time, then granule id</td></tr>
+<tr><th>Bands present</th><td>Every role read, and its aliases</td><td>Only what <code>required_roles</code> names</td></tr>
+<tr><th>Arrays</th><td>The observation's own</td><td>Read-only</td></tr>
+<tr><th>Memory</th><td>O(block)</td><td>O(block &times; N), block windows of declared names only</td></tr>
 </tbody>
 </table>
 </div>
 
-<p>Ordering in stack mode is guaranteed ascending by <code>datetime</code>, so
-<code>tie_break: earliest</code> is well defined and a stack scorer can reason about sequence.</p>
+<p>Ordering in stack mode is guaranteed ascending by <code>(datetime, granule_id)</code>, so
+<code>tie_break: earliest</code> is well defined and a stack scorer can reason about sequence.
+<code>tile</code> is specified and not built.</p>
 
 <p>Address bands by alias, never index. Aliases are declared in the manifest per collection, so an
 alias-based plugin runs against a different instrument unchanged. An alias the manifest does not
@@ -315,7 +333,7 @@ Filters take an explicit <code>on_missing</code> policy rather than guessing.</p
 <span class="k">class</span> LayerSpec:
     name: str
     kind: Literal[<span class="k">"categorical"</span>, <span class="k">"continuous"</span>]
-    source: str                           <span class="c"># role or band alias - one namespace</span>
+    source: str                           <span class="c"># role or band alias - one namespace; acquired; scorer.&lt;output&gt;</span>
     aggregate: Aggregation                <span class="c"># method + params</span>
     dtype: str | <span class="k">None</span>                     <span class="c"># filled from the source band at plan time; categorical -&gt; uint16</span>
     bands: tuple[int, ...] | <span class="k">None</span>         <span class="c"># subset of a multi-band source; None = all</span>
@@ -334,7 +352,8 @@ Filters take an explicit <code>on_missing</code> policy rather than guessing.</p
 
 @dataclass(frozen=<span class="k">True</span>)
 <span class="k">class</span> BandSpec:
-    <span class="c">"""A delivered output band. Derived from the schema, or declared by a Reducer plugin."""</span>
+    <span class="c">"""A delivered output band. Derived from the schema, or declared by a Reducer plugin
+    - or, as a Scorer's outputs, a per-cell value its emit() computes."""</span>
     name: str
     dtype: str
     description: str
@@ -362,8 +381,10 @@ Filters take an explicit <code>on_missing</code> policy rather than guessing.</p
 <p><code>snaps[...]</code> resolves any layer the <code>SnapshotSchema</code> declares, plus
 <code>score</code> and <code>valid</code>. A categorical layer holds product ids from its
 enumeration, never a raw class. Every snapshot in a run shares one schema, and its
-<code>layers_hash</code> is in every snapshot's cache key. Scorer-computed layers are
-<a href="../status.html#planned">planned, not in v1</a>. See
+<code>layers_hash</code> is in every snapshot's cache key. A layer with
+<code>source: scorer.&lt;output&gt;</code> holds what the scorer's <code>emit()</code> computed,
+one continuous band whose <code>dtype</code> the planner takes from the scorer's
+<code>BandSpec</code> (<a href="../guide/plugins.html#emit">recording what the scorer computed</a>). See
 <a href="../guide/plugins.html#snapshot-schema">what the snapshot carries</a>.</p>
 
 <p>Check <code>snaps.valid</code> rather than testing values against a sentinel. An epoch with no

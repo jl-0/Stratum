@@ -374,7 +374,7 @@ def test_scorer_or_mask_change_invalidates_snapshots_not_glts(pair_plan: PlanCon
 
 def test_non_streaming_scorer_is_refused(tmp_path: Path) -> None:
     class Stack(NadirScorer):
-        capability = "stack"
+        capability = "tile"
 
     with pytest.raises(NotImplementedError, match="04 section 4"):
         build_plan(tmp_path, two_overlapping(), scorer=Stack())

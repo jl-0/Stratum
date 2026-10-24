@@ -65,7 +65,7 @@ snapshot:
 | Field | Meaning |
 |---|---|
 | `kind` | `categorical` or `continuous`. Decides the aggregation vocabulary available and how nodata is represented ([11 §2](11-types.md)) |
-| `source` | Where the value comes from in the *winning* observation. A role name or a band alias; the two share one namespace ([09 §2](09-run-manifest.md)). Or `acquired`, which the framework provides — below |
+| `source` | Where the value comes from in the *winning* observation. A role name or a band alias; the two share one namespace ([09 §2](09-run-manifest.md)). Or `acquired`, which the framework provides, or `scorer.<output>`, which the scorer's `emit()` computes — both below |
 | `dtype` | Optional. Defaults to the source band's dtype; categorical layers default to `uint16` |
 | `bands` | Optional. Band indices to keep from a multi-band source; default all — see below |
 | `classes` | Categorical only. The enumeration file, or `source` — §3 |
@@ -83,7 +83,8 @@ variable needs an alias. Naming something neither defines is a plan-time error.
 observation's acquisition start, in Unix seconds UTC, the same in every cell that observation
 reaches. It is not a role and is never read from a file, and no role or alias may be named
 `acquired`. A layer that uses it must be `kind: continuous`, with no `bands` and no `dtype`, because
-it is always one `float64` band. It is the only `float64` layer, and the reason is resolution:
+it is always one `float64` band. It is the only `float64` source the framework provides, and the
+reason is resolution:
 float32 rounds a 2020s timestamp to 128 s, and adjacent EMIT scenes in one orbit start **12 s
 apart** [observed, US West proof tile]. To the second, an EMIT scene's start time is unique, so the
 value **names the granule**. Each published tile carries `granules.json`, which maps each value
@@ -102,6 +103,23 @@ delivered class: an observation that actually saw it, not merely the best look a
 the per-cell provenance a pixel → granule → spectrum click-through needs. It has to be stored at
 resolve time, because a reducer cannot recover evidence a snapshot never stored
 ([04 §4](04-cost-functions.md)).
+
+**Sources the scorer computes: `scorer.<output>`.** *(Built 2026-10-23.)* A scorer may declare
+`outputs` and an `emit()` method ([04 §4](04-cost-functions.md)); a layer reaches one of those
+outputs with `source: scorer.<output>`. `scorer.` is a **reserved prefix**: no role or alias may be
+named `scorer` or start with `scorer.`, so the one namespace stays unambiguous. Such a layer is
+one continuous band — `kind: continuous`, no `bands`, no `classes`, and `dtype` omitted (the planner
+fills it from the output's `BandSpec`, `float32` or `float64`) or equal to it. Its value is the
+winning observation's, or for a `stack` scorer a per-cell property of the whole stack, written only
+where some observation won. Nothing else about it is special: it enters `layers_hash` like any layer
+(§5) and is aggregated by its declared `aggregate` (§4).
+
+```yaml
+    mode_votes:
+      kind: continuous
+      source: scorer.mode_votes
+      aggregate: {method: best}
+```
 
 **A layer may have a band axis.** A `source` that names a multi-band variable — a reflectance
 cube, a set of abundance fractions — yields one layer of shape `(H, W, B)`, with one dtype and one
@@ -327,7 +345,7 @@ compatibility; it either extends its ancestor or it does not.
 | `ignore: [0, -4]` | Classes are named — `ignore: [none]` — and `-4` had no meaning here |
 | `Scorer.carry` | Gone. Layers are the schema's; the scorer only scores |
 | `Reducer.outputs` and `ModeThroughTime` | Derived from the schema by the built-in reducer. A plugin still declares its own outputs |
-| The `obs[...]` namespace | One namespace: roles and band aliases, which may not collide; `acquired` is reserved for the framework |
+| The `obs[...]` namespace | One namespace: roles and band aliases, which may not collide; `acquired` is reserved for the framework and the prefix `scorer.` for scorer outputs |
 
 ---
 
@@ -339,9 +357,10 @@ compatibility; it either extends its ancestor or it does not.
 2. ~~Joint aggregation across layers — a vote in which `mineral_1` and `mineral_2` candidates pool —
    is not expressible in §4 and needs a custom reducer. Is it wanted?~~ **Resolved:** not in the
    vocabulary; a custom reducer if anyone wants it.
-3. Classify-last over per-candidate evidence still depends on scorer-computed layers, which remain
-   deferred ([04 §4](04-cost-functions.md)). When they arrive they are layers with
-   `source: scorer` and need no new schema machinery.
+3. Classify-last over per-candidate evidence still has no representation. Scorer-computed layers
+   exist (`source: scorer.<output>`, §2, [04 §4](04-cost-functions.md)) and needed no new schema
+   machinery, but an output is one band per cell; per-candidate evidence needs a decision about
+   how several candidates per cell are stored.
 4. ~~Is `extends` by hash the right handle, or should schemas carry a name and version with the hash
    recorded beside it?~~ **Resolved:** both. The classes file carries `name` and `version`, the
    manifest lists ancestors by name, and the planner records each ancestor's `layers_hash` beside it

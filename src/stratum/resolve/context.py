@@ -35,12 +35,16 @@ from stratum.types import (
     AssetHandle,
     AuxAccessor,
     AuxTable,
+    BandSpec,
+    ClassTable,
     Epoch,
     GranuleFrame,
     GranuleReader,
     GranuleRef,
     GridDef,
+    LayerSpec,
     SnapshotSchema,
+    scorer_output,
 )
 
 AUX_NOT_IN_SLICE = "aux is not in the first slice (05)"
@@ -178,6 +182,25 @@ def plugin_version(obj: Any) -> str:
     return "unversioned"
 
 
+#: The capabilities a scorer may declare (04 section 4). `tile` is specified and not built.
+SCORER_CAPABILITIES = ("streaming", "stack", "tile")
+
+
+def scorer_capability(instance: Any) -> str:
+    """The scorer's declared capability; "streaming" when the class declares none."""
+    return str(getattr(instance, "capability", "streaming"))
+
+
+def scorer_required_layers(instance: Any) -> tuple[str, ...]:
+    """The snapshot layers a scorer reads through `ObsWindow.layer` (optional; empty)."""
+    return tuple(getattr(instance, "required_layers", ()) or ())
+
+
+def scorer_outputs(instance: Any) -> tuple[BandSpec, ...]:
+    """The per-cell values a scorer declares it can `emit()` (optional; empty)."""
+    return tuple(getattr(instance, "outputs", ()) or ())
+
+
 @dataclass
 class PlanContext:
     """Everything `resolve_block` needs that is not in the work item.
@@ -265,13 +288,78 @@ class PlanContext:
                 raise ValueError(
                     f"mask {m.ref!r} is sensor-space and declares required_aux; aux is on the "
                     "BLOCK grid (05 section 1) and a sensor-space mask sees sensor geometry")
-        if self.scorer.instance.capability != "streaming":
+        cap = scorer_capability(self.scorer.instance)
+        if cap == "tile":
             raise NotImplementedError(
-                f"scorer {self.scorer.ref!r} has capability "
-                f"{self.scorer.instance.capability!r}; only 'streaming' is in this slice "
-                "(04 section 4)")
+                f"scorer {self.scorer.ref!r} has capability 'tile'; only 'streaming' and "
+                "'stack' are built (04 section 4)")
+        if cap not in SCORER_CAPABILITIES:
+            raise ValueError(f"scorer {self.scorer.ref!r} has capability {cap!r}; it must be "
+                             "one of 'streaming', 'stack', 'tile' (04 section 4)")
+        names = {layer.name for layer in self.schema.layers}
+        unknown = [n for n in scorer_required_layers(self.scorer.instance) if n not in names]
+        if unknown:
+            raise ValueError(f"scorer {self.scorer.ref!r}: required layer(s) {unknown} are not "
+                             f"snapshot layers; the schema has {sorted(names)} (04 section 4)")
+        emitted = self.scorer_layers()
+        own = [n for n in scorer_required_layers(self.scorer.instance)
+               if n in {layer.name for layer in emitted}]
+        if own:
+            raise ValueError(f"scorer {self.scorer.ref!r}: required layer(s) {own} are the "
+                             "scorer's own outputs (04 section 4)")
+        if emitted:
+            declared = {b.name for b in scorer_outputs(self.scorer.instance)}
+            missing = [layer.name for layer in emitted
+                       if scorer_output(layer.source) not in declared]
+            if missing:
+                raise ValueError(f"scorer {self.scorer.ref!r} declares outputs "
+                                 f"{sorted(declared)}; layer(s) {missing} name another "
+                                 "(04 section 4)")
+            if not callable(getattr(self.scorer.instance, "emit", None)):
+                raise ValueError(f"scorer {self.scorer.ref!r}: declares outputs but no emit() "
+                                 "(04 section 4)")
 
     # ------------------------------------------------------------------------------ plugins
+    def scorer_layers(self) -> list[LayerSpec]:
+        """The schema layers whose source is `scorer.<output>` (04 section 4, 13 section 2): what
+        the scorer's `emit()` supplies. Empty means `emit()` is never called."""
+        return [layer for layer in self.schema.layers if scorer_output(layer.source) is not None]
+
+    def layer_classes(self) -> dict[str, ClassTable]:
+        """Each categorical schema layer's product class table, for `ObsWindow.layer_classes`
+        (11 section 5): what lets a scorer resolve a class NAME to the id `obs.layer` returns."""
+        return {layer.name: layer.classes for layer in self.schema.layers
+                if layer.kind == "categorical" and layer.classes is not None}
+
+    def stack_keep(self) -> tuple[list[str], dict[str, str]]:
+        """What a `stack` resolve keeps of each observation's bands (04 section 4): the roles the
+        scorer names kept whole, in manifest order, and alias -> role for each alias it names
+        whose role is not itself kept - that band alone is copied, so a one-band alias does not
+        pin a many-band role array. Aliases of a kept role are views of it and need no entry."""
+        wanted = list(self.scorer.instance.required_roles)
+        whole = [r for r in self.roles if r in wanted]
+        copied = {a: self.aliases[a].role for a in self.aliases
+                  if a in wanted and self.aliases[a].role not in whole}
+        return whole, copied
+
+    def stack_shared_layers(self) -> dict[str, str]:
+        """Schema layers a `stack` resolve serves from a kept band instead of a buffer of their
+        own (04 section 4): layer -> the role or alias it reads. A continuous layer with no
+        band subset gathers its source unchanged, so when the scorer keeps that source too the
+        layer's value IS the kept band and a second copy would only double the peak. Categorical
+        layers (remapped), band subsets, `acquired` and scorer outputs always get their own."""
+        whole, copied = self.stack_keep()
+        kept = set(whole) | set(copied)
+        out: dict[str, str] = {}
+        for layer in self.schema.layers:
+            src = layer.source
+            if (layer.kind != "continuous" or layer.bands is not None
+                    or scorer_output(src) is not None or src == "acquired"):
+                continue
+            if src in kept or (src in self.aliases and self.aliases[src].role in whole):
+                out[layer.name] = src
+        return out
+
     @property
     def scorer_instance(self) -> Scorer:
         return self.scorer.instance
@@ -319,7 +407,7 @@ class PlanContext:
         masks' `required_roles`, each resolved through aliases to its role. Manifest order."""
         wanted: set[str] = set()
         for layer in self.schema.layers:
-            if layer.source not in BUILTIN_SOURCES:
+            if layer.source not in BUILTIN_SOURCES and scorer_output(layer.source) is None:
                 wanted.add(self.role_of(layer.source))
         for name in self.scorer.instance.required_roles:
             wanted.add(self.role_of(name))
@@ -361,6 +449,7 @@ class PlanContext:
 
 
 __all__ = [
-    "AUX_NOT_IN_SLICE", "AliasBinding", "ClassTableProbe", "NullAux", "PlanContext", "PluginBinding", "RoleBinding",
-    "Store", "plugin_version",
+    "AUX_NOT_IN_SLICE", "SCORER_CAPABILITIES", "AliasBinding", "ClassTableProbe", "NullAux",
+    "PlanContext", "PluginBinding", "RoleBinding", "Store", "plugin_version",
+    "scorer_capability", "scorer_outputs", "scorer_required_layers",
 ]

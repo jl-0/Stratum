@@ -384,7 +384,9 @@ directory. Queried when the index is built, never by a run.
 <a href="../guide/reading-data.html#sources">Where granules come from</a></dd>
 
 <dt id="source-layer"><code>source</code> (of a layer)</dt>
-<dd>The role or band alias a snapshot layer is gathered from. Not the same word as the
+<dd>The role or band alias a snapshot layer is gathered from &mdash; or <code>acquired</code>,
+which the framework provides, or <code>scorer.&lt;output&gt;</code>, a value the scorer's
+<code>emit()</code> computes. Not the same word as the
 <a href="#source">granule source</a>. <a href="manifest.html#layer">Manifest &rarr; layers</a></dd>
 
 <dt id="space">Space <span class="aka">(sensor, map)</span></dt>

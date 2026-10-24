@@ -4,6 +4,7 @@ from __future__ import annotations
 import numpy as np
 
 from stratum.types import AuxAccessor, ObsWindow
+from stratum_emit.scorers.mode_gated import ModeGatedSelect
 
 
 class MinViewZenith:
@@ -289,4 +290,4 @@ class MaxBandDepth:
 
 
 __all__ = ["BareEarthNadir", "CleanestNadir", "LowVegetationNadir", "MaxBandDepth",
-           "MinViewZenith", "PreferBareEarth"]
+           "MinViewZenith", "ModeGatedSelect", "PreferBareEarth"]

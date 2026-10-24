@@ -447,7 +447,51 @@ preview` draws from STAC — so the band is viewable — but there is no baked R
 The schema still governs what a *snapshot* holds — which is how the plugin can see both groups —
 but what the *product* delivers is the plugin's declaration.
 
-## 10. The same run in the cloud
+## 10. The fourth manifest: mode-gated selection
+
+`manifest-mode-gated.yaml` picks **one scene per cell for the whole year**. It has one epoch
+(`epoch: P1Y`) and a `stack` scorer, `mode_gated_select`, that sees every look of the year at a
+cell at once:
+
+1. masks first - `edge_trim`, `l2a_standard` and `cos_i` (cos(i) < 0.3, sun grazing the slope);
+2. the most common (group 1, group 2) class pair among the remaining looks is the cell's **mode**;
+3. a look whose pair is not the mode may not win, however well it scores (`gate: hard`);
+4. among the looks that agree, the lowest weighted penalty wins - uncertainty, fit, band depth,
+   cloud probability, scene cloudiness, bare soil, sun and view zenith, path length, airmass.
+
+So `mineral_1`/`mineral_2` are the mode, `acquired_1` names the selected granule, and the scorer
+itself supplies `mode_count`, `n_valid`, `agreement` and `selection_penalty`
+(`source: scorer.<name>`). Every parameter is spelled out at its default in the manifest; the
+contract is [spec 04 section 4](../../docs/specs/04-cost-functions.md).
+
+**It needs more than the other manifests.** Its own index (`./index-mode-gated`) because it adds
+the V002 L2A MASK collection (cloud flags and cloud probability), and every granule's MINUNCERT
+file (uncertainty and fit). At the Cuprite tile that is 34 MINUNCERT files, 1.8 GB.
+
+**On V001 masks** there is no cloud-probability band: drop `version: "002"` from the `mask` role,
+delete the `cloud_prob` alias and set `weights: {cloud_prob: 0}`. A metric with a positive weight
+makes its band required, so `stratum validate` refuses the manifest until you do.
+
+### What a subset of it produced
+
+Run 2026-10-23 against this directory's existing `./index`, which has no L2A MASK collection: the
+same manifest without the `mask` role, without `l2a_standard` and with `cloud_prob: 0` (cos(i),
+edge trim and the other nine metrics in place). The 33 missing MINUNCERT files (1.8 GB) were the
+only download; GLTs, MIN, OBS and FRCOV came from the cache.
+
+| | |
+|---|---|
+| Work | 34 regrid (all cache hits), 16 resolve, 16 reduce, 1 publish; 128 s, resolve 117 s of it |
+| Stack | at most 24 looks per block; plan estimate ~379 MB peak per resolve item |
+| Coverage | 99.9 % of the tile's cells have a selected look, from 21 distinct granules |
+| Consensus | median `n_valid` 6, median `mode_count` 2, median `agreement` 0.40 |
+| Classes | 52 group-1 and 119 group-2 classes among the selected looks |
+| Penalty | median `selection_penalty` 0.32 |
+
+The full manifest, with the cloud flags and cloud probability, has not been run: it needs the
+`./index-mode-gated` index built and the V002 L2A MASK files downloaded.
+
+## 11. The same run in the cloud
 
 Identical to [`../emit-cmr-nevada/README.md` §6](../emit-cmr-nevada/README.md#6-the-same-run-in-the-cloud):
 point `outputs.bucket` at the deployment's S3 root, set `$STRATUM_LAMBDA_FUNCTION`, and run with
@@ -457,7 +501,7 @@ manifest or the code changes. It is also the first case where fan-out concurrenc
 items at the default `--workers 32` is the scale at which the open question about exhausting
 account Lambda concurrency starts to bite. [Deploying to AWS](../../docs/guide/deploying.html) is the runbook.
 
-## 11. Where things are
+## 12. Where things are
 
 ```
 examples/emit-cmr-cuprite/

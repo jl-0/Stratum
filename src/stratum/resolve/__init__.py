@@ -19,6 +19,7 @@ from stratum.resolve.block import (
     resolve_block,
     resolve_window,
     snapshot_key,
+    stack_argmax,
     window_lonlat_bounds,
 )
 from stratum.resolve.context import (
@@ -30,6 +31,9 @@ from stratum.resolve.context import (
     PluginBinding,
     RoleBinding,
     plugin_version,
+    scorer_capability,
+    scorer_outputs,
+    scorer_required_layers,
 )
 from stratum.resolve.gather import Gathered, gather
 from stratum.resolve.observation import (
@@ -61,6 +65,7 @@ __all__ = [
     "Observation", "PlanContext", "PluginBinding", "ResolveItem", "Resolved", "RoleBinding",
     "apply_remap", "block_coords", "candidates", "empty_layer", "gather", "glt_key_for",
     "layer_dtype", "layer_nodata", "observation_inputs", "plugin_version", "reached_observations",
-    "read_observation", "read_snapshot", "resolve_block", "resolve_window", "snapshot_key",
+    "read_observation", "read_snapshot", "resolve_block", "resolve_window",
+    "scorer_capability", "scorer_outputs", "scorer_required_layers", "snapshot_key", "stack_argmax",
     "stack_snapshots", "window_lonlat_bounds", "write_snapshot",
 ]

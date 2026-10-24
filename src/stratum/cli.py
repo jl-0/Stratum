@@ -506,8 +506,8 @@ def plugins_list(kind: str | None) -> None:
             click.echo("  (none)")
 
 
-_SHOWN = ("capability", "halo", "required_roles", "required_aux", "space", "outputs",
-          "collections")
+_SHOWN = ("capability", "halo", "required_roles", "required_aux", "required_layers", "space",
+          "outputs", "collections")
 
 
 @plugins.command("show")
@@ -534,9 +534,18 @@ def plugins_show(ref: str, kind: str | None) -> None:
     click.echo(f"class:    {cls.__qualname__}")
     click.echo(f"module:   {cls.__module__}")
     click.echo(f"version:  {plugin_version(cls)}")
+    # A plugin may set a declaration in __init__ (from its parameters), so read them off an
+    # instance built with the defaults when there is one; the class otherwise.
+    try:
+        source: Any = cls()
+    except Exception:  # noqa: BLE001 - a plugin needing arguments is shown from its class
+        source = cls
     for attr in _SHOWN:
-        if hasattr(cls, attr):
-            click.echo(f"{attr + ':':18}{getattr(cls, attr)!r}")
+        if hasattr(source, attr):
+            value = getattr(source, attr)
+            if attr == "outputs" and all(hasattr(b, "name") for b in value or ()):
+                value = tuple(b.name for b in value)
+            click.echo(f"{attr + ':':18}{value!r}")
     doc = (cls.__doc__ or "").strip().splitlines()
     if doc:
         click.echo(f"doc:      {doc[0]}")

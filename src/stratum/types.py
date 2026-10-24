@@ -9,7 +9,7 @@ import hashlib
 import json
 import math
 from abc import ABC, abstractmethod
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterator, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
@@ -244,7 +244,14 @@ class Coords:
 
 
 class ObsWindow:
-    """What every Scorer and PixelMask receives. Two forms; the difference is one axis."""
+    """What every Scorer and PixelMask receives. Two forms; the difference is one axis.
+
+    Per observation (`stacked=False`): bands, `valid` and `interpolated` are (H, W[, B]) and
+    `granule` is the one look. Stacked (`stacked=True`, a `stack` scorer, 04 section 4): every
+    band, layer, `valid` and `interpolated` gains a leading axis of length `n`, row i is
+    `granules[i]`, and `granule` is None even at n == 1. `coords`, `grid`, `block` and `epoch`
+    are one per block in both forms.
+    """
 
     def __init__(
         self,
@@ -260,6 +267,9 @@ class ObsWindow:
         coords: Coords | None = None,
         sensor_shape: tuple[int, int] | None = None,
         band_attrs: Mapping[str, Mapping[str, Sequence[Any]]] | None = None,
+        layers: Mapping[str, np.ndarray] | None = None,
+        stacked: bool = False,
+        layer_classes: Mapping[str, ClassTable] | None = None,
     ) -> None:
         self.space = space
         self._bands = dict(bands)
@@ -277,6 +287,28 @@ class ObsWindow:
         # Per-band attributes the reader reported for each multi-band role or alias
         # (VarSpec.band_attrs, e.g. {"mask": {"name": [...]}}); never interpreted by the core.
         self.band_attrs: Mapping[str, Mapping[str, Sequence[Any]]] = dict(band_attrs or {})
+        # The schema layers' gathered values (product ids for a categorical layer). Held BY
+        # REFERENCE, not copied: `read_observation` builds the window before the map masks run
+        # and fills this same dict after them, so a mask finds it empty and a scorer full.
+        self._layers: Mapping[str, np.ndarray] = {} if layers is None else layers
+        # Each categorical schema layer's PRODUCT class table (LayerSpec.classes): what turns a
+        # class NAME into the product id `layer()` returns. One per run, shared by every window.
+        self._layer_classes: Mapping[str, ClassTable] = dict(layer_classes or {})
+        self.stacked = bool(stacked)
+        if self.stacked:
+            n = self.n
+            shape = np.shape(valid)
+            if len(shape) != 3 or shape[0] != n:
+                raise ValueError(f"stacked ObsWindow: 'valid' has shape {shape}; expected "
+                                 f"(n, H, W) with n = {n}")
+            named = [*self._bands.items(), *self._layers.items()]
+            if interpolated is not None:
+                named.append(("interpolated", interpolated))
+            for name, arr in named:
+                k = np.shape(arr)[0] if np.ndim(arr) else None
+                if k != n:
+                    raise ValueError(f"stacked ObsWindow: {name!r} has leading axis {k}; "
+                                     f"expected n = {n}")
 
     @property
     def n(self) -> int:
@@ -284,6 +316,8 @@ class ObsWindow:
 
     @property
     def granule(self) -> GranuleRef | None:
+        if self.stacked:
+            return None
         return self.granules[0] if self.n == 1 else None
 
     @property
@@ -296,6 +330,56 @@ class ObsWindow:
         except KeyError:
             raise KeyError(f"no band alias {alias!r}; declare it through required_roles "
                            "and the manifest (11 section 5)") from None
+
+    def layer(self, name: str) -> np.ndarray:
+        """A snapshot schema layer's gathered value for this look: product ids (int32) for a
+        categorical layer, the native dtype for a continuous one; (H, W[, B]), or (n, H, W[, B])
+        stacked. Scorers only: layers exist after the map masks ran, so a mask gets KeyError."""
+        try:
+            return self._layers[name]
+        except KeyError:
+            raise KeyError(f"no snapshot layer {name!r} on this observation; layers exist only "
+                           "after the map masks ran, and a scorer declares the ones it reads "
+                           "through required_layers (11 section 5)") from None
+
+    def layer_classes(self, name: str) -> ClassTable:
+        """The product class table of categorical schema layer `name` - the table whose keys are
+        the ids `layer(name)` returns - so a scorer can name classes rather than hard-code ids
+        (13 section 3). The same table in both forms and for every observation."""
+        try:
+            return self._layer_classes[name]
+        except KeyError:
+            raise KeyError(f"no class table for snapshot layer {name!r}; only a categorical "
+                           f"layer has one, and the categorical layers here are "
+                           f"{sorted(self._layer_classes)} (11 section 5)") from None
+
+    def at(self, i: int) -> ObsWindow:
+        """Observation `i` of a stacked window as a per-observation window: views of the kept
+        rows, no copy and no read. Negative `i` counts from the end. On a per-observation
+        window only 0 (itself) exists."""
+        if not self.stacked:
+            if i == 0:
+                return self
+            raise IndexError(f"observation index {i} out of range for a per-observation window")
+        n = self.n
+        if not -n <= i < n:
+            raise IndexError(f"observation index {i} out of range for a stack of {n}")
+        i = i % n
+        return ObsWindow(
+            space="block", bands={k: v[i] for k, v in self._bands.items()},
+            valid=self._valid[i], granules=(self.granules[i],), epoch=self.epoch,
+            block=self.block,
+            interpolated=None if self._interpolated is None else self._interpolated[i],
+            coords=self._coords, band_attrs=self.band_attrs,
+            layers={k: v[i] for k, v in self._layers.items()},
+            layer_classes=self._layer_classes)
+
+    def __iter__(self) -> Iterator[ObsWindow]:
+        if not self.stacked:
+            yield self
+            return
+        for i in range(self.n):
+            yield self.at(i)
 
     @property
     def valid(self) -> np.ndarray:
@@ -418,6 +502,18 @@ class Aggregation:
 #: unique. It is the per-cell provenance that a pixel -> granule -> spectrum click-through needs
 #: and that a published mosaic cannot recover later (04 section 4, "Derived snapshot bands").
 BUILTIN_SOURCES: Mapping[str, str] = {"acquired": "float64"}
+
+#: A layer source naming one of the SCORER's declared `outputs` (04 section 4, 13 section 2):
+#: `source: scorer.<output>`. Not a role, not an alias - the prefix is reserved in the one
+#: namespace - and read from no file: the scorer's `emit()` computes it during resolve.
+SCORER_SOURCE_PREFIX = "scorer."
+
+
+def scorer_output(source: str) -> str | None:
+    """The output name a `scorer.<output>` layer source names; None for any other source."""
+    if source.startswith(SCORER_SOURCE_PREFIX):
+        return source[len(SCORER_SOURCE_PREFIX):]
+    return None
 
 
 def acquired_seconds(when: datetime) -> float:

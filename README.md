@@ -114,7 +114,8 @@ None of these blocks the local run; the rolling list, with every spec's open que
    configuration of it or a different aggregation. One question for SDS engineering.
 2. **Mode over mineral ID directly, or over something continuous first?** Both directions are
    expressible today — `vote` over the class layer, continuous layers reduced conditionally on
-   it — except classify-last, which waits on scorer-computed snapshot layers
+   it — except classify-last. Scorer-computed snapshot layers exist, but an output is one band
+   per cell, and per-candidate evidence still has no representation
    ([04 §4](docs/specs/04-cost-functions.md)). For the science lead, who has leaned toward *not* reducing over
    binarized labels.
 3. **AWS account, quota and Earthdata credential path.** The long pole for anything cloud;

@@ -13,7 +13,7 @@ from stratum.manifest.models import CONFIG_MAPPERS, Manifest
 from stratum.plugins import resolve
 from stratum.publish.cogs import check_formats
 from stratum.reduce import SchemaError, product_bands
-from stratum.types import BUILTIN_SOURCES, BandSpec
+from stratum.types import BUILTIN_SOURCES, SCORER_SOURCE_PREFIX, BandSpec, scorer_output
 
 
 def _instantiate(kind: str, ref: str, params: dict[str, Any], where: str,
@@ -150,6 +150,60 @@ def _reducer_problems(ref: str, reducer: Any) -> list[str]:
     return problems
 
 
+#: The dtypes a scorer output may declare: a scorer layer is one continuous float band (13 section 2).
+SCORER_OUTPUT_DTYPES = ("float32", "float64")
+
+
+def scorer_output_problems(ref: str, scorer: Any) -> list[str]:
+    """Problems with a scorer's declared `outputs` / `emit` (04 section 4): every entry a
+    BandSpec, one name each, a float dtype, and an `emit()` to compute them. Empty when the
+    scorer declares no outputs."""
+    problems: list[str] = []
+    outputs = getattr(scorer, "outputs", ()) or ()
+    if not outputs:
+        return problems
+    if not callable(getattr(scorer, "emit", None)):
+        problems.append(f"scorer {ref}: declares outputs but no emit() (04 section 4)")
+    if not all(isinstance(b, BandSpec) for b in outputs):
+        problems.append(f"scorer {ref}: every entry of `outputs` must be a BandSpec")
+        return problems
+    names = [b.name for b in outputs]
+    dupes = sorted({n for n in names if names.count(n) > 1})
+    if dupes:
+        problems.append(f"scorer {ref}: `outputs` names {dupes} more than once; one band, one "
+                        "name")
+    for b in outputs:
+        if b.dtype not in SCORER_OUTPUT_DTYPES:
+            problems.append(f"scorer {ref}: output {b.name!r} has dtype {b.dtype!r}; a scorer "
+                            f"output is one of {list(SCORER_OUTPUT_DTYPES)} (04 section 4)")
+    return problems
+
+
+def _scorer_outputs(scorer: Any) -> dict[str, BandSpec]:
+    """name -> BandSpec of the scorer's declared outputs that are BandSpecs."""
+    return {b.name: b for b in getattr(scorer, "outputs", ()) or () if isinstance(b, BandSpec)}
+
+
+def _scorer_layer_problems(where: str, ref: str, output: str, layer: Any,
+                           scorer: Any) -> list[str]:
+    """A `source: scorer.<output>` layer (13 section 2): the output is declared, and the layer is
+    one continuous band of the output's dtype. Nothing is said when the scorer did not
+    instantiate - that already is a problem of its own."""
+    if scorer is None:
+        return []
+    outputs = _scorer_outputs(scorer)
+    spec = outputs.get(output)
+    if spec is None:
+        return [(f"{where}: scorer {ref} declares no output {output!r}; it declares "
+                 f"{sorted(outputs)}")]
+    if layer.kind != "continuous" or layer.bands is not None or layer.classes is not None \
+            or layer.dtype not in (None, spec.dtype):
+        return [(f"{where}: a scorer output is one continuous {spec.dtype} band; declare "
+                 "kind: continuous with no bands or classes, and dtype omitted or "
+                 f"{spec.dtype} (13 section 2)")]
+    return []
+
+
 def _delivered_names(m: Manifest, problems: list[str], reducer: Any = None) -> set[str]:
     """Band names the built-in reducer delivers for this schema - the actual rule
     (`stratum.reduce.delivered_bands`, 13 section 4), not every suffix for every layer, so an
@@ -174,6 +228,11 @@ def validate_static(m: Manifest) -> list[str]:
     if reserved:
         problems.append(f"inputs: {sorted(reserved)} is a framework-provided source and cannot "
                         "name a role or a band alias (13 section 2)")
+    prefixed = sorted(n for n in inputs.names
+                      if n == SCORER_SOURCE_PREFIX.rstrip(".") or n.startswith(SCORER_SOURCE_PREFIX))
+    if prefixed:
+        problems.append(f"inputs: {prefixed} use the reserved prefix {SCORER_SOURCE_PREFIX!r} "
+                        "(13 section 2)")
     for alias, spec in inputs.band_aliases.items():
         if spec.role not in inputs.roles:
             problems.append(f"inputs.band_aliases.{alias}: role {spec.role!r} is not declared")
@@ -188,9 +247,21 @@ def validate_static(m: Manifest) -> list[str]:
         if isinstance(halo, int) and halo * 2 >= m.grid.block_size:
             problems.append(f"scorer {m.scorer.ref}: halo {halo} is not consistent with block "
                             f"{m.grid.block_size}")
-        if getattr(scorer, "capability", "streaming") != "streaming":
-            problems.append(f"scorer {m.scorer.ref}: capability "
-                            f"{scorer.capability!r} is a later slice")
+        cap = getattr(scorer, "capability", "streaming")
+        if cap == "tile":
+            problems.append(f"scorer {m.scorer.ref}: capability 'tile' is a later slice "
+                            "(04 section 4)")
+        elif cap not in ("streaming", "stack"):
+            problems.append(f"scorer {m.scorer.ref}: capability {cap!r} must be one of "
+                            "'streaming', 'stack', 'tile'")
+        for name in getattr(scorer, "required_layers", ()) or ():
+            if name not in m.snapshot.layers:
+                problems.append(f"scorer {m.scorer.ref}: required layer {name!r} is not a "
+                                "snapshot layer")
+            elif scorer_output(m.snapshot.layers[name].source) is not None:
+                problems.append(f"scorer {m.scorer.ref}: required layer {name!r} is the "
+                                "scorer's own output")
+        problems.extend(scorer_output_problems(m.scorer.ref, scorer))
     for i, mask in enumerate(m.pixel_mask):
         inst = _instantiate("mask", mask.ref, mask.params, f"pixel_mask[{i}]", problems)
         if inst is not None:
@@ -208,7 +279,10 @@ def validate_static(m: Manifest) -> list[str]:
     layers = m.snapshot.layers
     for name, layer in layers.items():
         where = f"snapshot.layers.{name}"
-        if layer.source in BUILTIN_SOURCES:
+        output = scorer_output(layer.source)
+        if output is not None:
+            problems.extend(_scorer_layer_problems(where, m.scorer.ref, output, layer, scorer))
+        elif layer.source in BUILTIN_SOURCES:
             want = BUILTIN_SOURCES[layer.source]
             if layer.kind != "continuous" or layer.bands is not None \
                     or layer.dtype not in (None, want):

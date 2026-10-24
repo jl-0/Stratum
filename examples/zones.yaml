@@ -22,3 +22,20 @@ south-central-az: [-111.8, 31.9, -110.4, 33.1]      # Tucson - Globe - Safford p
 # the district's public location (~35.48 N, 115.53 W) with a margin. Replace it with the
 # collaborator's site polygons before using it as a regression baseline.
 mountain-pass-ca: [-115.60, 35.43, -115.46, 35.53]  # Mountain Pass REE mine, California
+
+# Demonstration sites (23 Oct 2026 tag-up): the four used by ./emit-cm-demo-sites/. Cuprite and
+# Mountain Pass are the entries above; these two complete the set.
+#
+# The acid-mine-drainage (AMD) reference site. EXACT, not approximate: the AMD project's own
+# BinghamCanyonUT region (lat 40.4-40.6, lon -112.2 to -112.0), so a Stratum run here can be
+# compared with that project's established output over the same ground. It is deliberately much
+# smaller than `bingham-canyon` above, which is the delivered-product district box.
+bingham-canyon-amd: [-112.2, 40.4, -112.0, 40.6]    # Bingham Canyon mine, Utah
+
+# The workshop tutorial area. UNVERIFIED: the science team has not yet sent this box. This is the
+# outward-rounded footprint of the scene the REVISED EMIT L2B mineralogy tutorial works through
+# (EMIT_L2B_MIN_001_20230622T193324_2317313_010; CMR footprint lon -117.200 to -116.011,
+# lat 34.263-35.436), on the assumption that the workshop used that revision. The published
+# revision uses a scene over Cuprite instead (..._20230427T173309_2311711_010), which would
+# duplicate the Cuprite site. Replace this box when the real one arrives.
+mojave-l2b-tutorial: [-117.2, 34.25, -116.0, 35.45]  # central Mojave, California

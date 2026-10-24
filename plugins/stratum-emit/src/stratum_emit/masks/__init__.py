@@ -118,6 +118,37 @@ class SoilFraction:
         return obs["frcov"] >= self.min_soil
 
 
+class CosineI:
+    """Drop cells whose local illumination is too oblique: cos(i) below `min_cos_i`.
+
+    `i` is the angle between the sun and the local surface normal, so cos(i) accounts for
+    terrain as well as sun height: a slope facing away from the sun has a low cos(i) at any solar
+    zenith. EMIT reports it per pixel as L1B OBS band 8 (0-based; "cosine(i)"), so the manifest
+    declares it as an alias - `cos_i: {role: geometry, band: 8}` - and this mask reads it after
+    the gather, in map space, like `SoilFraction`. A non-finite value is invalid: an unknown
+    illumination is not a usable one.
+
+    The default 0.3 is the external tiled aggregator's default (`DEFAULT_OBS_COSINE_I_MIN`),
+    where a low cos(i) is treated exactly like cloud: the look neither votes nor wins.
+    """
+
+    space = "map"
+    required_aux: tuple[str, ...] = ()
+
+    def __init__(self, min_cos_i: float = 0.3, alias: str = "cos_i") -> None:
+        if not -1.0 <= float(min_cos_i) <= 1.0:
+            raise ValueError(f"CosineI: min_cos_i is a cosine and must be in [-1, 1]; "
+                             f"got {min_cos_i}")
+        self.min_cos_i = float(min_cos_i)
+        self.alias = alias
+        self.required_roles = (alias,)
+
+    def valid(self, obs: ObsWindow, aux: AuxAccessor) -> np.ndarray:
+        c = np.asarray(np.ma.filled(np.ma.asarray(obs[self.alias]).astype(np.float32), np.nan))
+        with np.errstate(invalid="ignore"):
+            return np.isfinite(c) & (c >= self.min_cos_i)
+
+
 class Landcover:
     """Drop cells whose land cover is not ground worth mapping, from a declared aux raster.
 
@@ -188,4 +219,4 @@ class Landcover:
         return ok
 
 
-__all__ = ["EdgeTrim", "L2AStandard", "Landcover", "SlitDust", "SoilFraction"]
+__all__ = ["CosineI", "EdgeTrim", "L2AStandard", "Landcover", "SlitDust", "SoilFraction"]

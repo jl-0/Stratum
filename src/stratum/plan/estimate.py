@@ -63,6 +63,11 @@ _DTYPE_BYTES = {"bool": 1, "uint8": 1, "int8": 1, "uint16": 2, "int16": 2, "uint
                 "int32": 4, "float32": 4, "uint64": 8, "int64": 8, "float64": 8}
 
 
+def dtype_bytes(dtype: Any) -> int:
+    """The size of one value of `dtype` (a name or numpy dtype); 4 when unknown."""
+    return _DTYPE_BYTES.get(str(dtype), 4)
+
+
 def layer_bytes_per_cell(layers: Sequence[Any], band_counts: Mapping[str, int]) -> int:
     """What one cell of the snapshot costs: each layer's dtype size times its band count."""
     total = 0
@@ -70,6 +75,13 @@ def layer_bytes_per_cell(layers: Sequence[Any], band_counts: Mapping[str, int]) 
         size = _DTYPE_BYTES.get(str(layer.dtype or "float32"), 4)
         total += size * int(band_counts.get(layer.name, 1))
     return max(total, 1)
+
+
+def stack_peak_bytes(max_candidates: int, halo_block_cells: int, kept_bytes_per_cell: int) -> int:
+    """What a `stack` resolve item holds at its peak (04 section 4, 08 section 2): one kept
+    block window - halo included - per observation, for the item with the most candidates. A
+    report figure, not a fitted cost: `block_size` is the knob that brings it down."""
+    return int(max_candidates) * int(halo_block_cells) * int(kept_bytes_per_cell)
 
 
 def bbox_overlap(bbox: Sequence[float], tile: Sequence[float]) -> float:
@@ -84,9 +96,15 @@ def bbox_overlap(bbox: Sequence[float], tile: Sequence[float]) -> float:
 def estimate(*, tile_cells: int, block_cells: int, bytes_per_cell: int,
              regrid_overlaps: Sequence[float], resolve_candidates: Sequence[int],
              reduce_items: int, publish_items: int, ortho_roles: int = 0,
-             download_bytes: int | None = None) -> dict[str, Any]:
+             download_bytes: int | None = None,
+             stack_kept_bytes_per_cell: int | None = None,
+             halo_block_cells: int | None = None) -> dict[str, Any]:
     """The ROM for one run's work lists. Seconds are on the calibration core; `lambda_usd` is at
-    the deployment's default memory and is re-priced by preflight for the real function."""
+    the deployment's default memory and is re-priced by preflight for the real function.
+
+    For a `stack` scorer, `stack_kept_bytes_per_cell` and `halo_block_cells` add
+    `stack_peak_bytes` (and the candidate count it was taken at). Resolve CPU is unchanged - the
+    reads are the same - and the scorer's own work over the stack is not priced."""
     ov = np.asarray(regrid_overlaps, dtype=float)
     cand = np.asarray(resolve_candidates, dtype=float)
     per_item = {
@@ -109,7 +127,7 @@ def estimate(*, tile_cells: int, block_cells: int, bytes_per_cell: int,
         "products": float(PRODUCTS_BYTES_PER_CELL_BYTE * tile_cells * bytes_per_cell
                           * publish_items),
     }
-    return {
+    out: dict[str, Any] = {
         "calibration": CALIBRATION,
         "range_factor": [ROM_LOW, ROM_HIGH],
         "bytes_per_cell": bytes_per_cell,
@@ -121,6 +139,12 @@ def estimate(*, tile_cells: int, block_cells: int, bytes_per_cell: int,
         "download_bytes": download_bytes,
         "footprint_bytes": {k: int(v) for k, v in footprint.items()},
     }
+    if stack_kept_bytes_per_cell is not None and halo_block_cells is not None:
+        most = int(cand.max()) if cand.size else 0
+        out["stack_max_candidates"] = most
+        out["stack_peak_bytes"] = stack_peak_bytes(most, halo_block_cells,
+                                                   stack_kept_bytes_per_cell)
+    return out
 
 
 def lambda_cost(cpu_hours: float, invocations: int, memory_mb: int) -> dict[str, Any]:
@@ -152,5 +176,6 @@ def fmt_hours(h: float) -> str:
 
 __all__ = [
     "CALIBRATION", "DEFAULT_LAMBDA_MEMORY_MB", "LAMBDA_SLOWDOWN", "ROM_HIGH", "ROM_LOW",
-    "bbox_overlap", "estimate", "fmt_bytes", "fmt_hours", "lambda_cost", "layer_bytes_per_cell",
+    "bbox_overlap", "dtype_bytes", "estimate", "fmt_bytes", "fmt_hours", "lambda_cost", "layer_bytes_per_cell",
+    "stack_peak_bytes",
 ]

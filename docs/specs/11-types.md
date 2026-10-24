@@ -224,13 +224,27 @@ class ObsWindow:
     n: int                        # 1 in streaming mode, N in stack mode
     block: BlockRef | None        # None in sensor space
     sensor_window: SensorWindow | None   # set in sensor space; carries row0/col0 - section 10
-    granule: GranuleRef | None    # None in stack mode - see granules
+    granule: GranuleRef | None    # None whenever stacked (even N = 1) - see granules
     granules: Sequence[GranuleRef]
+    stacked: bool                 # True for the window a stack scorer receives
 
     epoch: Epoch                  # the epoch this block is being resolved for
 
     def __getitem__(self, alias: str) -> np.ndarray:
         """Band by alias. Shape (H, W) streaming, (N, H, W) stacked."""
+
+    def layer(self, name: str) -> np.ndarray:
+        """A snapshot layer's gathered value (product ids for a categorical layer).
+        Scorers only; a mask gets KeyError."""
+
+    def layer_classes(self, name: str) -> ClassTable:
+        """A categorical snapshot layer's product class table: the keys layer() returns."""
+
+    def at(self, i: int) -> ObsWindow:
+        """Observation i of a stacked window as a per-observation window (views)."""
+
+    def __iter__(self) -> Iterator[ObsWindow]:
+        """at(i) for each row when stacked; the window itself otherwise."""
 
     @property
     def coords(self) -> Coords:
@@ -271,6 +285,28 @@ so no existing construction changed (`src/stratum/types.py`, `ObsWindow.__init__
   interpreted by the core. `L2AStandard` selects mask bands by their reported `name` through it
   rather than by a positional guess ([04 §3](04-cost-functions.md)).
 
+**[design] Three more added for `stack` scorers** ([04 §4](04-cost-functions.md)), again optional
+keywords with defaults:
+
+- `layers` — the schema layers' gathered values, held **by reference**, not copied as `bands` is.
+  `read_observation` builds the window before the map masks run and fills the same dict after
+  them, which is what makes `layer()` available to a scorer and absent (`KeyError`) for a mask.
+  Values are product ids (`int32`, with UNMAPPED cells already excluded through `valid`) for a
+  categorical layer and the native dtype for a continuous one.
+- `stacked` — construction checks that every band and layer, `valid` and `interpolated` lead with
+  an axis of length `n`. It, not `n`, decides `granule`: a stacked window of one look still has
+  `granule is None`.
+- `at(i)` / iteration — per-observation views of the kept rows (no copy, no read); `obs[alias]`
+  stays `(N, H, W)`. There is deliberately no `__len__`: an empty stack would become falsy.
+
+**[design] One more, `layer_classes`** — each categorical schema layer's product class table
+(`LayerSpec.classes`), the same mapping for every window of a run, carried by `at(i)`. It is what
+lets a scorer take class **names** as parameters (`mode_gated_select`'s `ignore` and
+`g2_mask_classes`) and resolve them to the product ids `layer()` returns, through the same
+`resolve_class_names` the reducer's `vote.ignore` uses (section 9, [13 §3](13-snapshot-schema.md)).
+A name-to-id lookup is determined by the table, which is already in `layers_hash`, so it adds no
+cache-key term.
+
 In sensor space the bands are masked arrays; in block space they are plain arrays with `valid`
 carried beside them. A multi-band role appears as `(H, W, B)` under the role name as well as
 through its aliases, so a `bands:` layer subset has something to index.
@@ -289,16 +325,20 @@ Requesting an alias the manifest does not define is an error at **plan time**, v
 
 ### Streaming vs stack
 
-| | `capability = "streaming"` | `capability = "stack"` |
+| | `capability = "streaming"` (the default) | `capability = "stack"` |
 |---|---|---|
 | `score()` calls | once per granule | once per block |
 | Band shape | `(H, W)` | `(N, H, W)` |
-| `granule` | the granule | `None` |
-| `granules` | one-element | all N, ordered by `datetime` |
-| Memory | O(block) | O(block × N) |
+| `valid`, `interpolated` | `(H, W)` | `(N, H, W)`; row *i* is look *i*'s final `valid` |
+| `coords`, `grid`, `block`, `epoch` | one per block | the same, shared by every row |
+| `granule` | the granule | `None`, also at N = 1 |
+| `granules` | one-element | all N, ordered by `(datetime, granule_id)` |
+| Bands present | every role read and its aliases | only the scorer's `required_roles` (an alias of an unkept role is a copied band) |
+| Buffers | the observation's own | read-only; shared by `obs[...]`, `at(i)` and the gather |
+| Memory | O(block) | O(block × N), block windows of declared names only |
 
-Ordering by `datetime` is guaranteed so that `tie_break: earliest` is meaningful and stack-mode
-scorers can reason about sequence.
+Ordering by `(datetime, granule_id)` is guaranteed so that `tie_break: earliest` is meaningful and
+stack-mode scorers can reason about sequence.
 
 ---
 
@@ -396,8 +436,9 @@ warns about.
 class LayerSpec:
     name: str
     kind: Literal["categorical", "continuous"]
-    source: str                           # role or band alias - one namespace
-    dtype: str                            # defaulted from the source band
+    source: str                           # role or band alias - one namespace; or acquired,
+                                          # or scorer.<output> (13 section 2)
+    dtype: str                            # defaulted from the source band (a scorer output's BandSpec)
     bands: tuple[int, ...] | None         # subset of a multi-band source; None = all
     classes: ClassTable | None            # the enumeration; categorical only
     aggregate: Aggregation                # method + params - 13 section 4
@@ -419,7 +460,8 @@ class SnapshotSchema:
 
 @dataclass(frozen=True)
 class BandSpec:
-    """A delivered output band. Derived from the schema, or declared by a Reducer plugin."""
+    """A delivered output band. Derived from the schema, or declared by a Reducer plugin -
+    or, as a Scorer's `outputs`, a per-cell value its emit() computes (04 section 4)."""
     name: str
     dtype: str
     description: str
@@ -462,8 +504,12 @@ class BandStack:
 
 Exactly the layers `SnapshotSchema` declares, plus `score` and `valid`, which the framework always
 adds. A categorical layer holds product ids from its enumeration, never a raw class
-([13 §3](13-snapshot-schema.md)). Scorer-*computed* layers are a planned enhancement, not in v1
-([04 §4](04-cost-functions.md)).
+([13 §3](13-snapshot-schema.md)). A layer with `source: scorer.<output>` holds what the scorer's
+`emit()` computed — the winning observation's value, or for a `stack` scorer a per-cell property of
+the whole stack — as one continuous band, NaN where nothing won ([04 §4](04-cost-functions.md)).
+**[design]** It is stored and keyed like any other layer: `SCORER_SOURCE_PREFIX` and
+`scorer_output(source)` in `src/stratum/types.py` are the only new names, and `LayerSpec` gained no
+field.
 
 A snapshot is an **internal artifact** — nothing renders it and nothing outside the pipeline reads
 it — so its width is a design choice rather than a product constraint. Carrying geometry,

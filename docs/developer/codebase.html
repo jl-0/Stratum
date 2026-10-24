@@ -225,7 +225,7 @@ pixels.</td><td><a class="src" data-sym="def apply_filters" href="https://github
 silent default.</td><td><a class="src" data-sym="class Manifest(Strict)" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/manifest/models.py#L580">Manifest</a></td></tr>
 <tr><td><code>manifest/validate.py</code></td><td>Every static check that needs no data:
 instantiating each named plugin, resolving each role, confirming the reducer can deliver the
-band names promised.</td><td><a class="src" data-sym="def validate_static" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/manifest/validate.py#L164">validate_static</a></td></tr>
+band names promised.</td><td><a class="src" data-sym="def validate_static" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/manifest/validate.py#L218">validate_static</a></td></tr>
 <tr><td><code>index/</code></td><td>The GeoParquet granule index: schema, build, merge, query,
 freeze, and the resolution from an index row to the <code>GranuleRef</code> a worker
 carries.</td><td><a class="src" data-sym="def build_index" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/index/build.py#L112">build_index</a></td></tr>
@@ -256,7 +256,7 @@ KD-tree, or a product's own embedded lookup table adopted onto the run's lattice
 recorded module hash that guards the algorithm version.</td><td><a class="src" data-sym="def regrid_granule_tile" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/regrid/__init__.py#L275">regrid_granule_tile</a></td></tr>
 <tr><td><code>resolve/</code></td><td>The block read path, masks, the gather, scoring, and the
 streaming argmax that produces one epoch snapshot. The densest package in the
-tree.</td><td><a class="src" data-sym="def resolve_block" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/resolve/block.py#L260">resolve_block</a></td></tr>
+tree.</td><td><a class="src" data-sym="def resolve_block" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/resolve/block.py#L481">resolve_block</a></td></tr>
 <tr><td><code>reduce/</code></td><td>The schema-driven built-in reducer: vote, best, and the
 continuous aggregations, plus the derivation of which bands a schema
 delivers.</td><td><a class="src" data-sym="def reduce_stack" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/reduce/builtin.py#L39">reduce_stack</a></td></tr>
@@ -275,8 +275,8 @@ record.</td><td><a class="src" data-sym="def publish_period" href="https://githu
 <tbody>
 <tr><td><code>plan/run.py</code></td><td>The plan stage end to end: load, validate, index, filter,
 freeze, budget-gate, inspect real granules, build the work lists. About a thousand lines and the
-largest module in the tree.</td><td><a class="src" data-sym="def plan_run" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/plan/run.py#L875">plan_run</a></td></tr>
-<tr><td><code>plan/estimate.py</code></td><td>The run's rough order of magnitude: per-item seconds from pixels and bytes per cell, constants fitted to one recorded run, Lambda dollars, downloads and bytes written. Pure arithmetic over the work lists; reads no granule.</td><td><a class="src" data-sym="def estimate(" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/plan/estimate.py#L84">estimate</a></td></tr>
+largest module in the tree.</td><td><a class="src" data-sym="def plan_run" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/plan/run.py#L902">plan_run</a></td></tr>
+<tr><td><code>plan/estimate.py</code></td><td>The run's rough order of magnitude: per-item seconds from pixels and bytes per cell, constants fitted to one recorded run, Lambda dollars, downloads and bytes written. Pure arithmetic over the work lists; reads no granule.</td><td><a class="src" data-sym="def estimate(" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/plan/estimate.py#L96">estimate</a></td></tr>
 <tr><td><code>plan/document.py</code></td><td>The serialisation seam: <code>plan.json</code>, the
 work lists, and the paired <code>*_to_doc</code> / <code>*_from_doc</code> functions that let a
 worker rebuild a planner's context from plain JSON.</td><td><a class="src" data-sym="class RunPlan" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/plan/document.py#L291">RunPlan</a></td></tr>
@@ -324,7 +324,7 @@ path and reports no geolocation.</td><td><a class="src" data-sym="class L2BFrcov
 which is why the space declaration matters.</td><td><a class="src" data-sym="class EdgeTrim" href="https://github.com/jl-0/Stratum/blob/main/plugins/stratum-emit/src/stratum_emit/masks/__init__.py#L16">EdgeTrim</a></td></tr>
 <tr><td><code>stratum_emit/scorers/__init__.py</code></td><td>Four <code>Scorer</code>
 implementations, the shipped worked examples. Seventy-odd lines for all four &mdash; a scorer is
-meant to be small.</td><td><a class="src" data-sym="class MinViewZenith" href="https://github.com/jl-0/Stratum/blob/main/plugins/stratum-emit/src/stratum_emit/scorers/__init__.py#L9">MinViewZenith</a></td></tr>
+meant to be small.</td><td><a class="src" data-sym="class MinViewZenith" href="https://github.com/jl-0/Stratum/blob/main/plugins/stratum-emit/src/stratum_emit/scorers/__init__.py#L10">MinViewZenith</a></td></tr>
 </tbody>
 </table>
 </div>

@@ -52,7 +52,7 @@ maintained.</p>
 
 <h2 id="suite">2. The test suite</h2>
 
-<p>About 6,000 lines over twenty-one modules, and the split is by seam rather than by file.</p>
+<p>About 11,500 lines over thirty-three modules, and the split is by seam rather than by file.</p>
 
 <div class="tw">
 <table>
@@ -64,6 +64,9 @@ maintained.</p>
 <tr><td><code>test_index.py</code>, <code>test_cmr_source.py</code></td><td><code>LocalSource</code> and <code>CMRSource</code> reaching index rows through the same path</td></tr>
 <tr><td><code>test_readers.py</code>, <code>test_store.py</code></td><td>The EMIT readers, the reader registry, and HTTPS staging into the node-local asset cache</td></tr>
 <tr><td><code>test_regrid.py</code>, <code>test_resolve.py</code>, <code>test_reduce.py</code>, <code>test_publish.py</code></td><td>One per stage. <code>test_resolve.py</code> is the largest at ~600 lines, which is proportionate: the read path has the most ways to be subtly wrong</td></tr>
+<tr><td><code>test_stack.py</code></td><td>The <code>stack</code> capability and scorer-emitted layers: stack snapshots byte-identical to streaming, each granule read once, the streaming cache key pinned to a recorded literal</td></tr>
+<tr><td><code>test_plugins.py</code>, <code>test_mode_gated.py</code></td><td>The EMIT plugin&rsquo;s scorers and masks on synthetic windows; <code>test_mode_gated.py</code> covers <code>mode_gated_select</code> and <code>cos_i</code></td></tr>
+<tr><td><code>test_examples.py</code></td><td>Every <code>examples/*/manifest*.yaml</code> passes <code>stratum validate</code>, which builds each plugin it names with its params; the demonstration-site contenders keep one grid, one index and one set of band names</td></tr>
 <tr><td><code>test_plan.py</code></td><td>Selection, the plan-time checks, the vintage check</td></tr>
 <tr><td><code>test_e2e.py</code>, <code>test_cmr_e2e.py</code></td><td>Plan &rarr; <code>run_all</code> &rarr; products, STAC and provenance, through the real readers, planner and executor</td></tr>
 <tr><td><code>test_invariants.py</code></td><td><a href="#invariants">Section 3</a> — the non-negotiable ones</td></tr>

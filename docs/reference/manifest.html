@@ -404,7 +404,7 @@ reads. See <a href="../guide/plugins.html#snapshot-schema">what the snapshot car
 <thead><tr><th>Field</th><th>Required</th><th>Notes</th></tr></thead>
 <tbody>
 <tr><td><code>kind</code></td><td>yes</td><td><code>categorical</code> | <code>continuous</code></td></tr>
-<tr><td><code>source</code></td><td>yes</td><td>A role name or a band alias. The two share one namespace and may not collide. A multi-band source gives the layer a band axis. Or <code>acquired</code>, which the framework provides: the winning look's start time, one <code>float64</code> band in Unix seconds UTC that names its granule. Each published tile's <code>granules.json</code> maps it back. It must be <code>kind: continuous</code> with no <code>bands</code> or <code>dtype</code>, and no role or alias may take the name (<a href="../specs/13-snapshot-schema.md">13 &sect;2</a>)</td></tr>
+<tr><td><code>source</code></td><td>yes</td><td>A role name or a band alias. The two share one namespace and may not collide. A multi-band source gives the layer a band axis. Or <code>acquired</code>, which the framework provides: the winning look's start time, one <code>float64</code> band in Unix seconds UTC that names its granule. Each published tile's <code>granules.json</code> maps it back. It must be <code>kind: continuous</code> with no <code>bands</code> or <code>dtype</code>, and no role or alias may take the name (<a href="../specs/13-snapshot-schema.md">13 &sect;2</a>). Or <code>scorer.&lt;output&gt;</code>: one of the scorer's declared <code>outputs</code>, computed by its <code>emit()</code>. It must be <code>kind: continuous</code> with no <code>bands</code> or <code>classes</code>, and <code>dtype</code> omitted or equal to the output's; no role or alias may be named <code>scorer</code> or start with <code>scorer.</code> (<a href="../guide/plugins.html#emit">plugins</a>)</td></tr>
 <tr><td><code>dtype</code></td><td>no</td><td>Defaults to the source band's dtype; <code>uint16</code> for categorical</td></tr>
 <tr><td><code>bands</code></td><td>no</td><td>Band indices to keep from a multi-band source; default all</td></tr>
 <tr><td><code>classes</code></td><td>categorical</td><td>The enumeration file, or <code>source</code> to adopt the input's own class table</td></tr>
@@ -572,7 +572,7 @@ exist and are readable;</li>
 <li><code>kind</code> and <code>resampling</code> agree for every aux source;</li>
 <li><code>capability</code> and <code>halo</code> are consistent with <code>grid.block_size</code>;</li>
 <li><code>epoch</code> divides <code>deliver</code> evenly;</li>
-<li>the snapshot schema resolves: every layer <code>source</code> is a role, an alias or <code>acquired</code>, every enumeration member matches exactly one class-table row per granule, and every class a colour table names exists in the enumeration;</li>
+<li>the snapshot schema resolves: every layer <code>source</code> is a role, an alias, <code>acquired</code> or an output the scorer declares, every enumeration member matches exactly one class-table row per granule, and every class a colour table names exists in the enumeration;</li>
 <li>contributing granules' class tables agree by fingerprint &mdash; the vintage check &mdash; or a remap is explicitly permitted;</li>
 <li>every filter's <code>on_missing</code> policy is explicit;</li>
 <li>every role's <code>collection</code> resolves to exactly one registered <code>GranuleReader</code>, and its <code>var</code> exists in that reader's variables;</li>

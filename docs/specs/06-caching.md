@@ -64,6 +64,19 @@ Two terms in the snapshot key are determined by the build (`stratum/resolve/bloc
 
 The product key adds no window term: every snapshot key it lists already carries one.
 
+The scorer's `capability` (`streaming` or `stack`, [04 §4](04-cost-functions.md)) is **not** a
+determinant. It is a class attribute, fixed by `scorer_ref` and `scorer_version` like the rest of
+the scorer's code, and a stack scorer equivalent to a streaming one writes byte-identical snapshot
+files, so adding it would only cause spurious misses (rule 1).
+
+**Scorer-emitted layers** (`source: scorer.<output>`, [04 §4](04-cost-functions.md)) add no field.
+They enter through `schema.layers_hash`: the planner fills each such layer's `dtype` from the
+scorer's declared `BandSpec`, and a layer's identity already carries its `name`, `source` and
+`dtype`, so adding, renaming, re-sourcing or re-typing one moves every snapshot key and `stratum
+cache diff` names `layers_hash`. The code of `emit()` is covered by `scorer_version` exactly as
+`score()`'s is — including the existing gap of rule 3 for an editable install whose code changed
+while its version did not. A run without scorer layers has the keys it had before they existed.
+
 The listed fields are the key's **determinants**; the sidecar may carry explanatory extras. A
 snapshot's `.inputs.json` also lists `class_tables` — layer → the raw fingerprints its
 observations were remapped from — already inside each `obs_key`, repeated so `stratum cache diff`

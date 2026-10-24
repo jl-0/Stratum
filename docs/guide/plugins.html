@@ -95,15 +95,86 @@ behaviour and where the work runs, so pick the cheapest one that works.</p>
 <tbody>
 <tr><td><code>streaming</code></td><td>Once per granule</td><td><code>(H, W)</code></td><td>O(block)</td><td>Each observation can be judged on its own</td></tr>
 <tr><td><code>stack</code></td><td>Once with all observations</td><td><code>(N, H, W)</code></td><td>O(block &times; N)</td><td>You need to compare observations to each other</td></tr>
-<tr><td><code>tile</code></td><td>Once per tile</td><td><code>(N, H, W)</code></td><td>O(tile &times; N)</td><td>You need global spatial context. Gives up block parallelism.</td></tr>
+<tr><td><code>tile</code></td><td>Once per tile</td><td><code>(N, H, W)</code></td><td>O(tile &times; N)</td><td>You need global spatial context. Gives up block parallelism. <strong>Not built yet</strong>: <code>stratum validate</code> refuses it.</td></tr>
 </tbody>
 </table>
 </div>
 
-<p><code>streaming</code> keeps a running best-score array, so memory does not grow with the number
+<p>Leave <code>capability</code> out and the scorer is <code>streaming</code>.
+<code>streaming</code> keeps a running best-score array, so memory does not grow with the number
 of overlapping observations. Prefer it. Reach for <code>stack</code> only when the decision
-genuinely depends on the other observations — a median, a consensus, an outlier test. In stack mode
-observations arrive ordered by acquisition time.</p>
+genuinely depends on the other observations — a median, a consensus, an outlier test.</p>
+
+<h4>Writing a stack scorer</h4>
+
+<p><code>score()</code> is called once per block with every observation of the epoch that reaches
+it. Return one row per observation, <code>(N, H, W)</code>, in the order of
+<code>obs.granules</code> (acquisition time, then granule id). Higher wins, NaN means "this look may
+not occupy this cell", and on a tie the earliest look keeps the cell — exactly as in streaming.</p>
+
+<pre><code><span class="k">class</span> NearMedianZenith:
+    capability = <span class="k">"stack"</span>
+    required_roles = (<span class="k">"view_zenith"</span>,)
+
+    <span class="k">def</span> score(self, obs, aux):
+        vz = np.where(obs.valid, obs[<span class="k">"view_zenith"</span>], np.nan)   <span class="c"># (N, H, W)</span>
+        return -np.abs(vz - np.nanmedian(vz, axis=0))
+
+    <span class="c"># or one look at a time, over the same rows - no copy, no re-read:</span>
+    <span class="c">#   return np.stack([self.one(o) for o in obs])   # o is obs.at(i), (H, W), o.granule set</span></code></pre>
+
+<ul>
+<li><strong>Only what you declare is there.</strong> A stack window holds the roles and aliases in
+<code>required_roles</code>, the snapshot layers, <code>valid</code> and <code>interpolated</code>;
+asking for anything else is a <code>KeyError</code>.</li>
+<li><strong>The arrays are read-only.</strong> Copy before you modify.</li>
+<li><strong><code>obs.granule</code> is <code>None</code></strong>, even with one look; use
+<code>obs.granules[i]</code> or <code>obs.at(i).granule</code>.</li>
+<li><strong>Memory grows with N.</strong> Each look's block window is kept, so the plan report
+prints the peak per resolve item and warns when it nears the Lambda memory. Lower
+<code>block_size</code> to bring it down.</li>
+</ul>
+
+<h3 id="emit">Recording what the scorer computed</h3>
+
+<p>A snapshot layer normally copies a band from the winning look. To record something the scorer
+<em>computed</em> — how many looks agreed, a per-look quality figure — declare it in
+<code>outputs</code>, return it from <code>emit()</code>, and point a layer at it with
+<code>source: scorer.&lt;output&gt;</code>:</p>
+
+<pre><code><span class="k">class</span> AgreeingLooks:
+    capability = <span class="k">"stack"</span>
+    required_roles = (<span class="k">"view_zenith"</span>,)
+    outputs = (BandSpec(<span class="k">"looks"</span>, <span class="k">"float32"</span>, <span class="k">"valid looks at the cell"</span>),)
+
+    <span class="k">def</span> score(self, obs, aux):
+        return -obs[<span class="k">"view_zenith"</span>]
+
+    <span class="k">def</span> emit(self, obs, aux):
+        return {<span class="k">"looks"</span>: obs.valid.sum(axis=0)}      <span class="c"># (H, W): one value per cell</span></code></pre>
+
+<pre><code>snapshot:
+  layers:
+    looks: {kind: continuous, source: scorer.looks, aggregate: {method: median}}</code></pre>
+
+<ul>
+<li><strong>Shapes.</strong> A streaming scorer returns <code>(H, W)</code> per call, and the
+winner's value is kept. A stack scorer returns <code>(N, H, W)</code> for a per-look value (the
+winning row is kept) or <code>(H, W)</code> for a property of the whole stack, kept as-is.</li>
+<li><strong>Exactly the declared names</strong>, every time. A missing or extra name stops the
+run with a message naming both lists.</li>
+<li><strong><code>emit()</code> runs right after <code>score()</code>, with the same
+<code>obs</code></strong>, and only when the schema has a <code>scorer.*</code> layer. Work done in
+<code>score()</code> can be kept on the instance and reused.</li>
+<li><strong>One continuous band.</strong> Outputs are <code>float32</code> or <code>float64</code>;
+the layer declares <code>kind: continuous</code> and no <code>bands</code> or
+<code>classes</code>. Values are written where some look won the cell, NaN elsewhere.</li>
+<li><strong>The prefix is reserved.</strong> No role or alias may be called <code>scorer</code>
+or start with <code>scorer.</code>.</li>
+</ul>
+
+<p>Adding, renaming or retyping a scorer layer changes every snapshot key, so resolve re-runs;
+reduce and publish treat the layer like any other continuous layer.</p>
 
 <h3 id="obs">Reading bands</h3>
 
@@ -117,10 +188,14 @@ obs.granule.datetime      <span class="c"># acquisition metadata</span>
 obs.grid                  <span class="c"># this block's transform and CRS</span>
 obs.coords.lon            <span class="c"># every cell's centre; also .lat, and .x/.y in the grid CRS</span>
 obs.epoch                 <span class="c"># the epoch being resolved</span>
-obs.n                     <span class="c"># 1 when streaming, N when stacked</span></code></pre>
+obs.n                     <span class="c"># 1 when streaming, N when stacked</span>
+obs.layer(<span class="k">"mineral_1"</span>)    <span class="c"># a snapshot layer's value: product ids for a categorical layer</span></code></pre>
 
 <p>Declare every alias you use through <code>required_roles</code>. A missing role is a plan-time
-error, so you find out before the run rather than in several thousand workers.</p>
+error, so you find out before the run rather than in several thousand workers. Declare every
+snapshot layer you read with <code>obs.layer</code> in an optional
+<code>required_layers</code> tuple; a name that is not a snapshot layer is refused the same way.
+Layers exist for scorers only &mdash; a pixel mask runs before they are gathered.</p>
 
 <p>An alias can also pick a band by an attribute the reader reports — <code>{role: reflectance,
 match: {wavelength: 2200}, tolerance: 10}</code> — so a scorer written against a wavelength
@@ -331,16 +406,12 @@ rebuilds every epoch. Stratum refuses to reduce epochs written under two schemas
 </div>
 
 <div class="note">
-  <span class="label"><span class="chip chip-open">planned</span> Derived layers — not in v1</span>
-  <p>Layers copy bands that already exist in the winning observation. A layer the scorer
-  <em>computes</em> — a runner-up margin, per-candidate evidence, a broadcast acquisition time — is a
-  planned enhancement (<code>source: scorer</code>, fed by an <code>emit()</code> method) and is
-  <strong>not implemented</strong>.</p>
-  <p>It was deferred on purpose: several of the motivating layers (<code>source_granule</code>,
-  <code>acquired</code>, <code>runner_up_score</code>) are things the selection loop already knows
-  and may belong as framework built-ins rather than plugin output, which would leave the derived
-  form a much smaller job. See <a href="../specs/04-cost-functions.md">spec 04</a> and
-  <a href="../status.html#planned">Status</a>.</p>
+  <span class="label">Layers the scorer computes</span>
+  <p>Layers copy bands that already exist in the winning observation, or record what the scorer
+  computed through <code>source: scorer.&lt;output&gt;</code> &mdash; see
+  <a href="#emit">recording what the scorer computed</a>. Each such layer is one band per cell.
+  Per-candidate evidence and a runner-up margin are still <strong>not representable</strong>; see
+  <a href="../specs/04-cost-functions.md">spec 04</a> and <a href="../status.html#planned">Status</a>.</p>
 </div>
 
 <h2 id="pixel-mask">PixelMask</h2>
@@ -371,7 +442,7 @@ the space is how Stratum knows to run yours at the right point.</p>
 
 <h3 id="builtin-scorers">Shipped scorers</h3>
 
-<p>Five, and the choice between them is the whole point of the framework. <code>ref:</code> is
+<p>Seven, and the choice between them is the whole point of the framework. <code>ref:</code> is
 what you write; <code>stratum plugins list</code> prints what your environment provides.</p>
 
 <div class="tw"><table>
@@ -382,6 +453,7 @@ what you write; <code>stratum plugins list</code> prints what your environment p
 <tr><td><code>prefer_bare_earth</code></td><td><code>frcov</code>, <code>solar_zenith</code></td><td>The best-exposed, best-lit look. No view-zenith term.</td></tr>
 <tr><td><code>bare_earth_nadir</code></td><td><code>frcov</code>, <code>solar_zenith</code>, <code>view_zenith</code></td><td>The same, plus a nadir term. <code>nadir_weight: 0</code> reproduces the one above.</td></tr>
 <tr><td><code>low_vegetation_nadir</code></td><td><code>pv</code>, <code>solar_zenith</code>, <code>view_zenith</code></td><td>Bare earth as green vegetation at most <code>max_pv</code> (0.40), NPV ignored; ranks on <code>1 - PV</code>. <code>vegetated_weight</code> grades a greener look rather than refusing it.</td></tr>
+<tr><td><code>mode_gated_select</code></td><td>two categorical snapshot layers, plus the bands of each metric you weight</td><td>A <code>stack</code> scorer. Builds each look&rsquo;s (group 1, group 2) class pair, takes the most common pair at the cell, excludes every look that disagrees with it (<code>gate: hard</code>; <code>soft</code> penalises instead), and picks the agreeing look with the lowest weighted penalty over ten metrics &mdash; uncertainty, fit, band depth, cloud probability, scene cloudiness, bare soil, sun and view zenith, path length, airmass. With <code>epoch: P1Y</code> that is one scene per cell for the year. Emits <code>mode_count</code>, <code>n_valid</code>, <code>agreement</code>, <code>selection_penalty</code> and more for <code>source: scorer.&lt;name&gt;</code>. Class names in <code>ignore</code> / <code>g2_mask_classes</code>, never ids. Examples: <code>examples/emit-cmr-cuprite/manifest-mode-gated.yaml</code> (one tile); <code>examples/emit-cm-demo-sites/manifest-mode-gated.yaml</code> and <code>manifest-assistant-pick.yaml</code> (four sites, defaults and a variant).</td></tr>
 <tr><td><code>cleanest_nadir</code></td><td><code>geometry</code>, aux <code>slope</code> + <code>snow</code></td><td>Nadir-preferring, terrain-penalised, snow-rejecting. <strong>Cannot run yet</strong> &mdash; it needs date-keyed aux, which is refused.</td></tr>
 </tbody>
 </table></div>
@@ -401,6 +473,7 @@ and an entry point in the plugin&rsquo;s <code>pyproject.toml</code> connects th
 <tr><td><code>slit_dust</code></td><td><code>SlitDust</code></td><td>sensor</td><td>&mdash;</td><td>Drops 2&ndash;3 columns at cross-track centre. Off by default.</td></tr>
 <tr><td><code>l2a_standard</code></td><td><code>L2AStandard</code></td><td>map</td><td><code>mask</code> role</td><td>Cloud, cirrus, water and spacecraft flags from the L2A mask</td></tr>
 <tr><td><code>soil_fraction</code></td><td><code>SoilFraction</code></td><td>map</td><td><code>frcov</code> role</td><td>Requires soil fraction above a threshold</td></tr>
+<tr><td><code>cos_i</code></td><td><code>CosineI</code></td><td>map</td><td><code>cos_i</code> alias (OBS band 8)</td><td>Requires cos(i) &ge; 0.3 (<code>min_cos_i</code>), the cosine of the angle between the sun and the local slope: drops sun-grazed terrain as well as low sun. Unknown is invalid.</td></tr>
 <tr><td><code>landcover</code></td><td><code>Landcover</code></td><td>map</td><td>an <strong>aux</strong> alias</td><td>Drops cells whose land cover cannot carry a surface mineral signal &mdash; open water, built-up, closed canopy. The only built-in mask that reads ancillary data rather than the granule.</td></tr>
 </tbody>
 </table></div>
@@ -701,12 +774,12 @@ candidate class and classify the aggregate:</p>
 
 <p>This needs the snapshot to hold per-candidate evidence rather than only the winning label,
 which is a decision about what the snapshot holds — not something a reducer can add later.
-<strong>It is not expressible in v1:</strong> layers copy existing bands, and per-candidate
-evidence has to be computed by the scorer. See
+<strong>It is not expressible yet:</strong> per-candidate evidence has to be computed by the
+scorer, and a scorer output is one band per cell. See
 <a href="#snapshot-schema">what the snapshot carries</a>.</p>
 
-<p>Worth knowing now rather than later, because reaching it means adding derived outputs and
-<em>reprocessing snapshots</em>, not merely writing a new reducer.</p>
+<p>Worth knowing now rather than later, because reaching it means storing per-candidate evidence
+and <em>reprocessing snapshots</em>, not merely writing a new reducer.</p>
 
 <p>Worth knowing the limit: the upstream products are already binarised, so some information is gone
 before Stratum sees anything. Reducing continuously recovers what survived; it does not recover what

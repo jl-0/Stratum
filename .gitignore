@@ -23,6 +23,7 @@ trial-data/
 # products the first time it ran.
 examples/*/out/
 examples/*/index/
+examples/*/index-*/
 examples/*/assets/
 
 # ---- Terraform / AWS (docs/guide/deploying.html, "What must never be committed") ----

@@ -34,6 +34,7 @@ from stratum.types import (
     SensorWindow,
     VarSpec,
     acquired_seconds,
+    scorer_output,
 )
 
 
@@ -319,19 +320,23 @@ def read_observation(ctx: ObsContext) -> Observation | None:
         if alias.role in bands:
             bands[name] = bands[alias.role][..., alias.band]
 
+    # the schema layers are filled into THIS dict after the map masks ran: the window holds it
+    # by reference, so a mask finds no layers and a scorer finds them all (11 section 5)
+    layers: dict[str, np.ndarray] = {}
     obs = ObsWindow(space="block", bands=bands, valid=valid, granules=(granule,),
                     epoch=ctx.epoch, block=block, interpolated=interpolated,
                     coords=ctx.coords or block_coords(block.transform, glt.shape[:2],
                                                       plan.grid.crs),
-                    band_attrs=band_attrs)
+                    band_attrs=band_attrs, layers=layers, layer_classes=plan.layer_classes())
 
     # step 15: map-space masks, by conjunction, on the block
     for mask in plan.map_masks:
         valid &= np.asarray(mask.valid(obs, ctx.aux), dtype=bool)
 
     # 13 section 3 rule 3: the remap is applied at the gather, where the granule is known
-    layers: dict[str, np.ndarray] = {}
     for layer in plan.schema.layers:
+        if scorer_output(layer.source) is not None:
+            continue           # the scorer's emit() supplies it, after score (04 section 4)
         if layer.source == "acquired":
             # framework-provided (13 section 2): the same value in every cell this look reaches
             layers[layer.name] = np.full(glt.shape[:2], acquired_seconds(granule.datetime),

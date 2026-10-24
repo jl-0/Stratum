@@ -39,6 +39,7 @@ prefer_bare_earth = "stratum_emit.scorers:PreferBareEarth"
 bare_earth_nadir  = "stratum_emit.scorers:BareEarthNadir"
 low_vegetation_nadir = "stratum_emit.scorers:LowVegetationNadir"
 max_band_depth    = "stratum_emit.scorers:MaxBandDepth"
+mode_gated_select = "stratum_emit.scorers:ModeGatedSelect"
 
 [project.entry-points."stratum.reducers"]
 # The ONLY reducer, and it earns its place: combining two categorical layers is the one thing
@@ -52,6 +53,7 @@ slit_dust     = "stratum_emit.masks:SlitDust"
 l2a_standard  = "stratum_emit.masks:L2AStandard"
 soil_fraction = "stratum_emit.masks:SoilFraction"
 landcover     = "stratum_emit.masks:Landcover"
+cos_i         = "stratum_emit.masks:CosineI"
 
 [project.entry-points."stratum.readers"]
 EMITL2BMIN   = "stratum_emit.readers:L2BMin"

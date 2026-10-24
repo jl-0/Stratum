@@ -380,8 +380,11 @@ stratum plugins show REF [--kind KIND]</code></pre>
 <code>show</code> resolves <code>REF</code> — an entry-point name or <code>module:Class</code>,
 trying every registry when <code>--kind</code> is omitted — and prints its class, module,
 version, and what it declares: <code>capability</code>, <code>halo</code>,
-<code>required_roles</code>, <code>required_aux</code>, <code>space</code>, <code>outputs</code>,
-<code>collections</code>. Useful for checking what a manifest must supply before you run it.</p>
+<code>required_roles</code>, <code>required_aux</code>, <code>required_layers</code>, <code>space</code>, <code>outputs</code>,
+<code>collections</code>. Declarations a plugin sets from its parameters are shown for its
+default parameters (an instance built with none, or the class when that fails); <code>outputs</code>
+prints the output names a <code>source: scorer.&lt;name&gt;</code> layer may use. Useful for
+checking what a manifest must supply before you run it.</p>
 
 <h2 id="validate">stratum validate</h2>
 
