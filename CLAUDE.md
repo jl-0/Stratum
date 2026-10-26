@@ -163,7 +163,8 @@ Established by reading code and data. Do not re-derive; do not assume the opposi
   after it — [`03` §5](docs/specs/03-regrid-glt.md), [`12` §2](docs/specs/12-data-access.md).
 - **Reduction is DECLARED per layer, not named once.** There is no "which reducer" - the built-in
   one executes each layer's `aggregate`. A `Reducer` plugin replaces that vocabulary and is only
-  for what it cannot say. Two are shipped: `joint_mineral_vote` (combining two categorical
+  for what it cannot say. Three are shipped: `confirmed_mineral_vote` (a per-group vote weighted
+  by score x Tetracorder fit, confirmed by a second look, `none` for observed cells), `joint_mineral_vote` (combining two categorical
   layers) and `spectral_abundance` (band depth x a per-constituent XRD fraction, applied per
   epoch, with one constituent allowed to reach SEVERAL output classes - which an `Enumeration`
   refuses, since `classes.py:resolve` raises on a raw key claimed twice). A plugin's `outputs` replace the

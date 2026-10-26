@@ -1,0 +1,206 @@
+# Stratum demonstration, the SCORE-WEIGHTED contender - contender B with each look's vote in
+# the joint (G1, G2) mode weighted by its quality, on the L3 grid, over the four demonstration sites.
+#
+#     pixi run stratum validate -m examples/emit-cm-demo-sites/manifest-score-weighted.yaml
+#     make cloud-run MANIFEST=examples/emit-cm-demo-sites/manifest-score-weighted.yaml
+#
+# IDENTICAL to manifest-mode-gated.yaml except `vote_weight` and `vote_power` (tests/test_examples.py
+# checks that). B gives every look one vote; here a look's vote is (1 - penalty) ** vote_power, so
+# fewer looks with a better score can outvote more poorer ones. The power sharpens it: the penalty
+# averages ten metrics, so 1 - penalty spans only ~0.55-0.75 between looks. Over two Cuprite tiles
+# (local, 2025) power 8 changed 5-7 % of B's cells and power 1-4 at most 3 %.
+
+run_id: cm-demo-score-weighted-2025
+description: Demonstration sites 2025, one annual epoch, score-weighted joint (G1, G2) mode gate then the lowest-penalty agreeing look
+
+grid:                               # the EMIT L3 gridded-reflectance lattice - see manifest-baseline.yaml
+  crs: EPSG:4326
+  resolution: [0.00055, -0.00055]
+  origin: [-0.000275, -0.000275]
+  tile_size: 0.55
+  block_size: 500                   # the memory knob for a stack scorer: resolve keeps every look's
+                                    #   block window. `stratum plan` prints the estimate.
+  regrid_method: kdtree
+
+aoi:
+  zones: [cuprite-nv, mountain-pass-ca, bingham-canyon-amd, mojave-l2b-tutorial]
+  registry: ../zones.yaml
+
+time:
+  start: 2025-01-01
+  end:   2026-01-01
+  epoch: P1Y                        # ONE epoch: the consensus is over every look of the year
+  deliver: P1Y
+
+inputs:
+  index_location: ./index           # shared with the other two contenders - patterns identical
+  source:
+    kind: cmr
+    provider: LPCLOUD
+    prefer: https
+    patterns:
+      EMITL2BMIN:
+        MIN: "EMIT_L2B_MIN_001_*.nc"
+        MINUNCERT: "EMIT_L2B_MINUNCERT_001_*.nc"
+      EMITL1BRAD:
+        OBS: "EMIT_L1B_OBS_001_*.nc"
+      EMITL2AMASK:
+        MASK: "EMIT_L2A_MASK_002_*.nc"
+      EMITL2BFRCOV:
+        FRCOVBARE: "EMIT_L2B_FRCOVBARE_001_*.tif"
+        FRCOVPV: "EMIT_L2B_FRCOVPV_001_*.tif"
+        FRCOVNPV: "EMIT_L2B_FRCOVNPV_001_*.tif"
+  roles:
+    geometry: {collection: EMITL1BRAD, asset: OBS, var: obs}
+    mineral_1:
+      collection: EMITL2BMIN
+      var: group_1_mineral_id
+      class_table:
+        source: embedded
+        path: /mineral_metadata
+        key: index
+        attributes: [name, record, library, group, url]
+        identity: [collection_version, build_version]
+    depth_1: {collection: EMITL2BMIN, var: group_1_band_depth}
+    mineral_2:
+      collection: EMITL2BMIN
+      var: group_2_mineral_id
+      class_table:
+        source: embedded
+        path: /mineral_metadata
+        key: index
+        attributes: [name, record, library, group, url]
+        identity: [collection_version, build_version]
+    depth_2: {collection: EMITL2BMIN, var: group_2_band_depth}
+    mineral_unc:   {collection: EMITL2BMIN, asset: MINUNCERT, var: group_1_band_depth_unc}
+    mineral_2_unc: {collection: EMITL2BMIN, asset: MINUNCERT, var: group_2_band_depth_unc}
+    mineral_fit:   {collection: EMITL2BMIN, asset: MINUNCERT, var: group_1_fit}
+    mineral_2_fit: {collection: EMITL2BMIN, asset: MINUNCERT, var: group_2_fit}
+    mask: {collection: EMITL2AMASK, version: "002", var: mask}
+    frcov: {collection: EMITL2BFRCOV, asset: FRCOVBARE, var: EMIT_L2B_FRCOVBARE, resampling: nearest}
+    pv:    {collection: EMITL2BFRCOV, asset: FRCOVPV,   var: EMIT_L2B_FRCOVPV,   resampling: nearest}
+    npv:   {collection: EMITL2BFRCOV, asset: FRCOVNPV,  var: EMIT_L2B_FRCOVNPV,  resampling: nearest}
+  band_aliases:
+    view_zenith:  {role: geometry, band: 2}
+    solar_zenith: {role: geometry, band: 4}
+    path_length:  {role: geometry, band: 0}
+    cos_i:        {role: geometry, band: 8}
+    cloud_prob:   {role: mask, band: 8}   # V002 L2A MASK cloud probability, 0-based band 8 - not
+                                          #   yet checked against a delivered file's band names
+
+aux:                                # identical to manifest-baseline.yaml
+  landcover:
+    uri:
+      - https://esa-worldcover.s3.eu-central-1.amazonaws.com/v200/2021/map/ESA_WorldCover_10m_2021_v200_N33W120_Map.tif
+      - https://esa-worldcover.s3.eu-central-1.amazonaws.com/v200/2021/map/ESA_WorldCover_10m_2021_v200_N33W117_Map.tif
+      - https://esa-worldcover.s3.eu-central-1.amazonaws.com/v200/2021/map/ESA_WorldCover_10m_2021_v200_N36W120_Map.tif
+      - https://esa-worldcover.s3.eu-central-1.amazonaws.com/v200/2021/map/ESA_WorldCover_10m_2021_v200_N36W117_Map.tif
+      - https://esa-worldcover.s3.eu-central-1.amazonaws.com/v200/2021/map/ESA_WorldCover_10m_2021_v200_N39W114_Map.tif
+    kind: categorical
+    resampling: mode
+
+granule_filter:                     # identical to manifest-baseline.yaml
+  - {max_cloud_fraction: 0.8, on_missing: fail}
+  - {max_solar_zenith: 70}
+
+pixel_mask:                         # identical to manifest-baseline.yaml
+  - {ref: edge_trim, columns: 7}
+  - {ref: l2a_standard, flags: [cloud, cirrus, water, spacecraft, dilated_cloud]}
+  - {ref: landcover, exclude: [water, built-up]}
+  - {ref: cos_i, min_cos_i: 0.3}
+
+scorer:
+  ref: mode_gated_select
+  params:
+    layers: [mineral_1, mineral_2]
+    key: joint                      # the aggregator's choice: the (G1, G2) pair is the key
+    ignore: {g1: [], g2: []}
+    g2_mask_classes: []
+    min_count: 1
+    tie_break: weighted
+    partial_vote_weight: 0.01
+    partial_tie_penalty: 0.05
+    vote_weight: score              # a look votes (1 - penalty) ** vote_power, not 1
+    vote_power: 8
+    gate: hard
+    soft_penalty: 10.0
+    normalize: fixed
+    weights: {bd_unc: 0.2, fit: 0.2, banddepth: 0.2, cloud_prob: 0.2, scene_cloudiness: 0.2,
+              bare: 0.2, sza: 0.2, vza: 0.2, path_length: 0.2, airmass: 0.2}
+    bounds: {bd_unc: [0, 0.03], fit: [0, 0.5], banddepth: [0, 0.5], sza: [0, 70],
+             vza: [0, 30], path_length: [402404, 452394], airmass: [2, 4]}
+    aliases: {banddepth: [depth_1, depth_2]}   # this directory's role names; the rest are the defaults
+
+snapshot:
+  name: cm-demo-score-weighted-v1
+  layers:                           # the same layer NAMES as manifest-baseline.yaml, so a viewer
+    mineral_1:                      #   can flip between the products band for band
+      kind: categorical
+      source: mineral_1
+      classes: source
+      aggregate: {method: vote, min_count: 1, ignore: []}   # one epoch: the selected look's class
+    mineral_2:
+      kind: categorical
+      source: mineral_2
+      classes: source
+      aggregate: {method: vote, min_count: 1, ignore: []}
+    depth_1:
+      kind: continuous
+      source: depth_1
+      aggregate: {method: best}
+    depth_2:
+      kind: continuous
+      source: depth_2
+      aggregate: {method: best}
+    acquired_1:                     # the selected-granule map. One scene per cell for BOTH groups
+      kind: continuous              #   here, so acquired_2 would be the same band and is omitted.
+      source: acquired
+      aggregate: {method: best}
+    bare:                           # FRCOV pass-through: the cover of the selected look
+      kind: continuous
+      source: frcov
+      aggregate: {method: best}
+    pv:
+      kind: continuous
+      source: pv
+      aggregate: {method: best}
+    npv:
+      kind: continuous
+      source: npv
+      aggregate: {method: best}
+    mode_count:                     # the scorer's diagnostics (source: scorer.<output>)
+      kind: continuous
+      source: scorer.mode_count
+      aggregate: {method: best}
+    n_valid:
+      kind: continuous
+      source: scorer.n_valid
+      aggregate: {method: best}
+    agreement:
+      kind: continuous
+      source: scorer.agreement
+      aggregate: {method: best}
+    selection_penalty:
+      kind: continuous
+      source: scorer.selection_penalty
+      aggregate: {method: best}
+
+outputs:
+  bucket: ./out
+  formats: [cog]
+  stac: true
+  render:
+    mineral_1:
+      mapper: categorical
+      on_unmapped: grey
+      alpha_from: {band: agreement, domain: [0.25, 1.0], range: [60, 255]}
+    mineral_2:
+      mapper: categorical
+      on_unmapped: grey
+      alpha_from: {band: agreement, domain: [0.25, 1.0], range: [60, 255]}
+
+budget:
+  max_tiles: 24
+  max_granules: 200
+  max_vcpu_hours: 40
+  on_exceed: fail

@@ -449,3 +449,34 @@ def test_mode_gated_runs_through_resolve(tmp_path: Path) -> None:
     # (documented; a manifest lists the same names in that layer's aggregate.ignore)
     assert (snap["mineral_b"][:, 5:] == 1).all()
 
+
+
+def test_mode_gated_score_weighted_vote() -> None:
+    """Three poor looks agree on one pair, two good looks on another. Counting, the three win;
+    weighted by quality (1 - penalty), the two good looks do."""
+    obs = stack([(HEM, KAO), (HEM, KAO), (HEM, KAO), (GOE, ALU), (GOE, ALU)],
+                bands={"view_zenith": [27.0, 27.0, 27.0, 0.0, 3.0]})
+    assert winner(ModeGatedSelect(weights=VZ_ONLY), obs) == 0
+    s = ModeGatedSelect(weights=VZ_ONLY, vote_weight="score")
+    assert winner(s, obs) == 3
+    out = s.emit(obs, None)
+    assert out["mode_votes"][0, 0] == pytest.approx(1.0 + 0.9)     # quality 1 - vza/30
+    assert out["mode_count"][0, 0] == 2.0
+    # independent key: each group's mode is weighted the same way
+    s = ModeGatedSelect(weights=VZ_ONLY, vote_weight="score", key="independent")
+    assert winner(s, obs) == 3
+    with pytest.raises(ValueError, match="vote_weight"):
+        ModeGatedSelect(vote_weight="depth")
+
+
+def test_mode_gated_vote_power_sharpens() -> None:
+    """Three looks at quality 0.6 against two at 0.8: 1.8 vs 1.6 unsharpened, so the three win;
+    at power 4, 0.389 vs 0.819, so the two do."""
+    obs = stack([(HEM, KAO)] * 3 + [(GOE, ALU)] * 2,
+                bands={"view_zenith": [12.0, 12.0, 12.0, 6.0, 6.0]})
+    assert winner(ModeGatedSelect(weights=VZ_ONLY, vote_weight="score"), obs) == 0
+    s = ModeGatedSelect(weights=VZ_ONLY, vote_weight="score", vote_power=4)
+    assert winner(s, obs) == 3
+    assert s.emit(obs, None)["mode_votes"][0, 0] == pytest.approx(2 * 0.8 ** 4, rel=1e-5)
+    with pytest.raises(ValueError, match="vote_power"):
+        ModeGatedSelect(vote_power=0)

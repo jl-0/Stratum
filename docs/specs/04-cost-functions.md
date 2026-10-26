@@ -378,7 +378,7 @@ A `stack` scorer: with `epoch: P1Y` its argmax is one selected scene per cell fo
 | Step | Rule | Parameters (default) |
 |---|---|---|
 | Key | Each look's (group 1, group 2) product-id pair from `layers`. `g2_mask_classes` first turns group 2 into `none` where it is a listed class, leaving group 1 alone. | `layers` (`[mineral_1, mineral_2]`), `key` (`joint`; `independent` votes each group alone), `g2_mask_classes` (`[]`) |
-| Vote | A valid look votes when either group detects (id > 0) and neither holds a class in that group's `ignore` list; an ignored look still counts in `n_valid`. Under `joint`, a look detecting one group only votes `partial_vote_weight`. | `ignore` (`{g1: [], g2: []}`), `partial_vote_weight` (0.01) |
+| Vote | A valid look votes when either group detects (id > 0) and neither holds a class in that group's `ignore` list; an ignored look still counts in `n_valid`. Under `joint`, a look detecting one group only votes `partial_vote_weight`. `vote_weight: score` scales every vote by the look's quality, 1 − penalty, so fewer but better looks can outvote more poorer ones, raised to `vote_power` to sharpen it (the averaged penalty spans little between looks); `min_count` still counts looks. | `ignore` (`{g1: [], g2: []}`), `partial_vote_weight` (0.01), `vote_weight` (`count`), `vote_power` (1) |
 | Mode | Most votes. Ties: `weighted` takes the key of the tied look with the lowest penalty + `partial_tie_penalty` if partial; `earliest`, `latest`; `nodata` leaves the cell unoccupied. A mode held by fewer than `min_count` looks leaves the cell unoccupied. No voter: no gate. | `tie_break` (`weighted`), `partial_tie_penalty` (0.05), `min_count` (1) |
 | Gate | `hard`: a look off the mode may not occupy the cell (NaN). `soft`: it is ranked with `soft_penalty` added. A look holding an `ignore`d class never matches, also where the cell has no mode, so the hard gate never delivers an ignored class. Under `independent`, a look must carry each group's mode (a group with no voter imposes nothing), so a hard gate can leave a cell where no single look carries both unoccupied. | `gate` (`hard`), `soft_penalty` (10) |
 | Penalty | Per metric a value in [0, 1], 0 best; a value the look cannot derive (below: id 0, grazing airmass, no `cloud_fraction`) scores 1. Fill in a band a weighted metric reads is not that case: required roles decide `valid`, so it removes the look from the vote and from selection, and a granule with no asset for the role is dropped at plan. `fixed` clips `(x - lo) / (hi - lo)` (flipped where higher is better); `rank` is the look's average rank among the cell's valid looks over (n − 1). Weighted sum with positive weights renormalised to 1. Score = −penalty. | `normalize` (`fixed`), `weights` (0.2 each), `bounds`, `aliases` |
@@ -546,13 +546,14 @@ coded**: each layer names its method — `vote`, `median`, `inverse_variance` an
 has no `reducer:` block. Outputs, the raster schema, the STAC item and the `OutputMapper` contract
 are all derived from the schema without running anything.
 
-A `Reducer` plugin is for what the vocabulary cannot say. **Two are shipped, and each marks a
+A `Reducer` plugin is for what the vocabulary cannot say. **Three are shipped, and each marks a
 different limit of the vocabulary:**
 
 | plugin | what no `aggregate` entry can say |
 |---|---|
 | `joint_mineral_vote` | combine two CATEGORICAL layers. `conditional_on` conditions a continuous layer on a categorical one, never one categorical on another |
 | `spectral_abundance` | multiply a band depth by a per-constituent fraction **per epoch**, before anything collapses, and let one constituent reach SEVERAL output classes |
+| `confirmed_mineral_vote` | weight a vote PER LAYER (score x that group's own Tetracorder fit, where `vote` has one weight per epoch), choose among the classes that clear `min_count` rather than blanking a thin winner, and deliver `none` - not nodata - where a cell was validly observed and nothing was confirmed. Meant for a short epoch (`P1D`), so the vote sees every look |
 
 The second is also the answer to a limit of `Enumeration`, not just of `aggregate`: an enumeration
 maps one raw class to exactly one product class with no weight — `classes.py:resolve` raises

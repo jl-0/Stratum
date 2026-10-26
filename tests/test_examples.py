@@ -8,7 +8,9 @@ names with its params. A misspelt or retired scorer, mask or parameter fails her
 The demonstration sites (`examples/emit-cm-demo-sites/`) are built to be flipped between band for
 band in a viewer, so what they must share is pinned too: grid, sites, year, filters, masks and the
 delivered band names. Contender B claims to be the external aggregator's defaults, and C claims to
-change exactly three of B's settings; both claims are checked against `ModeGatedSelect`.
+change exactly three of B's settings; both claims are checked against `ModeGatedSelect`. The
+confirmed-vote contender keeps A's scorer and changes the epoch and the reduction; the
+score-weighted one changes exactly B's vote weighting.
 """
 from __future__ import annotations
 
@@ -54,7 +56,7 @@ def test_example_manifest_validates(path: Path) -> None:
 
 
 # ------------------------------------------------------------------- demonstration sites
-CONTENDERS = ("baseline", "mode-gated", "assistant-pick")
+CONTENDERS = ("baseline", "mode-gated", "assistant-pick", "confirmed", "score-weighted")
 SHARED = ("grid", "aoi", "aux", "granule_filter", "pixel_mask")
 
 
@@ -73,7 +75,7 @@ def test_contenders_share_one_index() -> None:
         for key in ("index_location", "source"):
             assert inputs[name][key] == inputs["baseline"][key], f"manifest-{name}.yaml: {key}"
         assert inputs["baseline"]["roles"].items() <= inputs[name]["roles"].items()
-    assert inputs["mode-gated"] == inputs["assistant-pick"]
+    assert inputs["mode-gated"] == inputs["assistant-pick"] == inputs["score-weighted"]
 
 
 def test_contenders_use_the_l3_reflectance_grid() -> None:
@@ -103,13 +105,32 @@ def test_contenders_deliver_the_same_bands() -> None:
     diagnostics = {"mode_count", "n_valid", "agreement", "selection_penalty"}
     layers = {n: set(_raw(n)["snapshot"]["layers"]) for n in CONTENDERS}
     assert layers["baseline"] == common | {"acquired_2"}
-    assert layers["mode-gated"] == layers["assistant-pick"] == common | diagnostics
+    assert layers["mode-gated"] == layers["assistant-pick"] == layers["score-weighted"] \
+        == common | diagnostics
+
+
+def test_confirmed_keeps_a_scorer_and_delivers_through_the_reducer() -> None:
+    """It differs from A in the epoch and the reduction only; its plugin delivers the mineral,
+    depth and selected-granule bands under A's names."""
+    a, d = _raw("baseline"), _raw("confirmed")
+    assert d["scorer"] == a["scorer"] and d["time"]["epoch"] == "P1D"
+    assert d["reducer"]["ref"] == "confirmed_mineral_vote"
+    from stratum_emit.reducers import ConfirmedMineralVote
+    bands = {b.name for b in ConfirmedMineralVote(**d["reducer"]["params"]).outputs}
+    assert {"mineral_1", "mineral_2", "depth_1", "depth_2", "acquired_1", "acquired_2"} <= bands
+
+
+def test_score_weighted_changes_only_bs_vote_weighting() -> None:
+    b = _raw("mode-gated")["scorer"]["params"]
+    e = _raw("score-weighted")["scorer"]["params"]
+    changed = {k for k in b.keys() | e.keys() if b.get(k) != e.get(k)}
+    assert changed == {"vote_weight", "vote_power"} and e["vote_weight"] == "score"
 
 
 def test_contender_scorers() -> None:
     assert _raw("baseline")["scorer"]["ref"] == "low_vegetation_nadir"
     assert _raw("baseline")["time"]["epoch"] == "P1W"
-    for name in ("mode-gated", "assistant-pick"):
+    for name in ("mode-gated", "assistant-pick", "score-weighted"):
         assert load_manifest(DEMO / f"manifest-{name}.yaml").scorer.ref == "mode_gated_select"
         assert _raw(name)["time"]["epoch"] == "P1Y"
 

@@ -199,6 +199,6 @@ outputs:
 
 budget:
   max_tiles: 24                     # 18 expected
-  max_granules: 150                 # 116 intersect the four boxes in 2025 before filtering (CMR)
+  max_granules: 200                 # the plan counts 157 over the 18 tiles in 2025 (the boxes alone: 116)
   max_vcpu_hours: 40
   on_exceed: fail

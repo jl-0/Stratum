@@ -210,6 +210,6 @@ outputs:
 
 budget:
   max_tiles: 24
-  max_granules: 150
+  max_granules: 200
   max_vcpu_hours: 40
   on_exceed: fail

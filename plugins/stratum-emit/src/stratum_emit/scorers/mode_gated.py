@@ -38,6 +38,7 @@ GATES = ("hard", "soft")
 KEYS = ("joint", "independent")
 TIE_BREAKS = ("weighted", "earliest", "latest", "nodata")
 NORMALIZE = ("fixed", "rank")
+VOTE_WEIGHTS = ("count", "score")
 GROUPS = ("g1", "g2")
 
 #: the per-cell (and one per-observation) diagnostics this scorer can deliver (04 section 4)
@@ -45,7 +46,8 @@ OUTPUTS = (
     BandSpec("mode_count", "float32", "looks whose class key equals the cell's mode; 0 with no "
              "detection to vote on", units="count", nodata=float("nan")),
     BandSpec("mode_votes", "float32", "weighted votes of the mode (a look detecting one group "
-             "only votes partial_vote_weight); equals mode_count under key: independent",
+             "only votes partial_vote_weight; under vote_weight: score each vote is also scaled "
+             "by 1 - penalty); under key: independent, the looks carrying both modes",
              units="votes", nodata=float("nan")),
     BandSpec("n_voters", "float32", "valid looks that voted (detected something, not ignored)",
              units="count", nodata=float("nan")),
@@ -156,6 +158,11 @@ class ModeGatedSelect:
        holds a class in its `ignore` list (an ignored look is still counted in `n_valid`, as
        `vote` counts it). Under `key: joint` a look that detects in one group only votes
        `partial_vote_weight`; under `key: independent` each group is voted on its own.
+       `vote_weight: score` scales every vote by the look's quality, 1 - its penalty (step 5),
+       so fewer but better looks can outvote more poorer ones; `count` (default) gives each
+       look one vote. `vote_power` raises that quality to a power: the penalty averages ten
+       metrics, so 1 - penalty spans only ~0.55-0.75 between looks and needs sharpening before
+       a good look outweighs several poor ones. `min_count` still counts looks, not weight.
     3. **Mode.** The key with the most votes. Ties: `weighted` (default) takes the key of the
        tied look with the lowest penalty plus `partial_tie_penalty` if it is partial; `earliest`
        / `latest` the first / last tied look; `nodata` leaves the cell unoccupied. A mode held by
@@ -225,6 +232,8 @@ class ModeGatedSelect:
                  soft_penalty: float = 10.0,
                  partial_vote_weight: float = 0.01,
                  partial_tie_penalty: float = 0.05,
+                 vote_weight: str = "count",
+                 vote_power: float = 1.0,
                  normalize: str = "fixed",
                  weights: Mapping[str, float] | None = None,
                  bounds: Mapping[str, Sequence[float]] | None = None,
@@ -236,7 +245,8 @@ class ModeGatedSelect:
                              f"(group 1, group 2); got {list(layers)}")
         for label, value, allowed in (("key", key, KEYS), ("gate", gate, GATES),
                                       ("tie_break", tie_break, TIE_BREAKS),
-                                      ("normalize", normalize, NORMALIZE)):
+                                      ("normalize", normalize, NORMALIZE),
+                                      ("vote_weight", vote_weight, VOTE_WEIGHTS)):
             if value not in allowed:
                 raise ValueError(f"{name}: {label} must be one of {list(allowed)}; got {value!r}")
         ignore = dict(ignore or {})
@@ -247,6 +257,8 @@ class ModeGatedSelect:
             if isinstance(names, str) or not all(isinstance(n, str) for n in names):
                 raise ValueError(f"{name}: {group} must be a list of class NAMES (never ids); "
                                  f"got {names!r}")
+        if not float(vote_power) > 0:
+            raise ValueError(f"{name}: vote_power must be positive; got {vote_power}")
         if int(min_count) < 1:
             raise ValueError(f"{name}: min_count must be at least 1; got {min_count}")
         if soft_penalty < 0 or partial_tie_penalty < 0:
@@ -292,6 +304,8 @@ class ModeGatedSelect:
         self.soft_penalty = float(soft_penalty)
         self.partial_vote_weight = float(partial_vote_weight)
         self.partial_tie_penalty = float(partial_tie_penalty)
+        self.vote_weight = vote_weight
+        self.vote_power = float(vote_power)
         self.normalize = normalize
         #: the positive weights renormalised to sum to 1; zero-weight metrics are not computed
         self.weights = {m: v / total for m, v in w.items() if v > 0}
@@ -420,13 +434,16 @@ class ModeGatedSelect:
                                                              if n != "none"])))
         detect1, detect2 = g1 > 0, g2 > 0
         P = self.penalty(obs, g1, g2)
+        # a look's vote: 1, or its quality (penalty is in [0, 1], 0 best)
+        quality = (1.0 - P).astype(np.float64) ** self.vote_power \
+            if self.vote_weight == "score" else np.ones(P.shape)
         n_valid = valid.sum(axis=0).astype(np.float32)
 
         if self.key == "joint":
             voters = valid & (detect1 | detect2) & ~ignored
             partial = detect1 ^ detect2
             code = (g1 << 32) | (g2 & 0xFFFFFFFF)
-            weight = np.where(partial, self.partial_vote_weight, 1.0)
+            weight = np.where(partial, self.partial_vote_weight, 1.0) * quality
             m = self._mode(code, weight, voters, P + self.partial_tie_penalty * partial)
             match = ((code == m["mode"][None]) | ~m["has"][None]) & ~ignored
             has, drop = m["has"], m["drop"]
@@ -442,7 +459,7 @@ class ModeGatedSelect:
             for g, det in ((g1, detect1), (g2, detect2)):
                 voters = valid & det & ~ignored
                 voters_any |= voters
-                m = self._mode(g, np.ones(g.shape), voters, P)
+                m = self._mode(g, quality, voters, P)
                 match &= (g == m["mode"][None]) | ~m["has"][None]
                 has |= m["has"]
                 drop |= m["drop"]

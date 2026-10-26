@@ -10,7 +10,7 @@ pixi run stratum plan     -m examples/emit-cm-demo-sites/manifest-baseline.yaml 
 make cloud-run MANIFEST=examples/emit-cm-demo-sites/manifest-baseline.yaml        # needs the deployment
 ```
 
-All three manifests share `./index`, because their `inputs.source.patterns` are identical. Plan
+All five manifests share `./index`, because their `inputs.source.patterns` are identical. Plan
 any one of them first and the others reuse its index.
 
 `tests/test_examples.py` holds these manifests to that: one grid, one index, the same filters,
@@ -52,6 +52,8 @@ diagonal. This is a parity check still to run; see below.
 | **B** | `manifest-mode-gated.yaml` | P1Y → P1Y | `mode_gated_select`, joint (G1, G2) key, hard gate, fixed bounds: the external tiled aggregator's defaults | one scene per cell |
 | **C** | `manifest-assistant-pick.yaml` | P1Y → P1Y | B with `key: independent`, `gate: soft`, `normalize: rank` | one scene per cell |
 | **D** | *not written* | | the science lead's preferred path | |
+| confirmed | `manifest-confirmed.yaml` | P1D → P1Y | A's `low_vegetation_nadir`, but every look is its own epoch | `confirmed_mineral_vote` reducer: per group, votes weighted score × Tetracorder fit; a class needs ≥ 2 agreeing looks; observed and unconfirmed is `none`. No `bare`/`pv`/`npv` delivered |
+| score-weighted | `manifest-score-weighted.yaml` | P1Y → P1Y | B with `vote_weight: score`, `vote_power: 8`: a look's vote in the joint mode is (1 − penalty)⁸ | one scene per cell |
 
 Every contender delivers the same band names (`mineral_1`, `mineral_2`, `depth_1`, `depth_2`,
 `acquired_1`, `bare`, `pv`, `npv`), so a viewer can flip between them band for band. A also
@@ -77,5 +79,5 @@ None of these is built, and none was invented to fill the gap.
 | 5 | **Mineral groupings** for this product (e.g. white micas). US West's `../emit-us-west-2025/classes/` and `../emit-critical-minerals/classes/cm-v1.yaml` exist, but none is agreed for the demonstration, so only native classes are delivered | all | science team |
 | 6 | **Grid parity with L3 reflectance**: cells filled at scene edges (the `max_distance` vs footprint rule above), and the float behaviour of `origin + n × res` vs `floor(x / p) × p`. Compare one Stratum GLT with one L3RFL file over the same scene | all | SDS |
 | 7 | **Cloud probability band**: `cloud_prob` reads V002 L2A MASK band 8, which has not been checked against a delivered file's band names | B, C | SDS |
-| 8 | **Where the team views it**. All three runs share a storage root, so `stratum preview`'s run picker already lists them side by side. Still open: which hosted viewer the science team uses (`make viewer-up` exists), and whether flipping by run picker is enough or a same-band swipe is wanted | all | SDS |
+| 8 | **Where the team views it**. All five runs share a storage root, so `stratum preview`'s run picker already lists them side by side. Still open: which hosted viewer the science team uses (`make viewer-up` exists), and whether flipping by run picker is enough or a same-band swipe is wanted | all | SDS |
 | 9 | **A low-agreement negative control**, e.g. a lava flow chosen from the collaborator's mode-match-count maps. Optional | — | collaborator |

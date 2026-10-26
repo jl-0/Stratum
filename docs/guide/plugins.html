@@ -549,7 +549,10 @@ result = vote(snaps.schema[<span class="k">"mineral_2"</span>], snaps[<span clas
               snaps.valid.sum(axis=0),
               VoteParams(min_count=2, ignore=(<span class="k">"none"</span>,), tie_break=<span class="k">"highest_score"</span>))</code></pre>
 
-<p>Two reducers ship. <code>spectral_abundance</code> marks a different limit: it multiplies a
+<p>Three reducers ship. <code>confirmed_mineral_vote</code> votes each mineral group over every look
+with weight score &times; that group's Tetracorder fit, lets only a class seen in at least
+<code>min_count</code> looks win, and delivers <code>none</code> where a cell was observed and
+nothing was confirmed; use it with <code>epoch: P1D</code>. <code>spectral_abundance</code> marks a different limit: it multiplies a
 band depth by a per-constituent fraction <em>per epoch</em>, before anything collapses, and lets
 one constituent contribute to several output classes at different fractions &mdash; which an
 enumeration cannot do, because it maps one raw class to exactly one product class with no weight.

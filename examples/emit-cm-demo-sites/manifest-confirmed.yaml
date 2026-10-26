@@ -1,0 +1,164 @@
+# Stratum demonstration, the CONFIRMED-VOTE contender - every look votes, weighted by its score x
+# Tetracorder fit, and a mineral needs a second look to agree; on the L3 grid, over the four
+# demonstration sites.
+#
+#     pixi run stratum validate -m examples/emit-cm-demo-sites/manifest-confirmed.yaml
+#     make cloud-run MANIFEST=examples/emit-cm-demo-sites/manifest-confirmed.yaml
+#
+# Grid, sites, year, granule filter, masks and scorer are IDENTICAL to manifest-baseline.yaml. What
+# differs is the epoch (a day, so the vote sees every look rather than each week's best) and the
+# reduction, which is the `confirmed_mineral_vote` reducer plugin: per group, a look that
+# identified a class votes score x that group's fit; only a class seen in >= 2 looks may win (a
+# cell seen once keeps its one look); an observed cell with nothing confirmed is `none`, not
+# nodata. Fit, not depth: Tetracorder names a material by its best fit (Clark et al. 2003, JGR
+# 108(E12) 5131). FRCOV is carried so its fill invalidates the same looks as in A, but a reducer
+# plugin replaces the delivered bands, so bare/pv/npv are not delivered.
+
+run_id: cm-demo-confirmed-2025
+description: Demonstration sites 2025, every look votes by score x fit per group, confirmed by a second look
+
+# The EMIT L3 GRIDDED REFLECTANCE lattice (EMITL3RFL ATBD section 4.2.1): EPSG:4326 at 0.00055
+# degrees, with cell CENTRES on whole multiples of 0.00055 - so cell EDGES sit half a cell off
+# them, which is what the origin below encodes. Any cell this grid writes has the same centre as
+# the L3 reflectance cell over the same ground.
+grid:
+  crs: EPSG:4326
+  resolution: [0.00055, -0.00055]   # ~61 m north-south; east-west shrinks with cos(latitude)
+  origin: [-0.000275, -0.000275]    # half a cell: edges at (n - 1/2) x 0.00055, centres at n x 0.00055
+  tile_size: 0.55                   # exactly 1000 x 1000 cells. A 1.0-degree tile is 1818.18 cells
+                                    #   and plan would warn; 0.55 divides, so every tile is the same
+                                    #   shape. Tile tx spans lon [0.55 tx, 0.55 (tx + 1)).
+  block_size: 500                   # 2 x 2 blocks per tile
+  # max_distance left at its default, 1.5 x the grid diagonal (~0.00117 degrees). The L3 reflectance
+  # gridder's own cutoff is a different rule (inside the scene footprint, or within half an input
+  # pixel), so the two grids share cells but not necessarily which cells are filled at a scene edge.
+  regrid_method: kdtree
+
+aoi:
+  zones: [cuprite-nv, mountain-pass-ca, bingham-canyon-amd, mojave-l2b-tutorial]
+  registry: ../zones.yaml           # Cuprite, Mountain Pass and the tutorial box are APPROXIMATE or
+                                    #   UNVERIFIED there - see each entry. Bingham is the AMD box exactly.
+                                    #   Eighteen tiles: Mojave 12, Cuprite 4, Bingham 1, and Mountain
+                                    #   Pass 2, one of which it shares with Mojave.
+
+time:
+  start: 2025-01-01                 # inclusive, UTC
+  end:   2026-01-01                 # exclusive - one calendar year
+  epoch: P1D                        # a look is an epoch: the reducer votes over every look
+  deliver: P1Y
+
+inputs:
+  index_location: ./index           # SHARED by all three contenders: the patterns below are the
+  source:                           #   union every contender needs, and identical in each manifest,
+    kind: cmr                       #   so all three run over one granule set. A role reads only its
+    provider: LPCLOUD               #   own asset, so an unused pattern costs an index row, not a download.
+    prefer: https
+    patterns:
+      EMITL2BMIN:
+        MIN: "EMIT_L2B_MIN_001_*.nc"
+        MINUNCERT: "EMIT_L2B_MINUNCERT_001_*.nc"
+      EMITL1BRAD:
+        OBS: "EMIT_L1B_OBS_001_*.nc"            # never the 1.85 GB RAD file
+      EMITL2AMASK:
+        MASK: "EMIT_L2A_MASK_002_*.nc"
+      EMITL2BFRCOV:
+        FRCOVBARE: "EMIT_L2B_FRCOVBARE_001_*.tif"
+        FRCOVPV: "EMIT_L2B_FRCOVPV_001_*.tif"
+        FRCOVNPV: "EMIT_L2B_FRCOVNPV_001_*.tif"
+  roles:
+    geometry: {collection: EMITL1BRAD, asset: OBS, var: obs}
+    mineral_1:
+      collection: EMITL2BMIN
+      var: group_1_mineral_id
+      class_table:
+        source: embedded
+        path: /mineral_metadata
+        key: index
+        attributes: [name, record, library, group, url]
+        identity: [collection_version, build_version]
+    depth_1: {collection: EMITL2BMIN, var: group_1_band_depth}
+    mineral_2:
+      collection: EMITL2BMIN
+      var: group_2_mineral_id
+      class_table:
+        source: embedded
+        path: /mineral_metadata
+        key: index
+        attributes: [name, record, library, group, url]
+        identity: [collection_version, build_version]
+    depth_2: {collection: EMITL2BMIN, var: group_2_band_depth}
+    mineral_fit:   {collection: EMITL2BMIN, asset: MINUNCERT, var: group_1_fit}
+    mineral_2_fit: {collection: EMITL2BMIN, asset: MINUNCERT, var: group_2_fit}
+    mask: {collection: EMITL2AMASK, version: "002", var: mask}
+    # FRCOV, all three fractions, in every contender. On THIS grid the FRCOV lattice
+    # (0.000542232520256367 degrees) is only 1.4 % finer than the cell, so `nearest` is close to a
+    # one-to-one copy and, unlike bilinear, never spreads FRCOV's fill into a neighbouring cell.
+    # Fill in any of these invalidates the look (cloud, urban, water, snow/ice per FRCOVQC) - the
+    # same in all three contenders, so it does not bias the comparison.
+    frcov: {collection: EMITL2BFRCOV, asset: FRCOVBARE, var: EMIT_L2B_FRCOVBARE, resampling: nearest}
+    pv:    {collection: EMITL2BFRCOV, asset: FRCOVPV,   var: EMIT_L2B_FRCOVPV,   resampling: nearest}
+    npv:   {collection: EMITL2BFRCOV, asset: FRCOVNPV,  var: EMIT_L2B_FRCOVNPV,  resampling: nearest}
+  band_aliases:
+    view_zenith:  {role: geometry, band: 2}   # 0-based into `obs`
+    solar_zenith: {role: geometry, band: 4}
+    cos_i:        {role: geometry, band: 8}   # read by the cos_i mask
+
+aux:
+  landcover:                        # ESA WorldCover 2021, the five 3-degree tiles the eighteen
+    uri:                            #   demonstration tiles touch (and no others)
+      - https://esa-worldcover.s3.eu-central-1.amazonaws.com/v200/2021/map/ESA_WorldCover_10m_2021_v200_N33W120_Map.tif
+      - https://esa-worldcover.s3.eu-central-1.amazonaws.com/v200/2021/map/ESA_WorldCover_10m_2021_v200_N33W117_Map.tif
+      - https://esa-worldcover.s3.eu-central-1.amazonaws.com/v200/2021/map/ESA_WorldCover_10m_2021_v200_N36W120_Map.tif
+      - https://esa-worldcover.s3.eu-central-1.amazonaws.com/v200/2021/map/ESA_WorldCover_10m_2021_v200_N36W117_Map.tif
+      - https://esa-worldcover.s3.eu-central-1.amazonaws.com/v200/2021/map/ESA_WorldCover_10m_2021_v200_N39W114_Map.tif
+    kind: categorical
+    resampling: mode                # 10 m onto ~61 m
+
+granule_filter:
+  - {max_cloud_fraction: 0.8, on_missing: fail}   # 0.8, not US West's 0.5: Bingham has 7 granules
+                                                  #   in 2025 at 0.8 and only 4 at 0.5 (CMR, 23 Oct
+                                                  #   2026); the pixel masks remove the cloud itself
+  - {max_solar_zenith: 70}
+
+pixel_mask:                         # the shared set: identical in all three contenders
+  - {ref: edge_trim, columns: 7}                                         # sensor-space
+  - {ref: l2a_standard, flags: [cloud, cirrus, water, spacecraft, dilated_cloud]}
+  - {ref: landcover, exclude: [water, built-up]}                         # map-space, aux above
+  - {ref: cos_i, min_cos_i: 0.3}                                         # sun grazing the slope
+
+scorer:
+  ref: low_vegetation_nadir         # parameters exactly as US West
+  params:
+    max_pv: 0.40
+    vegetated_weight: 0.1
+    sun_weight: 0.25
+    nadir_weight: 0.10
+
+reducer:                            # 04 section 5: the vote below is not expressible as `aggregate`
+  ref: confirmed_mineral_vote
+  params: {min_count: 2, weight: score_fit}
+
+snapshot:
+  name: cm-demo-confirmed-v1
+  layers:                           # carried per look; the reducer decides what is delivered
+    mineral_1: {kind: categorical, source: mineral_1, classes: source, aggregate: {method: none}}
+    mineral_2: {kind: categorical, source: mineral_2, classes: source, aggregate: {method: none}}
+    fit_1:     {kind: continuous, source: mineral_fit,   aggregate: {method: none}}
+    fit_2:     {kind: continuous, source: mineral_2_fit, aggregate: {method: none}}
+    depth_1:   {kind: continuous, source: depth_1, aggregate: {method: none}}
+    depth_2:   {kind: continuous, source: depth_2, aggregate: {method: none}}
+    acquired:  {kind: continuous, source: acquired, aggregate: {method: none}}
+    bare:      {kind: continuous, source: frcov, aggregate: {method: none}}   # read so FRCOV fill
+    npv:       {kind: continuous, source: npv,   aggregate: {method: none}}   #   invalidates as in A
+
+outputs:
+  bucket: ./out                     # `make cloud-run` writes the .cloud.yaml twin pointing at S3
+  formats: [cog]
+  stac: true
+  # no `render:` - a render entry names a schema layer, and these bands are the plugin's
+
+budget:
+  max_tiles: 24                     # 18 expected
+  max_granules: 200                 # the plan counts 157 over the 18 tiles in 2025 (the boxes alone: 116)
+  max_vcpu_hours: 40
+  on_exceed: fail
