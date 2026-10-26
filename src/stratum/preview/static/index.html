@@ -17,6 +17,31 @@
      asked while looking at the map. aria-live so it is announced rather than just seen. -->
 <div id="tilestatus" role="status" aria-live="polite" hidden></div>
 
+<!-- The layer stack, on the left: what "Add as layer" pins, top row drawn on top. Collapsed until
+     the first layer is pinned, so someone who never stacks loses no map to it. -->
+<aside id="stack" aria-label="Layers">
+  <button id="stacktoggle" type="button" aria-expanded="false" aria-controls="stackbody">
+    <span class="chev" aria-hidden="true"></span> Layers <span id="stackcount" class="badge">0</span>
+  </button>
+  <div id="stackbody" hidden>
+    <div class="tools" role="toolbar" aria-label="Peek-through mask">
+      <button id="toolrect" type="button" aria-pressed="false"
+              title="Drag on the map to add a rectangle">Rectangle</button>
+      <button id="toollasso" type="button" aria-pressed="false"
+              title="Drag on the map to draw a freehand shape">Lasso</button>
+      <button id="maskclear" type="button" title="Remove every shape">Clear</button>
+      <label><input id="peek" type="checkbox" checked> Peek</label>
+    </div>
+    <p class="muted">Shapes cut a window in the <strong>top</strong> layer: it draws inside them
+      and the layers beneath show everywhere else. Esc stops drawing.</p>
+    <p id="maskmeta" class="muted"></p>
+    <ol id="stacklist"></ol>
+    <p id="stackempty" class="muted">Pick a run and a layer on the right, then
+      <strong>Add as layer</strong>. Drag <span aria-hidden="true">⋮⋮</span> or use ↑ ↓ to
+      reorder.</p>
+  </div>
+</aside>
+
 <aside id="panel">
   <header>
     <h1><span class="glyph" aria-hidden="true"></span> Stratum</h1>
@@ -38,6 +63,8 @@
     <label for="ramp">Ramp</label>
     <select id="ramp"></select>
   </div>
+
+  <button id="pin" type="button" disabled>Add as layer</button>
 
   <label for="basemap">Basemap</label>
   <select id="basemap">

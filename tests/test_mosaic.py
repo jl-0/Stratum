@@ -182,7 +182,7 @@ def test_the_page_draws_one_overlay_for_a_mosaicked_layer() -> None:
 
     js = (STATIC / "viewer.js").read_text()
     assert "includes('overview')" in js, "the page must find mosaics by their STAC role"
-    assert "state.mosaics.filter" in js and "stratum:asset" in js
+    assert "src.mosaics.filter" in js and "stratum:asset" in js
 
 
 def test_the_command_builds_from_a_bucket_only_inside_ecs(tmp_path: Path, monkeypatch) -> None:

@@ -435,7 +435,7 @@ def test_the_page_sends_one_stretch_for_every_tile_of_a_layer() -> None:
     js = (STATIC / "viewer.js").read_text()
     layer = js[js.index("function rasterLayer"):js.index("function rampLUT")]
     assert "vmin: opts.vmin" in layer and "vmax: opts.vmax" in layer
-    assert "measure(state.run, key)" in js, "measured for the layer, not for the first asset"
+    assert "measure(src.run, key)" in js, "measured for the layer, not for the first asset"
     assert "api/range?asset=" not in js
 
 
@@ -486,5 +486,53 @@ def test_the_legend_lists_only_the_classes_the_run_contains() -> None:
     js = (STATIC / "viewer.js").read_text()
     union = js[js.index("function presentClasses"):js.index("function renderLegend")]
     assert "c.count > 0" in union and "return counted ? present : null" in union
-    assert "present: presentClasses(key)" in js
+    assert "present: presentClasses(src.items, key)" in js
 
+
+
+# ------------------------------------------------------------ the layer stack and the mask
+# Same reason as above: no JS runner, so these pin the mechanisms that are easy to "simplify"
+# into something that only looks right.
+
+
+def test_every_drawn_layer_has_a_pane_of_its_own() -> None:
+    """The pane is the unit of stacking, visibility, opacity and the mask. A layer drawn as four
+    hundred per-tile overlays must still be one z-index and one clip, so overlays go in by pane."""
+    js = (STATIC / "viewer.js").read_text()
+    layer = js[js.index("function rasterLayer"):js.index("function rampLUT")]
+    assert "pane: opts.pane" in layer
+    assert "map.createPane(" in js
+
+
+def test_the_mask_is_a_clip_on_the_top_pane_kept_in_step_with_zoom() -> None:
+    """The path is in layer points, which a zoom changes and a pan does not. Recompute it on
+    zoom and view reset, and hide the masked pane while a zoom animates under a stale path."""
+    js = (STATIC / "viewer.js").read_text()
+    assert "pane.style.clipPath" in js and "latLngToLayerPoint" in js
+    assert "map.on('zoomanim'" in js
+    assert "map.on('zoomend viewreset'" in js
+
+
+def test_overlapping_shapes_add_rather_than_cancel() -> None:
+    """Under `nonzero`, rings of opposite winding cancel where they overlap, and a lasso can be
+    drawn either way round. Every ring is wound one way before the path is built."""
+    js = (STATIC / "viewer.js").read_text()
+    path = js[js.index("function maskPath"):js.index("function applyMask")]
+    assert "signedArea(pts) < 0" in path and "reverse()" in path
+
+
+def test_the_stack_reorders_from_the_keyboard_as_well_as_by_drag() -> None:
+    """Dragging the grip is pointer-only. The up/down buttons are the accessible path."""
+    js = (STATIC / "viewer.js").read_text()
+    rows = js[js.index("function renderStack"):js.index("const rowLayer")]
+    assert 'class="up"' in rows and 'class="down"' in rows and 'class="grip"' in rows
+
+
+def test_a_tile_aborted_in_flight_is_not_counted_for_ever() -> None:
+    """With several layers loading at once the outstanding count cannot be zeroed on a reset, so
+    it must stay exact - and Leaflet aborts a pruned or removed tile with only `tileunload`."""
+    js = (STATIC / "viewer.js").read_text()
+    watch = js[js.index("function watchTiles"):js.index("function paintDrawing")]
+    assert "tileunload" in watch
+    reset = js[js.index("function drawingReset"):js.index("function drawingTick")]
+    assert "drawing.pending =" not in reset

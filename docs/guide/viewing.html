@@ -106,6 +106,41 @@ readable.</td></tr>
 that was looked at and found empty indistinguishable from one that was never looked at.</p>
 </div>
 
+<h3 id="stack">Comparing layers: the stack and peek-through</h3>
+
+<p>The pickers on the right draw a <strong>preview</strong>, replaced every time you change them.
+To keep a layer, press <strong>Add as layer</strong>: it moves into the <strong>Layers</strong>
+panel on the left, which opens on the first one. A pinned layer keeps the run it came from, so you
+can go on to pick another run and pin that too &mdash; two contenders over the same site, or one
+run's <code>mineral_1</code> over its <code>mineral_1_runner_up</code>.</p>
+
+<div class="tw">
+<table>
+<thead><tr><th>In the Layers panel</th><th>What it does</th></tr></thead>
+<tbody>
+<tr><td>Row order</td><td>Stacking order: the first row is drawn on top. The preview is always
+drawn above the whole stack.</td></tr>
+<tr><td>Drag <span aria-hidden="true">⋮⋮</span>, or ↑ ↓</td><td>Reorder. The buttons do the same
+from the keyboard.</td></tr>
+<tr><td>Checkbox, slider, ×</td><td>Show or hide the layer, set its opacity, remove it.</td></tr>
+<tr><td>A layer's name</td><td>Shows that layer's legend on the right, instead of the preview's.
+Press it again to go back.</td></tr>
+</tbody>
+</table>
+</div>
+
+<p><strong>Peek-through</strong> is the alternative to flicking visibility or dragging opacity.
+Arm <strong>Rectangle</strong> or <strong>Lasso</strong> and drag on the map: the top layer then
+draws <em>only inside</em> the shapes you have drawn, and everywhere else the layers beneath show
+through. Shapes add together, the tool stays armed so you can draw several, and
+<kbd>Esc</kbd> disarms it. While a tool is armed a drag draws instead of panning, and a click does
+not read a point.</p>
+
+<p>The window belongs to the top of the stack, not to a layer: reorder, and it cuts whichever layer
+is now first. <strong>Peek</strong> turns the cut off without losing the shapes;
+<strong>Clear</strong> removes them. Nothing here is saved &mdash; reloading the page empties the
+stack.</p>
+
 <h2 id="mosaic">Making a big run fast to draw: layer mosaics</h2>
 
 <p>A run is published one file per product tile, which is the right shape for a deliverable and
@@ -268,8 +303,8 @@ signs the requests itself with the task role, and speaks plain HTTP only to your
 
 <p>It is a way to look at products, not a way to serve them &mdash; the <a href="#mosaic">layer
 mosaics</a> are what to serve. There is no styling beyond the ramp
-picker, no per-pixel inspection, no time slider, and no way to compare two runs side by side — the
-run picker swaps one for the other. It reads the products tree and never writes to it, so nothing
+picker, no time slider, and no saved state &mdash; a <a href="#stack">layer stack</a> lasts as
+long as the page does. It reads the products tree and never writes to it, so nothing
 you do in the viewer can change a run.</p>
 
 </div>

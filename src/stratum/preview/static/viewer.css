@@ -157,3 +157,84 @@ table.read .sw { display: inline-block; width: .75em; height: .75em; border: 1px
 @media (prefers-reduced-motion: reduce) {
   #tilestatus .spinner { animation: none; }
 }
+
+
+/* ------------------------------------------------------------------ the layer stack
+   The left panel. Collapsed it is a tab in the corner; open it runs the height of the map, and
+   Leaflet's left-hand controls move over so the zoom buttons stay reachable. */
+button {
+  font: inherit; color: var(--fg); background: var(--bg);
+  border: 1px solid var(--line); border-radius: 4px; padding: .3rem .55rem; cursor: pointer;
+}
+button:hover:not(:disabled) { border-color: var(--accent); }
+button:disabled { opacity: .45; cursor: default; }
+button[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: var(--bg); }
+button:focus-visible, input:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+#pin { width: 100%; margin-top: 1rem; font-weight: 600; }
+
+#stack {
+  position: absolute; z-index: 1000; top: env(safe-area-inset-top, 0px); left: 0;
+  width: 280px; max-width: 85vw;
+  background: var(--panel); backdrop-filter: blur(8px);
+  border: 1px solid var(--line); border-width: 0 1px 1px 0; border-bottom-right-radius: 6px;
+}
+body.stack-open #stack {
+  bottom: env(safe-area-inset-bottom, 0px); border-bottom-width: 0; border-radius: 0;
+  overflow-y: auto; overscroll-behavior: contain;
+}
+#stacktoggle {
+  display: flex; align-items: center; gap: .45rem; width: 100%;
+  border: 0; border-radius: 0; background: none; padding: .55rem .8rem;
+  font-weight: 600; font-size: .82rem; letter-spacing: .02em; text-transform: uppercase;
+  color: var(--muted);
+}
+#stacktoggle .chev { width: .45rem; height: .45rem; border: solid currentColor;
+  border-width: 0 2px 2px 0; transform: rotate(-45deg); transition: transform .15s; }
+#stacktoggle[aria-expanded="true"] .chev { transform: rotate(45deg); }
+.badge { margin-left: auto; min-width: 1.4em; padding: 0 .4em; border-radius: 999px;
+  background: var(--line); color: var(--fg); text-align: center; font-variant-numeric: tabular-nums; }
+#stackbody { padding: 0 .8rem 1rem; }
+#stackbody[hidden] { display: none; }
+
+#stack .tools { display: flex; flex-wrap: wrap; gap: .35rem; align-items: center; }
+#stack .tools label { margin: 0 0 0 auto; }
+
+#stacklist { list-style: none; margin: .8rem 0 0; padding: 0; }
+#stacklist li {
+  display: grid; grid-template-columns: auto auto 1fr auto auto auto; gap: .3rem;
+  align-items: center; padding: .35rem .4rem; margin-bottom: .35rem;
+  border: 1px solid var(--line); border-radius: 5px; background: var(--bg);
+}
+#stacklist li.selected { border-color: var(--accent); }
+#stacklist li.dragging { opacity: .45; }
+#stacklist li.drop-before { box-shadow: 0 -3px 0 var(--accent); }
+#stacklist li.drop-after { box-shadow: 0 3px 0 var(--accent); }
+#stacklist .grip { cursor: grab; color: var(--muted); letter-spacing: -.2em; padding: 0 .25rem 0 0;
+  user-select: none; touch-action: none; }
+#stacklist .name {
+  border: 0; background: none; padding: 0; text-align: left; min-width: 0;
+  font-size: .85rem; overflow-wrap: anywhere; line-height: 1.25;
+}
+#stacklist .name[aria-pressed="true"] { color: var(--accent); background: none; }
+#stacklist .name small { display: block; color: var(--muted); font-size: .72rem; }
+#stacklist .up, #stacklist .down, #stacklist .rm { padding: .05rem .4rem; font-size: .8rem; }
+#stacklist .op { grid-column: 1 / -1; }
+
+/* The shapes' edges: white over a dark halo, so they read on imagery and on a street map. */
+.mask-outline { stroke: #fff; filter: drop-shadow(0 0 1.5px rgba(0, 0, 0, .9)); }
+
+/* Armed with a draw tool, the map draws instead of panning: say so with the cursor, and keep a
+   touch drag from scrolling the page. */
+body.tool-active .leaflet-container,
+body.tool-active .leaflet-container .leaflet-interactive { cursor: crosshair; touch-action: none; }
+
+/* Leaflet's left controls: below the collapsed tab, beside the open panel. */
+.leaflet-top.leaflet-left { top: 2.6rem; }
+body.stack-open .leaflet-left { left: 280px; }
+body.stack-open .leaflet-top.leaflet-left { top: 0; }
+
+@media (max-width: 640px) {
+  /* A drawer over the top of the map; the right panel is already a bottom sheet here. */
+  body.stack-open #stack { bottom: auto; max-height: 46%; border-bottom-width: 1px; }
+}
