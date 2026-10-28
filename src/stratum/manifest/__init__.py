@@ -92,6 +92,7 @@ def load_manifest(path: Path | str, patches: Sequence[Path | str] = ()) -> Manif
     path = Path(path)
     m = Manifest.from_document(load_document(path), base_dir=path.parent)
     m.enumerations()
+    m.output_colors()
     return m
 
 
@@ -101,11 +102,14 @@ def manifest_hash(m: Manifest) -> str:
     resolved to. Key order in the YAML never changes it. The `@ref:` PATH enters as written
     (it is part of the document); the file's CONTENT enters as `Enumeration.fingerprint()`, so
     editing a classes file under the same path changes `run_id` too, as 00 section 5 invariant 4
-    ("reproducible from its manifest hash alone") requires. A manifest without `@ref:` layers
-    hashes exactly as its document."""
+    ("reproducible from its manifest hash alone") requires. A `@ref:` `outputs.colors` file
+    enters the same way, by the hash of the colours it holds. A manifest without `@ref:` hashes
+    exactly as its document."""
     doc = m.document()
     refs = {f"snapshot.layers.{name}.classes": enum.fingerprint()
             for name, enum in m.enumerations().items()}
+    if isinstance(m.outputs.colors, str):
+        refs["outputs.colors"] = canonical_hash(m.output_colors())
     if refs:
         doc["resolved_refs"] = refs
     return canonical_hash(doc)

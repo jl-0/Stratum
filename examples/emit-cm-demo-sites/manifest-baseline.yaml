@@ -187,6 +187,7 @@ outputs:
   bucket: ./out                     # `make cloud-run` writes the .cloud.yaml twin pointing at S3
   formats: [cog]
   stac: true
+  colors: "@ref:colors-usgs-1995.yaml"   # the 1995 USGS Cuprite groups; unnamed classes follow on_unmapped
   render:
     mineral_1:
       mapper: categorical

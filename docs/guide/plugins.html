@@ -571,9 +571,12 @@ what <code>aggregate: vote</code> would have delivered for that layer alone.</p>
   <p><strong>No aux.</strong> <code>reduce()</code> receives <code>NullAux</code>. Unlike a
   <code>Scorer</code> the protocol declares no <code>required_aux</code>, so there is not even a
   channel to ask.</p>
-  <p><strong>Your bands cannot be rendered.</strong> <code>outputs.render</code> names a schema
-  layer, and a plugin output is not one. The data COG and the STAC asset are written, so the band
-  is viewable in the product viewer &mdash; there is just no baked RGBA image.</p>
+  <p><strong>Render a band by delivering it under a layer's name.</strong>
+  <code>outputs.render</code> names a delivered band that is also a snapshot layer, which is where
+  a categorical band gets its class table. Carry the layer (<code>aggregate: {method: none}</code>)
+  and deliver your answer under the same name, as <code>confirmed_mineral_vote</code> does with
+  <code>mineral_1</code>, and it renders like any other. Every categorical band you deliver gets a
+  legend and a colour table either way, so the viewer draws its classes even without a render.</p>
 </div>
 
 <h3 id="reducer-inputs">What you get</h3>

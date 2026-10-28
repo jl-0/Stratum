@@ -118,6 +118,20 @@ def test_confirmed_keeps_a_scorer_and_delivers_through_the_reducer() -> None:
     from stratum_emit.reducers import ConfirmedMineralVote
     bands = {b.name for b in ConfirmedMineralVote(**d["reducer"]["params"]).outputs}
     assert {"mineral_1", "mineral_2", "depth_1", "depth_2", "acquired_1", "acquired_2"} <= bands
+    # and its mineral bands render like everyone else's: a render names a DELIVERED band
+    m = load_manifest(DEMO / "manifest-confirmed.yaml")
+    assert {"mineral_1", "mineral_2"} <= set(m.outputs.render) and not validate_static(m)
+
+
+def test_contenders_share_one_colour_table() -> None:
+    """Every contender colours a class the same way, so their maps compare cell for cell: one
+    `outputs.colors` file, the 1995 USGS Cuprite groups, and nothing per-render that overrides it."""
+    for name in CONTENDERS:
+        out = _raw(name)["outputs"]
+        assert out["colors"] == "@ref:colors-usgs-1995.yaml", name
+        assert all("colors" not in r for r in out["render"].values()), name
+    colours = load_manifest(DEMO / "manifest-baseline.yaml").output_colors()
+    assert len(colours) > 100 and colours["Hematite.02+Quartz.98 GDS76 W1R1Ha"] == (235, 0, 180)
 
 
 def test_score_weighted_changes_only_bs_vote_weighting() -> None:

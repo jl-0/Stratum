@@ -152,6 +152,7 @@ outputs:
   bucket: s3://emit-l3-products
   formats: [cog, netcdf]
   stac: true
+  colors: "@ref:colors.yaml"              # product-wide class colours by name; or inline ([07 §3](07-output-mapping.md))
   render:
     mineral_1:
       mapper: categorical                 # classes come from the layer's enumeration
@@ -289,8 +290,10 @@ Everything below fails in the plan stage, loudly, while it is cheap:
   `scorer.<output>` the scorer declares, typed from its `BandSpec`), every categorical
   layer's enumeration resolves to **exactly one** row per member in each contributing granule's
   embedded table — matched on attributes, never on positional index — `conditional_on` and `unc`
-  name declared layers, and every class a colour table names exists in the enumeration
-  ([13](13-snapshot-schema.md), [07 §6](07-output-mapping.md));
+  name declared layers, and every class a render's `colors` names exists in the enumeration
+  ([13](13-snapshot-schema.md), [07 §6](07-output-mapping.md)). The product-wide
+  `outputs.colors` is exempt: it is shared across bands and products, so a name a band's table
+  lacks is dropped for that band ([07 §3](07-output-mapping.md));
 - the contributing granules' class tables **agree by fingerprint**, or a cross-vintage remap is
   explicitly permitted ([11 §9](11-types.md));
 - filter `on_missing` policy explicit;
@@ -311,7 +314,7 @@ Three layers, in the order a manifest meets them:
 | Layer | Checks | Reports |
 |---|---|---|
 | **Models** (`stratum/manifest/models.py`) | The shape of one block: types, enumerated values, which fields go together, aux `kind`/`resampling` agreement, the time rules, a categorical layer needing `classes`, `mixed_vintage_reason` | The first failure, with a location |
-| **`validate_static`** (`stratum/manifest/validate.py`; `stratum validate`) | Every cross-block reference, with no data: role/alias collision; `alias.role` and `geolocation` declared; scorer/mask/filter/mapper refs resolve and accept their params; `required_roles` in roles or aliases; `required_aux` in `aux`; scorer `halo` vs `block_size`; scorer `capability`; scorer `required_layers` name snapshot layers that are not its own outputs; scorer `outputs` are unique float `BandSpec`s with an `emit()`; no role or alias uses the reserved `scorer.` prefix; layer `source` in the namespace, and a `scorer.<output>` source names a declared output as one continuous band of its dtype; a categorical source role declares a `class_table` whose attributes cover `match_on`; `conditional_on` names another *delivered* categorical layer and `unc` another continuous one; `ignore`/`colors` name enumeration classes; render targets a delivered layer of the right kind; `alpha_from` names a band the reducer actually delivers; zones resolve | Every problem, as a list |
+| **`validate_static`** (`stratum/manifest/validate.py`; `stratum validate`) | Every cross-block reference, with no data: role/alias collision; `alias.role` and `geolocation` declared; scorer/mask/filter/mapper refs resolve and accept their params; `required_roles` in roles or aliases; `required_aux` in `aux`; scorer `halo` vs `block_size`; scorer `capability`; scorer `required_layers` name snapshot layers that are not its own outputs; scorer `outputs` are unique float `BandSpec`s with an `emit()`; no role or alias uses the reserved `scorer.` prefix; layer `source` in the namespace, and a `scorer.<output>` source names a declared output as one continuous band of its dtype; a categorical source role declares a `class_table` whose attributes cover `match_on`; `conditional_on` names another *delivered* categorical layer and `unc` another continuous one; `ignore`/`colors` name enumeration classes; render targets a delivered band named after a snapshot layer of the right kind, whether the built-in reducer or a plugin delivers it; `outputs.colors` loads; `alpha_from` names a band the reducer actually delivers; zones resolve | Every problem, as a list |
 | **Planner** (`stratum/plan/run.py`) | What needs data: the collection resolves to one reader; `var` exists in its `variables()`; band aliases resolve against a real granule's `VarSpec`; per-granule enumeration resolution and fingerprint agreement; a collection under several `collection_version`s is pinned; every granule provides an asset for every role that will be read | `PlanError` |
 
 `validate_static` instantiates the scorer and masks with their params to read `required_roles`,

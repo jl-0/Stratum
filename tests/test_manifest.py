@@ -96,6 +96,30 @@ def loaded(tmp_path: Path, mutate=None) -> Manifest:
 
 
 # ------------------------------------------------------------------------------- loading and ids
+def test_output_colors_load_from_a_ref_and_enter_the_hash(tmp_path):
+    """09 section 5: `outputs.colors: '@ref:<file>'` names a YAML mapping beside the manifest. Its
+    CONTENT enters the manifest hash, so recolouring under the same path is a new run; plan.json
+    carries the colours themselves, so no worker needs the file."""
+    from stratum.plan.run import outputs_document
+
+    (tmp_path / "colors.yaml").write_text('goethite: [1, 2, 3]\n"hematite #2": [4, 5, 6]\n')
+    m = loaded(tmp_path, lambda d: d["outputs"].update(colors="@ref:colors.yaml"))
+    assert m.output_colors() == {"goethite": (1, 2, 3), "hematite #2": (4, 5, 6)}
+    assert outputs_document(m)["colors"] == {"goethite": [1, 2, 3], "hematite #2": [4, 5, 6]}
+    before = manifest_hash(m)
+    (tmp_path / "colors.yaml").write_text("goethite: [9, 9, 9]\n")
+    m2 = loaded(tmp_path, lambda d: d["outputs"].update(colors="@ref:colors.yaml"))
+    assert manifest_hash(m2) != before
+    # inline colours work too, and a bare path or a bad colour is refused at load
+    inline = loaded(tmp_path, lambda d: d["outputs"].update(colors={"goethite": [1, 2, 3]}))
+    assert inline.output_colors() == {"goethite": (1, 2, 3)}
+    with pytest.raises(ValidationError, match="@ref:"):
+        loaded(tmp_path, lambda d: d["outputs"].update(colors="colors.yaml"))
+    (tmp_path / "bad.yaml").write_text("goethite: [1, 2]\n")
+    with pytest.raises(ValueError, match="not \\[r, g, b\\]"):
+        loaded(tmp_path, lambda d: d["outputs"].update(colors="@ref:bad.yaml"))
+
+
 def test_example_manifest_loads_and_derives():
     m = load_manifest(EXAMPLE)
     assert m.run_label == "cm-zones-2026-annual-r3"
@@ -351,13 +375,21 @@ def test_later_slice_items_are_refused_by_name(tmp_path):
 def test_a_reducer_plugin_must_declare_what_it_delivers(tmp_path):
     """04 section 5: a plugin names its bands up front so a bad declaration fails at plan time.
     There is no schema to fall back on - publish stitches exactly what `outputs` names."""
-    def check(cls_path):
-        return validate_static(loaded(tmp_path, lambda d: d.update(reducer={"ref": cls_path})))
+    def check(cls_path, render=None):
+        def edit(d):
+            d.update(reducer={"ref": cls_path})
+            if render is not None:
+                d["outputs"]["render"] = render
+        return validate_static(loaded(tmp_path, edit))
 
     assert any("declares no `outputs`" in p for p in check("test_manifest:NoOutputs"))
     assert any("more than once" in p for p in check("test_manifest:DuplicateNames"))
     assert any("halo 1 is not built" in p for p in check("test_manifest:HaloReducer"))
-    assert not check("test_manifest:GoodReducer"), check("test_manifest:GoodReducer")
+    assert not check("test_manifest:GoodReducer", {}), check("test_manifest:GoodReducer", {})
+    # A render names a DELIVERED band, and with a plugin that is what the plugin declares: the
+    # base manifest renders `mineral_1`, which this reducer does not deliver (07 section 3).
+    assert any("'mineral_1' is not a delivered band" in p
+               for p in check("test_manifest:GoodReducer"))
     with pytest.raises(ValidationError, match="documented"):
         loaded(tmp_path, lambda d: d.update(allow_mixed_vintage=True))
 

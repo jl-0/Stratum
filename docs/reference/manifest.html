@@ -495,6 +495,7 @@ and their schema.</p>
 <tr><td><code>bucket</code></td><td>An <code>s3://</code> URI, or a path relative to the manifest</td><td>—</td></tr>
 <tr><td><code>formats</code></td><td><code>cog</code>, <code>netcdf</code></td><td><code>[cog]</code></td></tr>
 <tr><td><code>stac</code></td><td>bool</td><td><code>true</code></td></tr>
+<tr><td><code>colors</code></td><td>class name &rarr; <code>[r, g, b]</code>, inline or <code>"@ref:&lt;file&gt;"</code> naming a YAML mapping beside the manifest. Colours every categorical band, and every categorical render without its own <code>colors</code>; names a band's class table lacks are skipped for that band</td><td>unset: a fixed colour per class id</td></tr>
 <tr><td><code>render.&lt;band&gt;.mapper</code></td><td><code>categorical</code> | <code>continuous</code> | <code>threshold</code> | <code>composite</code> | a plugin ref</td><td>—</td></tr>
 <tr><td><code>render.&lt;band&gt;.on_unmapped</code></td><td><code>fail</code> | <code>grey</code> | <code>transparent</code></td><td><code>fail</code></td></tr>
 <tr><td><code>render.&lt;band&gt;.nodata</code></td><td><code>transparent</code> or an RGB triple</td><td><code>transparent</code></td></tr>
@@ -514,8 +515,12 @@ and their schema.</p>
 </div>
 
 <p>Continuous mappers take <code>ramp</code>, <code>domain</code> and <code>clip</code> instead of
-<code>colors</code>. A categorical mapper's classes are the layer's enumeration. The data product
-ships whether or not <code>render</code> is present.</p>
+<code>colors</code>. A categorical mapper's classes are the layer's enumeration. A render's
+<code>&lt;band&gt;</code> must be a band the run delivers, named after a snapshot layer &mdash;
+including one a <code>Reducer</code> plugin delivers &mdash; not a layer that is only carried
+(<code>aggregate: none</code>). The data product ships whether or not <code>render</code> is
+present, and every categorical band gets <code>&lt;band&gt;_legend.json</code> either way, so a
+viewer draws its classes rather than a ramp over class ids.</p>
 
 <h2 id="plugins">plugins</h2>
 

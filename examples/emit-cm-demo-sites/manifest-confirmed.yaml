@@ -155,7 +155,16 @@ outputs:
   bucket: ./out                     # `make cloud-run` writes the .cloud.yaml twin pointing at S3
   formats: [cog]
   stac: true
-  # no `render:` - a render entry names a schema layer, and these bands are the plugin's
+  colors: "@ref:colors-usgs-1995.yaml"   # the 1995 USGS Cuprite groups; unnamed classes follow on_unmapped
+  render:                           # the reducer delivers these bands; a render names a delivered band
+    mineral_1:
+      mapper: categorical
+      on_unmapped: grey
+      alpha_from: {band: mineral_1_agreement, domain: [0.25, 1.0], range: [60, 255]}
+    mineral_2:
+      mapper: categorical
+      on_unmapped: grey
+      alpha_from: {band: mineral_2_agreement, domain: [0.25, 1.0], range: [60, 255]}
 
 budget:
   max_tiles: 24                     # 18 expected

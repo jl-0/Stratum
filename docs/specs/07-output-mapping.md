@@ -53,7 +53,7 @@ Publish writes both, from the same block, in the same run:
 |---|---|---|
 | **Data** | class indices, counts, agreement, score — as the schema's aggregations deliver them, or a `Reducer` plugin declares. A categorical band embeds a colour table derived from its enumeration | analysis, reprocessing, statistics, restyling |
 | **Image** | RGBA rendering via `OutputMapper` | MMGIS, QGIS, anyone looking at a map |
-| **Legend** | class table or ramp stops | both — makes the image interpretable and the data joinable |
+| **Legend** | class table or ramp stops, `{name}_legend.json`. Every categorical band gets one, rendered or not (§3) | both — makes the image interpretable and the data joinable |
 | **Class table** | `classes.json` when one table covers every categorical layer; `classes.{layer}.json` per layer when they carry different enumerations, with a per-band colour table and a per-asset `classification:classes` ([13 §3](13-snapshot-schema.md)) | analysis, joining a class id to a name |
 
 The legend is authoritative in the STAC item's `classification` extension; the COG's colour table
@@ -92,6 +92,37 @@ outputs:
 `on_unmapped: fail` is the default deliberately. A class that appears in the data but not the
 colormap is a real error — silently rendering it grey is how a mineral goes missing from a map
 without anyone noticing.
+
+**A render names a delivered band.** The target (`layer`, else the entry's name) must be a band
+the product delivers and a snapshot layer of the matching kind, which is where a categorical band
+gets its class table. The band may come from the built-in reducer or from a `Reducer` plugin that
+delivers it under a layer's name ([04 §5](04-cost-functions.md)). A layer with `aggregate: none`
+and no plugin delivering it is carried, not delivered, and cannot be rendered. Checked at plan time.
+
+### Product-wide colours
+
+```yaml
+outputs:
+  colors: "@ref:colors-usgs-1995.yaml"     # or an inline mapping, class name -> [r, g, b]
+```
+
+`outputs.colors` colours a class the same way in every categorical band of the product: the data
+COG's colour table, every categorical render that names no `colors` of its own, and the default
+legends below. A render's own `colors` still wins for that render. The file is a YAML mapping
+beside the manifest, resolved like a classes `@ref:`. Its content enters the manifest hash, so
+recolouring under the same path is a new run, and `plan.json` carries the colours themselves, so no
+worker reads the file.
+
+The table is shared, so it may name classes a band's class table lacks — another layer's, another
+product's. Those names are dropped for that band rather than refused. A render's own `colors` keeps
+the strict rule: a name not in its table is a plan-time error.
+
+### Default legends
+
+Every categorical delivered band with a class table that no render covers still gets
+`{band}_legend.json`, coloured as its data COG is (`outputs.colors`, else the deterministic
+palette; a class the colours leave out is grey). No image is written for it. Without a legend a
+viewer has no way to know the band holds classes, and draws class ids as a ramp.
 
 ### Continuous
 

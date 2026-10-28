@@ -347,8 +347,14 @@ def validate_static(m: Manifest) -> list[str]:
             "exists, deliver the plugin in the image: a path dependency under `plugins/`, or a "
             "built wheel in `plugins/wheels/`")
 
-    # -- render names layers and their classes (07 section 3, 09 section 5)
+    # -- render names delivered bands and their classes (07 section 3, 09 section 5). The target
+    #    is a band the product DELIVERS - the built-in reducer's or a plugin's - named after a
+    #    snapshot layer, which is what gives it a kind and, if categorical, a class table.
     delivered = _delivered_names(m, problems, reducer)
+    try:
+        m.output_colors()
+    except (OSError, ValueError) as e:
+        problems.append(f"outputs.colors: {e}")
     for band, r in m.outputs.render.items():
         where = f"outputs.render.{band}"
         target = r.layer or band
@@ -359,8 +365,9 @@ def validate_static(m: Manifest) -> list[str]:
             problems.append(f"{where}: categorical mapper over continuous layer {target!r}")
         elif r.mapper == "continuous" and layer.kind != "continuous":
             problems.append(f"{where}: continuous mapper over categorical layer {target!r}")
-        elif layer.aggregate.method == "none":
-            problems.append(f"{where}: layer {target!r} is carried, not delivered (aggregate none)")
+        elif delivered and target not in delivered:
+            problems.append(f"{where}: {target!r} is not a delivered band (a layer with aggregate "
+                            f"none is carried, not delivered); choose from {sorted(delivered)}")
         if r.colors and layer is not None and layer.kind == "categorical":
             enum = m.enumerations().get(target)
             if enum is not None:

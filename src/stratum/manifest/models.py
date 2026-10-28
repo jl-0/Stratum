@@ -26,6 +26,7 @@ from pydantic import (
     PositiveFloat,
     PositiveInt,
     PrivateAttr,
+    field_validator,
     model_validator,
 )
 
@@ -546,12 +547,24 @@ class RenderSpec(Strict):
 
 
 class OutputsSpec(Strict):
-    """`bucket` is a URI or, locally, the storage root (06 section 4)."""
+    """`bucket` is a URI or, locally, the storage root (06 section 4). `colors` is the product's
+    class colours by class name - inline, or `@ref:<file>` naming a YAML mapping beside the
+    manifest - shared by every categorical band and every categorical render that names no
+    `colors` of its own (07 section 2)."""
 
     bucket: str
     formats: list[Literal["cog", "gtiff", "netcdf"]] = Field(default_factory=lambda: ["cog"])
     stac: bool = True
+    colors: dict[str, RGB] | str | None = None
     render: dict[str, RenderSpec] = Field(default_factory=dict)
+
+    @field_validator("colors")
+    @classmethod
+    def _colors_ref(cls, v: dict[str, RGB] | str | None) -> dict[str, RGB] | str | None:
+        if isinstance(v, str) and not v.startswith(REF_PREFIX):
+            raise ValueError(f"colors is a mapping of class name -> [r, g, b] or "
+                             f"'{REF_PREFIX}<file>', got {v!r}")
+        return v
 
 
 class PluginsSpec(Strict):
@@ -604,6 +617,7 @@ class Manifest(Strict):
 
     _base_dir: Path = PrivateAttr(default_factory=Path.cwd)
     _enumerations: dict[str, Enumeration] | None = PrivateAttr(default=None)
+    _output_colors: dict[str, RGB] | None = PrivateAttr(default=None)
 
     @model_validator(mode="after")
     def _top(self) -> Manifest:
@@ -755,6 +769,27 @@ class Manifest(Strict):
                     found[name] = load_enumeration(self.resolve_ref(layer.classes))
             self._enumerations = found
         return self._enumerations
+
+    def output_colors(self) -> dict[str, RGB] | None:
+        """`outputs.colors` as a mapping, loading a `@ref:` file relative to the manifest once.
+        A malformed file fails here, at load, not at publish."""
+        v = self.outputs.colors
+        if not isinstance(v, str):
+            return dict(v) if v is not None else None
+        if self._output_colors is None:
+            path = self.resolve_ref(v)
+            doc = yaml.safe_load(path.read_text())
+            if not isinstance(doc, Mapping):
+                raise ValueError(f"outputs.colors {v!r}: expected a mapping of class name -> "
+                                 f"[r, g, b], got {type(doc).__name__}")
+            out: dict[str, RGB] = {}
+            for name, rgb in doc.items():
+                if not (isinstance(rgb, list | tuple) and len(rgb) == 3
+                        and all(isinstance(c, int) and 0 <= c <= 255 for c in rgb)):
+                    raise ValueError(f"outputs.colors {v!r}: {name!r} is not [r, g, b] in 0..255")
+                out[str(name)] = (int(rgb[0]), int(rgb[1]), int(rgb[2]))
+            self._output_colors = out
+        return dict(self._output_colors)
 
     def snapshot_schema(self) -> SnapshotSchema:
         """The manifest-level schema (13). A categorical layer with `@ref:` classes carries the

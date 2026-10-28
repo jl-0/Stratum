@@ -169,8 +169,11 @@ Established by reading code and data. Do not re-derive; do not assume the opposi
   epoch, with one constituent allowed to reach SEVERAL output classes - which an `Enumeration`
   refuses, since `classes.py:resolve` raises on a raw key claimed twice). A plugin's `outputs` replace the
   schema-derived bands (the schema still governs what a SNAPSHOT holds), `n_epochs` is appended
-  for it, `halo > 0` and aux are refused, and its bands cannot be rendered - `outputs.render`
-  names a schema layer.
+  for it, `halo > 0` and aux are refused, and a render names a DELIVERED band that is also a
+  snapshot layer - so a plugin band renders when delivered under a carried layer's name
+  (`confirmed_mineral_vote` delivers `mineral_1`). Every categorical band gets a legend and a
+  data COG colour table whether rendered or not; `outputs.colors` (inline or `@ref:`) is the
+  product-wide class colour table, inlined into `plan.json` and hashed by content.
 - **Lumping runs at the gather in resolve**, into the snapshot schema's enumeration, so snapshots
   hold product ids and never raw Tetracorder classes. `ignore` names classes; `none` is the reserved
   id 0 — [`13` §3](docs/specs/13-snapshot-schema.md).

@@ -1183,8 +1183,12 @@ def outputs_document(m: Manifest) -> dict[str, Any]:
     actually wrote (`exclude_unset`), so a model default that belongs to another mapper -
     `nodata` and `on_unmapped` are the categorical mapper's - is never handed to the continuous
     one, which refuses unknown keys (07 section 3). Defaults publish and the model share
-    (`formats: [cog]`, `stac: true`, `on_unmapped: fail`) are applied by publish."""
-    return strip_none(m.outputs.model_dump(mode="json", by_alias=True, exclude_unset=True))
+    (`formats: [cog]`, `stac: true`, `on_unmapped: fail`) are applied by publish. A `@ref:`
+    `colors` is replaced by the colours it names, so a worker never needs the file."""
+    doc = strip_none(m.outputs.model_dump(mode="json", by_alias=True, exclude_unset=True))
+    if "colors" in doc:
+        doc["colors"] = {k: list(v) for k, v in (m.output_colors() or {}).items()}
+    return doc
 
 
 def strip_none(doc: Any) -> Any:

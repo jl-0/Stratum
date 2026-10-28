@@ -15,9 +15,10 @@ from typing import Any
 
 import numpy as np
 
-from stratum.publish.cogs import check_formats, raster_format, write_data_cogs
+from stratum.publish.cogs import check_formats, is_categorical, raster_format, write_data_cogs
+from stratum.publish.colors import shared_colors
 from stratum.publish.legend import write_classes, write_legend
-from stratum.publish.mappers import build_mappers, write_images
+from stratum.publish.mappers import build_mappers, categorical_legend, write_images
 from stratum.publish.provenance import iso_utc
 from stratum.publish.stac import stamp, write_stac_item
 from stratum.publish.stitch import stitch
@@ -129,14 +130,38 @@ def write_granules(out_dir: Path, stack: Any, schema: SnapshotSchema,
     return path
 
 
-def render_colors(outputs: Mapping[str, Any], layer: str) -> Mapping[str, Sequence[int]] | None:
-    """The `colors` of the categorical render on `layer`, if any, so the data COG's colour table
-    matches the image (07 section 2)."""
+def render_colors(outputs: Mapping[str, Any], layer: str,
+                  table: ClassTable | None = None) -> Mapping[str, Sequence[int]] | None:
+    """The colours `layer`'s classes are drawn in, so the data COG's colour table, the image and
+    the legend agree (07 section 2): the `colors` of the categorical render on `layer` if it
+    names any, else the product-wide `outputs.colors` restricted to `table`'s classes, else
+    None - the deterministic palette."""
     for name, cfg in (outputs.get("render") or {}).items():
         if isinstance(cfg, Mapping) and cfg.get("mapper") == "categorical" \
                 and cfg.get("layer", name) == layer and cfg.get("colors") is not None:
             return cfg["colors"]
-    return None
+    if table is None:
+        return None
+    return shared_colors(outputs.get("colors"), table)
+
+
+def default_legends(out_dir: Path, specs: Sequence[Any], tables: Mapping[str, ClassTable],
+                    outputs: Mapping[str, Any], rendered: Sequence[str]) -> dict[str, Path]:
+    """`{band}_legend.json` for every categorical delivered band with a class table that no
+    render covers (07 section 2). A legend is what tells a viewer a band holds classes and what
+    colour each is, so a band without one is drawn as a number - a ramp over class ids. Writing
+    one costs a small JSON file and no image; the colours are the data COG's. A class the
+    colours leave out is grey."""
+    out: dict[str, Path] = {}
+    for spec in specs:
+        table = tables.get(spec.name)
+        if spec.name in rendered or table is None or not is_categorical(spec):
+            continue
+        colors = render_colors(outputs, spec.name, table)
+        legend = categorical_legend(table, colors,
+                                    on_unmapped="grey" if colors is not None else "fail")
+        out[spec.name] = write_legend(out_dir, spec.name, legend)
+    return out
 
 
 def publish_period(out_dir: Path, product_dirs: Sequence[tuple[BlockRef, Path]], tile: TileRef,
@@ -168,15 +193,15 @@ def publish_period(out_dir: Path, product_dirs: Sequence[tuple[BlockRef, Path]],
     per_band = band_class_tables(schema) if class_table is None else {}
     colors_by_band: dict[str, Any] = {}
     if class_table is None:
-        for layer in by_layer:
-            cols = render_colors(outputs, layer)
+        for layer, table in by_layer.items():
+            cols = render_colors(outputs, layer, table)
             if cols is not None:
                 colors_by_band[layer] = cols
                 colors_by_band[f"{layer}_runner_up"] = cols
         colors = None
     else:
         cat_layers = list(by_layer)
-        colors = render_colors(outputs, cat_layers[0]) if cat_layers else None
+        colors = render_colors(outputs, cat_layers[0], class_table) if cat_layers else None
 
     all_tags = {"run_id": run_id, "manifest_hash": manifest_hash, "schema": schema.name,
                 "period_start": period.start.isoformat(), "period_end": period.end.isoformat(),
@@ -190,6 +215,10 @@ def publish_period(out_dir: Path, product_dirs: Sequence[tuple[BlockRef, Path]],
     images = write_images(out_dir, {n: m.render(stack) for n, m in mappers.items()}, tile,
                           tags=all_tags, fmt=fmt)
     legends = {n: write_legend(out_dir, n, m.legend()) for n, m in mappers.items()}
+    band_tables = per_band or {s.name: class_table for s in stack.specs
+                               if class_table is not None}
+    legends.update(default_legends(out_dir, stack.specs, band_tables, outputs,
+                                   [m.layer for m in mappers.values()] + list(mappers)))
     classes = write_classes(out_dir, class_table) if class_table is not None else None
     class_files = ({} if class_table is not None
                    else {n: write_classes(out_dir, tb, layer=n) for n, tb in by_layer.items()})

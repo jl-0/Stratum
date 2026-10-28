@@ -594,7 +594,7 @@ delivers, and those are different questions.
 | `n_observed` | Always appended and computed by the framework from `snaps.observed`; a plugin that declares it is refused ([13 §4](13-snapshot-schema.md)) |
 | `halo` | **Refused unless 0.** Snapshots are written at their block's *core* extent and their key excludes the halo ([06 §2](06-caching.md)), so a reducer needing neighbouring cells would have to read and stitch the surrounding blocks. Not built |
 | `aux` | **Not built.** `reduce()` receives `NullAux`. Note the protocol declares no `required_aux`, so unlike a `Scorer` there is no channel to declare one, and `PlanContext.aux_to_read()` could not learn about it |
-| Rendering | A plugin's bands **cannot** be rendered: `outputs.render` names a *schema layer* and a plugin output is not one. The data COG and the STAC asset are written, so the band is viewable, but there is no RGBA image for it ([07 §3](07-output-mapping.md)) |
+| Rendering | A render names a *delivered band* named after a snapshot layer, so a plugin band delivered under a layer's name renders like any other: `confirmed_mineral_vote` delivers `mineral_1` over the carried layer `mineral_1`. Every categorical band, rendered or not, gets a legend and a data COG colour table ([07 §3](07-output-mapping.md)). A plugin band with a name no layer has (`mineral_1_support`) is written as data only |
 | Class tables | A categorical output rides on the product's existing class table. A plugin cannot introduce an enumeration, which is the pre-existing "one product, one table" limit ([13 §3](13-snapshot-schema.md)) rather than a new one |
 
 `stratum.reduce` exports `vote` and `VoteParams` so a plugin can reuse the built-in kernel rather

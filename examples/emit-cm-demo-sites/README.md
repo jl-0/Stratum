@@ -66,6 +66,15 @@ the scorer's own diagnostics (`mode_count`, `n_valid`, `agreement`, `selection_p
   B and C report the selected look's values. A reports the median over the weeks that elected
   group 1's answer.
 
+## Colours
+
+All five share `outputs.colors: "@ref:colors-usgs-1995.yaml"`, so a class is the same colour in
+every contender's maps, legends and data COG colour tables. The table is the 1995 USGS AVIRIS
+Tetracorder colour groups for Cuprite (`spectroscopy-tetracorder` `cuprite95`, the 1-µm and 2-µm
+colour scripts), keyed by EMITL2BMIN.001 class name, with carbonates added in brown. It names 143
+of the 294 classes; the rest render grey (`on_unmapped: grey`). It is generated, not hand-edited:
+regenerate it rather than editing a colour in place.
+
 ## Still to define
 
 None of these is built, and none was invented to fill the gap.

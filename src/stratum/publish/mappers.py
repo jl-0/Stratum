@@ -30,6 +30,7 @@ from stratum.publish.colors import (
     ramp_stops,
     ramp_table,
     resolve_class_colors,
+    shared_colors,
     table_ids_names,
 )
 from stratum.reduce import CATEGORICAL_NODATA
@@ -226,8 +227,11 @@ class ContinuousMapper:
 ConfigMapper = CategoricalMapper | ContinuousMapper
 
 
-def build_mapper(name: str, cfg: Mapping[str, Any], schema: SnapshotSchema) -> ConfigMapper:
-    """One render entry -> a mapper, validated against the schema (plan time, 07 section 3)."""
+def build_mapper(name: str, cfg: Mapping[str, Any], schema: SnapshotSchema,
+                 shared: Mapping[str, Sequence[int]] | None = None) -> ConfigMapper:
+    """One render entry -> a mapper, validated against the schema (plan time, 07 section 3).
+    `shared` is the product-wide `outputs.colors`: a categorical entry naming no `colors` of its
+    own takes those of its classes (`shared_colors`)."""
     where = f"outputs.render.{name}"
     if not isinstance(cfg, Mapping):
         raise TypeError(f"{where}: expected a mapping")
@@ -250,6 +254,8 @@ def build_mapper(name: str, cfg: Mapping[str, Any], schema: SnapshotSchema) -> C
             raise ValueError(f"{where}: categorical mapper on {spec.kind} layer {layer!r}")
         if spec.classes is None:
             raise ValueError(f"{where}: layer {layer!r} has no class table to colour by")
+        if cfg.get("colors") is None and shared is not None:
+            cfg = {**cfg, "colors": shared_colors(shared, spec.classes)}
         return CategoricalMapper.from_config(name, cfg, spec.classes, layer)
     if spec.kind != "continuous":
         raise ValueError(f"{where}: continuous mapper on {spec.kind} layer {layer!r}")
@@ -262,7 +268,8 @@ def build_mappers(manifest_outputs: Mapping[str, Any],
     render_cfg = manifest_outputs.get("render") or {}
     if not isinstance(render_cfg, Mapping):
         raise TypeError("outputs.render must be a mapping of output name -> render config")
-    return {name: build_mapper(name, cfg, schema) for name, cfg in render_cfg.items()}
+    shared = manifest_outputs.get("colors")
+    return {name: build_mapper(name, cfg, schema, shared) for name, cfg in render_cfg.items()}
 
 
 def render(manifest_outputs: Mapping[str, Any], stack: BandStack,

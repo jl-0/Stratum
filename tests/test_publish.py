@@ -458,8 +458,38 @@ def test_publish_period_refuses_netcdf_and_unmapped_classes(tmp_path, product_di
 def test_publish_period_without_render_or_stac(tmp_path, product_dirs):
     pub = publish_period(tmp_path / "c", product_dirs, TILE, PERIOD, schema(), {"stac": False},
                          run_id=RUN_ID, manifest_hash="sha256:x")
-    assert pub.item is None and pub.images == {} and pub.legends == {}
+    assert pub.item is None and pub.images == {}
+    # no render, yet every categorical band still gets a legend, so a viewer draws its classes
+    # rather than a ramp over class ids (07 section 2); the colours are the data COG's palette
+    assert set(pub.legends) == {"m", "m_runner_up"}
     assert pub.classes is not None and len(pub.data) == 7          # six + n_observed
+
+
+
+def test_shared_colors_reach_the_data_cog_the_render_and_the_default_legends(tmp_path, product_dirs):
+    """07 section 2: `outputs.colors` colours every categorical band - the data COG's table, a
+    render that names no colours of its own, and the legend of a band no render covers - by class
+    name. A name the band's table lacks is another table's class and is dropped, not refused."""
+    shared = {"goethite": [10, 20, 30], "pyrite": [40, 50, 60], "not-in-this-table": [1, 1, 1]}
+    outputs = {"stac": False, "colors": shared,
+               "render": {"m": {"mapper": "categorical", "on_unmapped": "grey"}}}
+    pub = publish_period(tmp_path / "s", product_dirs, TILE, PERIOD, schema(), outputs,
+                         run_id=RUN_ID, manifest_hash="sha256:x")
+    with rasterio.open(pub.data["m"]) as src:
+        cmap = src.colormap(1)
+    assert cmap[1][:3] == (10, 20, 30) and cmap[3][:3] == (40, 50, 60)
+    for band in ("m", "m_runner_up"):                   # rendered, and legend-only
+        entries = {e["name"]: e["color"] for e in json.loads(pub.legends[band].read_text())["entries"]}
+        assert entries["goethite"] == [10, 20, 30] and entries["pyrite"] == [40, 50, 60]
+        assert entries["hematite"] == [128, 128, 128]   # unnamed -> grey, never fail
+    assert set(pub.images) == {"m"}                     # a default legend writes no image
+    # a render's own colors still win over the shared table
+    own = {**outputs, "render": {"m": {"mapper": "categorical", "on_unmapped": "grey",
+                                       "colors": {"goethite": [7, 7, 7]}}}}
+    pub = publish_period(tmp_path / "o", product_dirs, TILE, PERIOD, schema(), own,
+                         run_id=RUN_ID, manifest_hash="sha256:x")
+    entries = {e["name"]: e["color"] for e in json.loads(pub.legends["m"].read_text())["entries"]}
+    assert entries["goethite"] == [7, 7, 7] and entries["pyrite"] == [128, 128, 128]
 
 
 # ---------------------------------------------------------------------------------- provenance

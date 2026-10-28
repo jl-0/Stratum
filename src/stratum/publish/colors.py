@@ -65,6 +65,21 @@ def table_ids_names(table: ClassTable) -> tuple[list[int], list[str]]:
     return ids, names
 
 
+def shared_colors(colors: Mapping[str, Sequence[int]] | None,
+                  table: ClassTable) -> dict[str, Sequence[int]] | None:
+    """The product-wide `outputs.colors` restricted to the classes `table` names.
+
+    A render's own `colors` must name only classes in its table - naming another is a mistake
+    caught at plan time. The product-wide table is shared across bands and runs whose class tables
+    need not match, so a name a band's table lacks is simply not this band's; it is dropped, not
+    refused. None stays None: no shared colours means the deterministic palette."""
+    if colors is None:
+        return None
+    _, names = table_ids_names(table)
+    keep = set(names)
+    return {n: c for n, c in colors.items() if n in keep}
+
+
 def resolve_class_colors(table: ClassTable, colors: Mapping[str, Sequence[int]] | None = None, *,
                          on_unmapped: str = "fail",
                          present: Iterable[int] | None = None) -> dict[int, RGBA | None]:
