@@ -123,13 +123,18 @@ def _column(var: nc.Variable) -> pa.Array:
 
 
 class EmitNetCDFReader:
-    """Base for the sensor-space EMIT readers. Subclasses set `collections`, `space`, and
+    """Base for the sensor-space EMIT readers. Subclasses set `collections`, `space`,
     `band_names_var` (the vlen-string variable under `sensor_band_parameters` naming the
-    bands of a 3-D root variable; None when the product has none)."""
+    bands of a 3-D root variable; None when the product has none) and, where the product has
+    them, `band_attr_vars`."""
 
     collections: tuple[str, ...] = ()
     space: Literal["sensor", "ortho"] = "sensor"
     band_names_var: str | None = None
+    #: Further per-band attributes, {band_attrs key: variable under `sensor_band_parameters`},
+    #: reported for a 3-D variable whose band axis they match (e.g. `wavelength` for a
+    #: `match: {wavelength: ...}` alias, 11 section 5).
+    band_attr_vars: Mapping[str, str] = {}
     #: Declares that `open` accepts a ranged handle (12 section 4), and what to fetch first.
     range_prefetch: tuple[tuple[int, int], ...] = RANGED_PREFETCH
 
@@ -150,17 +155,28 @@ class EmitNetCDFReader:
 
     # ---- variables ------------------------------------------------------------------------
     def _band_attrs(self, ds: nc.Dataset, var: nc.Variable) -> Mapping[str, Sequence[Any]]:
-        if self.band_names_var is None or var.ndim < 3:
+        if var.ndim < 3:
             return {}
         params = ds.groups.get(BAND_PARAMS_GROUP)
-        if params is None or self.band_names_var not in params.variables:
+        if params is None:
             return {}
-        names = np.asarray(params.variables[self.band_names_var][:]).tolist()
-        return {"name": [str(n) for n in names]}
+        out: dict[str, Sequence[Any]] = {}
+        if self.band_names_var is not None and self.band_names_var in params.variables:
+            names = np.asarray(params.variables[self.band_names_var][:]).tolist()
+            out["name"] = [str(n) for n in names]
+        nbands = int(var.shape[-1])
+        for attr, name in self.band_attr_vars.items():
+            if name not in params.variables:
+                continue
+            values = np.ma.getdata(params.variables[name][:]).ravel()
+            if values.size == nbands:          # a band table for THIS variable's band axis
+                out[attr] = [v.item() for v in values]
+        return out
 
     def variables(self, ctx: NetCDFContext) -> dict[str, VarSpec]:
         """Every ROOT variable: dtype, shape, fill, units, and band names where the product
-        carries them (`band_attrs["name"]`). Groups are not variables a role can name."""
+        carries them (`band_attrs["name"]`, plus any `band_attr_vars`). Groups are not
+        variables a role can name."""
         ds = ctx.dataset
         out: dict[str, VarSpec] = {}
         for name, var in ds.variables.items():

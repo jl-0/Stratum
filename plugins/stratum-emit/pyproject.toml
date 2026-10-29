@@ -12,7 +12,7 @@ build-backend = "hatchling.build"
 [project]
 name = "stratum-emit"
 version = "0.0.1"
-description = "EMIT readers, instrument masks and mineral scorers for Stratum"
+description = "EMIT readers, instrument masks, mineral scorers and a matched filter for Stratum"
 readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "Apache-2.0" }
@@ -40,6 +40,7 @@ bare_earth_nadir  = "stratum_emit.scorers:BareEarthNadir"
 low_vegetation_nadir = "stratum_emit.scorers:LowVegetationNadir"
 max_band_depth    = "stratum_emit.scorers:MaxBandDepth"
 mode_gated_select = "stratum_emit.scorers:ModeGatedSelect"
+matched_filter    = "stratum_emit.scorers:MatchedFilter"
 
 [project.entry-points."stratum.reducers"]
 # The ONLY reducer, and it earns its place: combining two categorical layers is the one thing
@@ -60,6 +61,7 @@ cos_i         = "stratum_emit.masks:CosineI"
 EMITL2BMIN   = "stratum_emit.readers:L2BMin"
 EMITL1BRAD   = "stratum_emit.readers:L1BRad"
 EMITL2AMASK  = "stratum_emit.readers:L2AMask"
+EMITL2ARFL   = "stratum_emit.readers:L2ARfl"
 EMITL2BFRCOV = "stratum_emit.readers:L2BFrcovTiff"
 
 [tool.hatch.build.targets.wheel]

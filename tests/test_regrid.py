@@ -28,7 +28,7 @@ from stratum.regrid import (
     write_glt,
 )
 from stratum.regrid.__main__ import main as regrid_main
-from stratum.types import EmbeddedGLT, GridDef, LocArray, TileRef, Window
+from stratum.types import EmbeddedGLT, GridDef, LocArray, TileExtent, TileRef, Window
 
 # tile_size 0.01 at 0.001 -> a 10 x 10 tile; cell diagonal 0.001414, default max_distance 0.00212
 GRID = GridDef("EPSG:4326", (0.001, -0.001), (0.0, 0.0), 0.01, block_size=512)
@@ -230,6 +230,51 @@ def test_non_intersecting_granule_writes_a_zero_glt(tmp_path: Path) -> None:
     key = regrid_granule_tile(cache, TILE, "far", lambda: far, max_distance=None)
     assert cache.hit(key)
     assert not read_glt(key.path).any()
+
+
+# --------------------------------------------------------------- the padded tile (01 section 4)
+def lattice_loc(c0: int, r0: int, cols: int, rows: int) -> LocArray:
+    """A sensor array with one pixel at the centre of each of `rows x cols` grid cells, from
+    lattice column `c0` east and row `r0` north of the grid origin (rows count northward)."""
+    rx, ry = GRID.resolution
+    lon = GRID.origin[0] + (c0 + np.arange(cols) + 0.5) * rx
+    lat = GRID.origin[1] + (r0 + np.arange(rows) + 0.5) * abs(ry)
+    la, lo = np.meshgrid(lat, lon, indexing="ij")
+    return LocArray(lat=la, lon=lo, elev=np.zeros_like(la))
+
+
+def test_tile_extent_grows_the_tile_by_its_pad() -> None:
+    ext = TileExtent(TILE, 3)
+    assert ext.shape == (TILE.shape[0] + 6, TILE.shape[1] + 6)
+    assert ext.transform.c == pytest.approx(TILE.transform.c - 3 * 0.001)
+    assert ext.transform.f == pytest.approx(TILE.transform.f + 3 * 0.001)
+    w, s, e, n = TILE.bounds
+    assert ext.bounds == pytest.approx((w - 0.003, s - 0.003, e + 0.003, n + 0.003))
+    assert TileExtent(TILE, 0).shape == TILE.shape
+    with pytest.raises(ValueError, match="non-negative"):
+        TileExtent(TILE, -1)
+
+
+def test_a_padded_glt_reaches_the_ground_past_the_tile(tmp_path: Path) -> None:
+    """A granule running past the tile's east edge: with pad 0 a halo window there reads an
+    empty border, with pad 2 it reads the granule's own pixels beyond the edge - and the tile's
+    own cells are identical either way."""
+    cache = CacheRoot(tmp_path)
+    rows, cols = TILE.shape
+    loc = lattice_loc(-4, -4, cols + 8, rows + 8)       # 4 cells past every tile edge
+    plain = regrid_granule_tile(cache, TILE, "g", lambda: loc, max_distance=None)
+    padded = regrid_granule_tile(cache, TILE, "g", lambda: loc, max_distance=None, pad=2)
+    assert plain.path != padded.path
+    assert "pad" not in plain.inputs and padded.inputs["pad"] == 2
+    halo = Window(-2, -2, rows + 4, cols + 4)
+    a, b = read_glt(plain.path, halo), read_glt(padded.path, halo)
+    assert not a[:2].any() and not a[:, -2:].any()           # pad 0: the border is empty
+    assert b[..., 2].all()                                   # pad 2: every cell has a pixel
+    assert np.array_equal(a[2:-2, 2:-2], b[2:-2, 2:-2])      # inside the tile, nothing moved
+    with rasterio.open(padded.path) as src:
+        assert (src.height, src.width) == (rows + 4, cols + 4) and src.tags()["pad"] == "2"
+    # past the pad is still a boundless read of nothing
+    assert not read_glt(padded.path, Window(-5, 0, 2, 2)).any()
 
 
 # ------------------------------------------------------------------------- the recorded hash

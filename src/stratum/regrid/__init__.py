@@ -34,7 +34,10 @@ from rasterio.windows import Window as RioWindow
 from spectral_util.mosaic.mosaic import find_subgrid_locations, remove_negatives
 
 from stratum.cache import CacheKey, CacheRoot, glt_inputs
-from stratum.types import EmbeddedGLT, GridDef, LocArray, TileRef, Window
+from stratum.types import EmbeddedGLT, GridDef, LocArray, TileExtent, TileRef, Window
+
+#: What a GLT is built over: a tile, or a tile grown by the run's pad (`TileExtent`).
+Area = TileRef | TileExtent
 
 REGRID_ALGO_VERSION = 1
 """Bump when GLT output changes; see the module docstring and 06 section 3."""
@@ -64,7 +67,7 @@ def resolve_max_distance(grid: GridDef, max_distance: float | None) -> float:
     return float(max_distance)
 
 
-def cell_centres(tile: TileRef) -> tuple[np.ndarray, np.ndarray]:
+def cell_centres(tile: Area) -> tuple[np.ndarray, np.ndarray]:
     """(y, x) cell-centre meshes for the full tile, from `TileRef.transform` (north-up, row 0 is
     the northern edge): x = x0 + (c + 0.5) * rx, y = y1 + (r + 0.5) * ry."""
     rows, cols = tile.shape
@@ -87,7 +90,7 @@ def _valid_points(loc: LocArray) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     return np.stack([rows, cols], axis=1), lat_v, lon_v
 
 
-def build_glt_raw(loc: LocArray, tile: TileRef, *, max_distance: float | None,
+def build_glt_raw(loc: LocArray, tile: Area, *, max_distance: float | None,
                   n_workers: int = 1) -> np.ndarray:
     """`build_glt` before the contiguous-interpolation clean: steps 1-5 of 03 section 3.
 
@@ -161,12 +164,13 @@ def lattice_offset(grid: GridDef, transform: Affine, crs: str) -> tuple[int, int
     return round(kx), round(ky)
 
 
-def adopt_glt(embedded: EmbeddedGLT, tile: TileRef) -> np.ndarray:
+def adopt_glt(embedded: EmbeddedGLT, tile: Area) -> np.ndarray:
     """The product's own lookup table, moved onto `tile` (03 section 3, `adopt`).
 
     Valid only when the product was gridded on the run's lattice (`lattice_offset`, which this
     calls and which refuses otherwise). Then no value is resampled and no index is recomputed:
-    the cells are already right, they only move to their place in the tile, and cells the
+    the cells are already right, they only move to their place in the tile (or the padded
+    area, `TileExtent`), and cells the
     product's raster does not cover are 0. A cell either product band leaves at 0 is 0 in all
     three bands, so bands 1-2 and the hit band cannot disagree.
 
@@ -201,11 +205,11 @@ def clean_contiguous(glt: np.ndarray) -> np.ndarray:
     """Step 6 of 03 section 3, in place: `remove_negatives(clean_contiguous=True)`. A 3x3
     `convolve2d` over the interpolated mask zeroes every cell (all three bands) with >= 3 flagged
     cells in its 3x3 neighbourhood, itself included. **This is a stencil** (01 section 4); it is
-    only seam-free because GLTs are built per whole tile, never per block."""
+    only seam-free because GLTs are built per whole tile (or padded tile), never per block."""
     return remove_negatives(glt, clean_contiguous=True, clean_interpolated=False)
 
 
-def build_glt(loc: LocArray, tile: TileRef, *, max_distance: float | None,
+def build_glt(loc: LocArray, tile: Area, *, max_distance: float | None,
               n_workers: int = 1) -> np.ndarray:
     """(H, W, 3) int32 for the full tile (03 section 2): GLT X, GLT Y 1-based, 0 = no hit,
     negative = interpolated; band 3 is 1 wherever bands 1-2 are non-zero. See `build_glt_raw`
@@ -226,12 +230,13 @@ def internal_tile_size(block: int) -> int:
     return best or 256
 
 
-def write_glt(path: Path, glt: np.ndarray, tile: TileRef, *, granule_id: str,
+def write_glt(path: Path, glt: np.ndarray, tile: Area, *, granule_id: str,
               tags: Mapping[str, Any]) -> Path:
     """Write a GLT as a tiled, deflate-compressed 3-band int32 GeoTIFF, nodata 0, no overviews
     (07 section 7, resolution 3). Tags carry `granule_id` and `grid_id` so the file is meaningful
     without any file list (03 section 2), plus whatever the caller passes (algorithm version,
-    max_distance, method). Written with the GTiff driver rather than GDAL's COG driver, which
+    max_distance, method), and `pad` when the GLT covers a `TileExtent` - which is what
+    `read_glt` reads to place a tile-space window in the file. Written with the GTiff driver rather than GDAL's COG driver, which
     would build the whole file in memory to reorder it; tiling is what makes the window read a
     range request."""
     glt = np.asarray(glt, dtype=np.int32)
@@ -244,7 +249,9 @@ def write_glt(path: Path, glt: np.ndarray, tile: TileRef, *, granule_id: str,
                "blockxsize": bs, "blockysize": bs, "compress": "deflate"}
     with rasterio.open(path, "w", **profile) as dst:
         dst.write(np.moveaxis(glt, -1, 0))
+        pad = getattr(tile, "pad", 0)
         dst.update_tags(granule_id=granule_id, grid_id=tile.grid.id,
+                        **({"pad": str(pad)} if pad else {}),
                         **{k: str(v) for k, v in tags.items()})
         for i, name in enumerate(GLT_BAND_NAMES, start=1):
             dst.set_band_description(i, name)
@@ -253,13 +260,18 @@ def write_glt(path: Path, glt: np.ndarray, tile: TileRef, *, granule_id: str,
 
 def read_glt(path: Path, window: Window | None = None) -> np.ndarray:
     """(H, W, 3) int32 for `window` (a tile-space `Window`, row/col offsets) or the whole file.
-    A rasterio window read: only the internal tiles covering the window are fetched. A window
-    that reaches past the tile - a halo at a tile edge (01 section 4) - is padded with 0, no hit,
-    through a boundless read; in-bounds windows take the plain path."""
+    A rasterio window read: only the internal tiles covering the window are fetched. A padded GLT
+    (its `pad` tag, `write_glt`) holds the cells around the tile too, so the window is shifted by
+    the pad and a halo at a tile edge reads the neighbouring ground (01 section 4). Whatever still
+    reaches past the file is 0, no hit, through a boundless read; in-bounds windows take the plain
+    path. `window=None` is the whole file, padding included."""
     with rasterio.open(path) as src:
         if window is None:
             data = src.read()
         else:
+            pad = int(src.tags().get("pad", 0))
+            window = Window(window.row_off + pad, window.col_off + pad, window.height,
+                            window.width)
             rio = RioWindow(window.col_off, window.row_off, window.width, window.height)
             inside = (window.row_off >= 0 and window.col_off >= 0
                       and window.row_off + window.height <= src.height
@@ -276,7 +288,7 @@ def regrid_granule_tile(cache: CacheRoot, tile: TileRef, granule_id: str,
                         loc: Callable[[], LocArray], *, max_distance: float | None,
                         regrid_method: str = "kdtree", n_workers: int = 1,
                         embedded: Callable[[], EmbeddedGLT] | None = None,
-                        source_id: str | None = None) -> CacheKey:
+                        source_id: str | None = None, pad: int = 0) -> CacheKey:
     """One work item of the regrid stage: the GLT for `granule_id` over `tile`.
 
     Computes the key (06 section 2) and returns at once on a hit, so a hit never reads the
@@ -290,6 +302,10 @@ def regrid_granule_tile(cache: CacheRoot, tile: TileRef, granule_id: str,
     run's lattice; `source_id` identifies the bytes it came from (the asset's catalogue
     checksum) and enters the key, because under `adopt` the producer's pipeline, not this one,
     determines the output.
+
+    `pad` > 0 builds the GLT over `TileExtent(tile, pad)` - the tile plus `pad` cells all round,
+    the run's scorer halo - so a block at the tile edge sees the ground beyond it (01 section 4).
+    It is a key term, and the cache path stays the tile's.
     """
     if regrid_method not in REGRID_METHODS:
         raise NotImplementedError(
@@ -298,22 +314,23 @@ def regrid_granule_tile(cache: CacheRoot, tile: TileRef, granule_id: str,
     adopting = regrid_method == "adopt"
     md = None if adopting else resolve_max_distance(tile.grid, max_distance)
     inputs = glt_inputs(granule_id, tile.grid, md, regrid_method, REGRID_ALGO_VERSION,
-                        source=source_id)
+                        source=source_id, pad=pad)
     key = cache.key("glt", tile.grid.id, tile, inputs)
     if cache.hit(key):
         return key
+    area: Area = TileExtent(tile, pad) if pad else tile
     tags: dict[str, Any] = {"regrid_algo_version": REGRID_ALGO_VERSION,
                             "regrid_method": regrid_method}
     if adopting:
         if embedded is None:
             raise ValueError("regrid_method 'adopt' needs the product's own GLT; no `embedded` "
                              "callable was given (03 section 3)")
-        glt = adopt_glt(embedded(), tile)
+        glt = adopt_glt(embedded(), area)
         tags["glt_source"] = source_id or "unknown"
     else:
-        glt = build_glt(loc(), tile, max_distance=md, n_workers=n_workers)
+        glt = build_glt(loc(), area, max_distance=md, n_workers=n_workers)
         tags["max_distance"] = md
-    cache.write_file(key, lambda p: write_glt(p, glt, tile, granule_id=granule_id, tags=tags))
+    cache.write_file(key, lambda p: write_glt(p, glt, area, granule_id=granule_id, tags=tags))
     return key
 
 

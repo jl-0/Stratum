@@ -209,6 +209,23 @@ def test_a_halo_reaching_past_the_tile_is_filled_not_refused(tmp_path):
     assert (out[2:, 2:] == 6).all()
 
 
+def test_a_padded_warp_gives_the_halo_the_ground_past_the_tile(tmp_path):
+    """With the run's tile pad (TileExtent, 01 section 4) the warp covers the border too, so the
+    same edge block reads the source there instead of nodata; the key carries the pad."""
+    cache = CacheRoot(tmp_path / "root")
+    # a source 4 cells bigger than the tile on every side
+    big = write_source(tmp_path / "big.tif", np.full((28, 28), 6, "uint8"),
+                       transform=Affine(0.001, 0, -0.004, 0, -0.001, 0.024))
+    source = source_for(big)
+    plain, padded = warp_aux_tile(cache, TILE, source), warp_aux_tile(cache, TILE, source, 2)
+    assert plain.path != padded.path and padded.inputs["pad"] == 2 and "pad" not in plain.inputs
+    block = BlockRef(TILE, 0, 0, halo=2)
+    a = BlockAux({source.alias: plain}, {source.alias: source}, block).raster("landcover")
+    b = BlockAux({source.alias: padded}, {source.alias: source}, block).raster("landcover")
+    assert (a[:2] == 0).all() and (b == 6).all()
+    assert np.array_equal(a[2:, 2:], b[2:, 2:])
+
+
 def test_an_undeclared_alias_raises_and_never_falls_back(tmp_path):
     """05 section 5, the load-bearing rule: a plugin that opens an undeclared source produces a
     cache key that lies. The accessor holds only what the key was built from, so there is nothing

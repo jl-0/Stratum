@@ -191,7 +191,7 @@ def read_ortho_roles(ctx: ObsContext, roles: Sequence[str]) -> dict[str, np.ndar
         checksum = granule.checksums.get(asset) if asset else None
         resampling = plan.role_resampling(role)
         key = ortho_key_for(plan.cache, block.tile, granule.granule_id, role, binding.var,
-                            checksum, resampling)
+                            checksum, resampling, plan.tile_pad)
         if not plan.cache.hit(key):
             reader = plan.reader(binding.collection)
             rctx = reader.open(plan.store.open(uri, checksum=checksum))
@@ -199,7 +199,7 @@ def read_ortho_roles(ctx: ObsContext, roles: Sequence[str]) -> dict[str, np.ndar
                 source = reader.ortho_source(rctx, binding.var)
                 warp_ortho_tile(plan.cache, block.tile, source, granule_id=granule.granule_id,
                                 role=role, var=binding.var, checksum=checksum,
-                                resampling=resampling)
+                                resampling=resampling, pad=plan.tile_pad)
             finally:
                 close = getattr(rctx, "close", None)
                 if close is not None:

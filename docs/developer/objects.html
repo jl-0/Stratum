@@ -155,8 +155,8 @@ flowchart TB
 <table>
 <thead><tr><th>Object</th><th>Space</th><th>Note</th></tr></thead>
 <tbody>
-<tr><td><a class="src" data-sym="class SensorWindow" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/types.py#L642">SensorWindow</a></td><td>sensor</td><td>Carries its <strong>origin</strong>, not just a shape. A sensor-space mask that needs the absolute cross-track column — <code>EdgeTrim</code> — is wrong without it</td></tr>
-<tr><td><a class="src" data-sym="class ObsWindow" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/types.py#L246">ObsWindow</a></td><td>both</td><td>One class, two forms; the difference is one axis. <code>space</code> is explicit and checked, never inferred from shape</td></tr>
+<tr><td><a class="src" data-sym="class SensorWindow" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/types.py#L679">SensorWindow</a></td><td>sensor</td><td>Carries its <strong>origin</strong>, not just a shape. A sensor-space mask that needs the absolute cross-track column — <code>EdgeTrim</code> — is wrong without it</td></tr>
+<tr><td><a class="src" data-sym="class ObsWindow" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/types.py#L283">ObsWindow</a></td><td>both</td><td>One class, two forms; the difference is one axis. <code>space</code> is explicit and checked, never inferred from shape</td></tr>
 <tr><td><a class="src" data-sym="class Gathered" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/resolve/gather.py#L17">Gathered</a></td><td>block</td><td>The output of the only function that touches both spaces</td></tr>
 <tr><td><a class="src" data-sym="class Observation" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/resolve/observation.py#L111">Observation</a></td><td>block</td><td>The block <code>ObsWindow</code> plus each schema layer's values, with categorical remapping already applied</td></tr>
 <tr><td><a class="src" data-sym="class Resolved" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/resolve/block.py#L199">Resolved</a></td><td>block, core</td><td>The streaming argmax over every observation, trimmed from the haloed window to the core</td></tr>
@@ -185,10 +185,10 @@ flowchart TB
 <table>
 <thead><tr><th>Object</th><th>Is</th><th>Handed to</th></tr></thead>
 <tbody>
-<tr><td><a class="src" data-sym="class SnapshotSchema" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/types.py#L551">SnapshotSchema</a></td><td>One declaration per run of what a snapshot holds; carries <code>layers_hash</code> and <code>aggregate_hash</code> separately</td><td>Everything downstream of resolve</td></tr>
-<tr><td><a class="src" data-sym="class SnapshotStack" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/types.py#L581">SnapshotStack</a></td><td>Epoch-major: every epoch's snapshot over one window, all written under the same schema</td><td>A <code>Reducer</code></td></tr>
-<tr><td><a class="src" data-sym="class BandStack" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/types.py#L612">BandStack</a></td><td>Finished bands for one tile</td><td>An <code>OutputMapper</code></td></tr>
-<tr><td><a class="src" data-sym="class BandSpec" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/types.py#L476">BandSpec</a></td><td>One delivered band: name, dtype, nodata, units, description</td><td>The COG writer and the STAC item</td></tr>
+<tr><td><a class="src" data-sym="class SnapshotSchema" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/types.py#L588">SnapshotSchema</a></td><td>One declaration per run of what a snapshot holds; carries <code>layers_hash</code> and <code>aggregate_hash</code> separately</td><td>Everything downstream of resolve</td></tr>
+<tr><td><a class="src" data-sym="class SnapshotStack" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/types.py#L618">SnapshotStack</a></td><td>Epoch-major: every epoch's snapshot over one window, all written under the same schema</td><td>A <code>Reducer</code></td></tr>
+<tr><td><a class="src" data-sym="class BandStack" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/types.py#L649">BandStack</a></td><td>Finished bands for one tile</td><td>An <code>OutputMapper</code></td></tr>
+<tr><td><a class="src" data-sym="class BandSpec" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/types.py#L513">BandSpec</a></td><td>One delivered band: name, dtype, nodata, units, description</td><td>The COG writer and the STAC item</td></tr>
 </tbody>
 </table>
 </div>
@@ -211,7 +211,7 @@ mutable for a reason:</p>
 <tbody>
 <tr><td><a class="src" data-sym="class PlanContext" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/resolve/context.py#L205">PlanContext</a>, <a class="src" data-sym="class RunPlan" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/plan/document.py#L291">RunPlan</a></td><td>Assembled field by field and held live handles (a <code>CacheRoot</code>, an <code>AssetStore</code>); freezing would buy nothing since they are never shared across threads</td></tr>
 <tr><td><code>Resolved</code>, <code>Observation</code>, <code>ObsContext</code></td><td>Short-lived carriers of NumPy arrays. Freezing a dataclass does not freeze the arrays inside it, so it would be a promise the type cannot keep</td></tr>
-<tr><td><a class="src" data-sym="class GLT" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/types.py#L433">GLT</a>, <code>EmbeddedGLT</code></td><td>Same reason — array wrappers</td></tr>
+<tr><td><a class="src" data-sym="class GLT" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/types.py#L470">GLT</a>, <code>EmbeddedGLT</code></td><td>Same reason — array wrappers</td></tr>
 <tr><td><a class="src" data-sym="class Remap" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/classes.py#L60">Remap</a></td><td>Holds a NumPy lookup array indexed by raw key</td></tr>
 </tbody>
 </table>

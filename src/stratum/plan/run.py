@@ -117,6 +117,7 @@ from stratum.types import (
     GranuleSource,
     LayerSpec,
     SnapshotSchema,
+    TileExtent,
     TileRef,
     VarSpec,
     scorer_output,
@@ -559,7 +560,7 @@ def stage_aux(m: Manifest, store: AssetStore, manifest_dir: Path | None = None
 
 
 def warp_aux_for_tiles(cache: CacheRoot, tiles: Sequence[TileRef],
-                       sources: Mapping[str, AuxSource]) -> int:
+                       sources: Mapping[str, AuxSource], pad: int = 0) -> int:
     """Warp every declared aux source onto every tile the run will touch, at PLAN time.
 
     05 section 5 point 2 makes this an option; the deployment makes it the only sane default.
@@ -572,9 +573,9 @@ def warp_aux_for_tiles(cache: CacheRoot, tiles: Sequence[TileRef],
     warped = 0
     for tile in tiles:
         for source in sources.values():
-            key = aux_key_for(cache, tile, source)
+            key = aux_key_for(cache, tile, source, pad)
             if not cache.hit(key):
-                warp_aux_tile(cache, tile, source)
+                warp_aux_tile(cache, tile, source, pad)
                 warped += 1
     return warped
 
@@ -869,8 +870,9 @@ def _resolve_tables(m: Manifest, layer: str, enum: Enumeration, tables: Mapping[
 
 
 # --------------------------------------------------------------------------------------- geometry
-def tile_lonlat_bounds(tile: TileRef) -> Bbox:
-    w, s, e, n = tile.bounds
+def tile_lonlat_bounds(tile: TileRef, pad: int = 0) -> Bbox:
+    """The tile's bounds in EPSG:4326, grown by `pad` cells all round (`TileExtent`)."""
+    w, s, e, n = TileExtent(tile, pad).bounds
     if is_lonlat(tile.grid.crs):
         return (w, s, e, n)
     return transform_bounds(tile.grid.crs, "EPSG:4326", w, s, e, n)
@@ -990,15 +992,19 @@ def plan_run(manifest_path: Path | str, out_dir: Path | str | None = None,
     # -- the AOI is its tiles, not the box around them (09 section 4, 02 section 6): a granule
     #    in the gap between distant zones meets the query bbox but no tile, so no work item can
     #    read it; it must not be inspected, frozen, counted or budgeted
-    tile_boxes = [tile_lonlat_bounds(t) for t in tiles]
+    #    A tile reaches `pad` cells past its edge when the scorer has a halo (01 section 4), so a
+    #    granule that only meets that border still feeds the tile's edge blocks.
+    scorer = instantiate("scorer", m.scorer.ref, m.scorer.params)
+    pad = int(getattr(scorer.instance, "halo", 0) or 0)
+    tile_boxes = [tile_lonlat_bounds(t, pad) for t in tiles]
     off_tile = [gid for gid, ref in refs.items()
                 if not any(granule_meets(ref, tb) for tb in tile_boxes)]
     for gid in off_tile:
         del refs[gid]
     reports.append(FilterReport("meets a tile of the AOI", len(off_tile), None))
 
-    # -- plugins and the roles a granule must provide (12 section 7)
-    scorer = instantiate("scorer", m.scorer.ref, m.scorer.params)
+    # -- plugins (the scorer is above: its halo sizes the tiles) and the roles a granule must
+    #    provide (12 section 7)
     masks = [instantiate("mask", mk.ref, mk.params) for mk in m.pixel_mask]
     reducer = instantiate("reducer", m.reducer.ref, m.reducer.params) if m.reducer else None
     needed = roles_needed(m, scorer, masks, geolocation_role)
@@ -1098,7 +1104,7 @@ def plan_run(manifest_path: Path | str, out_dir: Path | str | None = None,
     #    artifact cache is shared while the asset cache is node-local, warping every tile now
     #    means no worker ever opens the source.
     aux_sources = stage_aux(m, store)
-    aux_warped = warp_aux_for_tiles(CacheRoot(ws), tiles, aux_sources)
+    aux_warped = warp_aux_for_tiles(CacheRoot(ws), tiles, aux_sources, pad)
 
     # -- outputs, validated against the resolved schema now, not after regrid has run
     #    (07 section 3 "declared in the manifest and validated at plan time"; 12 section 7)
@@ -1208,7 +1214,8 @@ def build_work_lists(ctx: PlanContext, refs: Mapping[str, GranuleRef], tiles: Se
                      geolocation_role: str) -> dict[str, list[dict[str, Any]]]:
     """The four work lists (08 section 1):
 
-    regrid   every (granule, tile) whose bbox meets the tile, with the geolocation role's asset;
+    regrid   every (granule, tile) whose bbox meets the tile grown by the scorer halo (the GLT's
+             `TileExtent`), with the geolocation role's asset;
     resolve  every (tile, epoch, block) whose block meets the AOI and has >= 1 candidate;
     reduce   every (tile, block, period) with >= 1 resolve item among the period's epochs,
              listing exactly those epochs (an epoch with no candidates has no snapshot);
@@ -1221,7 +1228,7 @@ def build_work_lists(ctx: PlanContext, refs: Mapping[str, GranuleRef], tiles: Se
     reduce_items: list[dict[str, Any]] = []
     publish: list[dict[str, Any]] = []
     for tile in tiles:
-        tb = tile_lonlat_bounds(tile)
+        tb = tile_lonlat_bounds(tile, halo)
         for gid in sorted(refs):
             ref = refs[gid]
             if not granule_meets(ref, tb):

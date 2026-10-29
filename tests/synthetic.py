@@ -327,12 +327,14 @@ def build_plan(root: Path, observations: Sequence[SyntheticObservation], *, scor
                max_distance: float | None = None,
                snapshot_schema: SnapshotSchema | None = None,
                reducer: Any | None = None) -> PlanContext:
-    """A PlanContext over `observations` with their GLTs already built into `root`."""
+    """A PlanContext over `observations` with their GLTs already built into `root`, padded by
+    the scorer's halo as the regrid worker pads them (`PlanContext.tile_pad`)."""
     cache = CacheRoot(root)
     md = resolve_max_distance(tile.grid, max_distance)
+    pad = int(getattr(scorer, "halo", 0) or 0)
     for o in observations:
         regrid_granule_tile(cache, tile, o.ref.granule_id, lambda o=o: o.data.loc,
-                            max_distance=md)
+                            max_distance=md, pad=pad)
     reader = FakeReader({o.uri: o.data for o in observations})
     store = FakeStore([o.uri for o in observations])
     sch = snapshot_schema or schema()

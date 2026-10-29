@@ -131,15 +131,15 @@ a number moved.</p>
 <h2 id="algo-hash">4. The recorded regrid hash</h2>
 
 <p>Geometry is the one thing the cache cannot check for itself. A GLT's key contains
-<a class="src" data-sym="REGRID_ALGO_VERSION = 1" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/regrid/__init__.py#L39">REGRID_ALGO_VERSION</a>,
+<a class="src" data-sym="REGRID_ALGO_VERSION = 1" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/regrid/__init__.py#L42">REGRID_ALGO_VERSION</a>,
 an integer a human maintains &mdash; so a change to the KD-tree path that nobody remembered to
 version would silently reuse GLTs built by the old code.</p>
 
 <p>The guard is a recorded content hash.
-<a class="src" data-sym="def module_content_hash" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/regrid/__init__.py#L321">module_content_hash</a>
+<a class="src" data-sym="def module_content_hash" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/regrid/__init__.py#L338">module_content_hash</a>
 hashes every <code>.py</code> in the package; <code>ALGO_HASH</code> beside them records the
 version and hash that were current when someone last looked.
-<a class="src" data-sym="def check_recorded_hash" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/regrid/__init__.py#L344">check_recorded_hash</a>
+<a class="src" data-sym="def check_recorded_hash" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/regrid/__init__.py#L361">check_recorded_hash</a>
 compares them and names which step was skipped.</p>
 
 <pre><code><span class="c"># after changing anything under src/stratum/regrid/</span>

@@ -130,6 +130,22 @@ The framework materializes `halo` extra pixels around each block, runs the plugi
 before writing. A plugin needing a genuinely global view declares `capability = "tile"` and routes
 to Batch, giving up block parallelism honestly rather than corrupting results quietly.
 
+**The halo crosses tile edges.** Inside a tile a block's halo is its neighbours' cells. At a tile
+edge it is the next tile's ground, and the per-tile artifacts a block reads its halo from are
+built to hold it: every GLT, aux warp and ortho warp covers the tile grown by the scorer's halo on
+every side (`TileExtent`, the run's `tile_pad`), the file records its `pad`, and a tile-space
+window is shifted into it on read. Regrid therefore assigns a granule to every tile whose *padded*
+extent it meets - the same test resolve's candidate search makes against a halo window, so a
+granule that reaches a block only through its halo always has a GLT. Snapshots stay core-only,
+so reduce, publish and mosaic never see the pad, and no output overlaps anywhere: a halo-dependent
+result is continuous across a tile edge exactly as it is across a block edge. The cost is regrid
+over `(1 + 2h/T)²` of the tile area (T the tile's cells along a side) and a GLT that much larger;
+with no halo, `pad` is 0, nothing grows and no key moves ([06 §2](06-caching.md)).
+
+What it does not do is average overlapping *outputs*. That would need overlapping products,
+per-cell weights and science in the mosaic step; reading across the edge instead keeps the blend
+inside the scorer, where it is exact.
+
 Halo cost is `(1 + 2h/B)²`: at `B=720`, a 1-pixel halo costs 0.6%, a 32-pixel halo 19%.
 
 ---

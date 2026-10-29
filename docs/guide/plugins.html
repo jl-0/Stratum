@@ -442,7 +442,7 @@ the space is how Stratum knows to run yours at the right point.</p>
 
 <h3 id="builtin-scorers">Shipped scorers</h3>
 
-<p>Seven, and the choice between them is the whole point of the framework. <code>ref:</code> is
+<p>Eight, and the choice between them is the whole point of the framework. <code>ref:</code> is
 what you write; <code>stratum plugins list</code> prints what your environment provides.</p>
 
 <div class="tw"><table>
@@ -454,6 +454,7 @@ what you write; <code>stratum plugins list</code> prints what your environment p
 <tr><td><code>bare_earth_nadir</code></td><td><code>frcov</code>, <code>solar_zenith</code>, <code>view_zenith</code></td><td>The same, plus a nadir term. <code>nadir_weight: 0</code> reproduces the one above.</td></tr>
 <tr><td><code>low_vegetation_nadir</code></td><td><code>pv</code>, <code>solar_zenith</code>, <code>view_zenith</code></td><td>Bare earth as green vegetation at most <code>max_pv</code> (0.40), NPV ignored; ranks on <code>1 - PV</code>. <code>vegetated_weight</code> grades a greener look rather than refusing it.</td></tr>
 <tr><td><code>mode_gated_select</code></td><td>two categorical snapshot layers, plus the bands of each metric you weight</td><td>A <code>stack</code> scorer. Builds each look&rsquo;s (group 1, group 2) class pair, takes the most common pair at the cell, excludes every look that disagrees with it (<code>gate: hard</code>; <code>soft</code> penalises instead), and picks the agreeing look with the lowest weighted penalty over ten metrics &mdash; uncertainty, fit, band depth, cloud probability, scene cloudiness, bare soil, sun and view zenith, path length, airmass. With <code>epoch: P1Y</code> that is one scene per cell for the year. Emits <code>mode_count</code>, <code>n_valid</code>, <code>agreement</code>, <code>selection_penalty</code> and more for <code>source: scorer.&lt;name&gt;</code>. Class names in <code>ignore</code> / <code>g2_mask_classes</code>, never ids. Examples: <code>examples/emit-cmr-cuprite/manifest-mode-gated.yaml</code> (one tile); <code>examples/emit-cm-demo-sites/manifest-mode-gated.yaml</code> and <code>manifest-assistant-pick.yaml</code> (four sites, defaults and a variant).</td></tr>
+<tr><td><code>matched_filter</code></td><td>a reflectance role that reports per-band <code>wavelength</code> (<code>EMITL2ARFL</code>)</td><td>Not a pick: a <em>continuous</em> output. A continuum-removed matched filter for a packaged target spectrum (<code>topaz-mt-antero-5</code>) against a local background &mdash; one mean and covariance per window of a grid-anchored lattice, blended between the four windows over each cell so the background has no edges. Emits <code>mf</code> (about 0 background, 1 pure target; in between, the target&rsquo;s share of the cell&rsquo;s continuum brightness), <code>band_depth_208</code> and <code>bg_n</code>. <code>halo = 2 &times; stride</code>. Example: <code>examples/emit-topaz-mf/manifest.yaml</code>.</td></tr>
 <tr><td><code>cleanest_nadir</code></td><td><code>geometry</code>, aux <code>slope</code> + <code>snow</code></td><td>Nadir-preferring, terrain-penalised, snow-rejecting. <strong>Cannot run yet</strong> &mdash; it needs date-keyed aux, which is refused.</td></tr>
 </tbody>
 </table></div>

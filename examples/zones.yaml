@@ -39,3 +39,19 @@ bingham-canyon-amd: [-112.2, 40.4, -112.0, 40.6]    # Bingham Canyon mine, Utah
 # revision uses a scene over Cuprite instead (..._20230427T173309_2311711_010), which would
 # duplicate the Cuprite site. Replace this box when the real one arrives.
 mojave-l2b-tutorial: [-117.2, 34.25, -116.0, 35.45]  # central Mojave, California
+
+# The topaz matched-filter demonstration (./emit-topaz-mf/). Topaz Mountain in the Thomas Range,
+# Utah (~39.71 N, 113.11 W) is the classic topaz-in-rhyolite locality. The box straddles the L3
+# grid's tile edge at 39.6 N (tile_size 0.55) on purpose, so the run shows what happens to a
+# halo-dependent output across a tile seam. Cuprite core is the negative control: strong
+# kaolinite and alunite (2.17 um, where topaz has its second feature) and no reported topaz;
+# it straddles the tile edge at 117.15 W the same way.
+topaz-mountain-ut: [-113.30, 39.45, -112.95, 39.85]
+cuprite-core: [-117.30, 37.45, -117.05, 37.65]
+
+# The GEMx topaz find (NASA/USGS, June 2026): AVIRIS flagged, and fieldwork confirmed, topaz on a
+# volcanic outcrop on public land near Barstow, California. The announcement gives no coordinates,
+# so this is the whole L3-grid tile holding Barstow (tile -213, 63: 117.15-116.60 W,
+# 34.65-35.20 N; the Calico and Mud Hills included), inset a cell so no neighbour tile is planned.
+# Replace with the outcrop itself once GEMx shares it.
+barstow-tile: [-117.1494, 34.6506, -116.6006, 35.1994]

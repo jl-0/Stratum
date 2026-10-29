@@ -72,7 +72,7 @@ def regrid_item(item: Mapping[str, Any], run: RunPlan) -> tuple[CacheKey, bool]:
                 if ref is not None else None)
     key = ctx.cache.key("glt", ctx.grid.id, tile, glt_inputs(
         gid, ctx.grid, None if adopting else ctx.max_distance, ctx.regrid_method,
-        ctx.regrid_algo_version, source=checksum))
+        ctx.regrid_algo_version, source=checksum, pad=ctx.tile_pad))
     hit = ctx.cache.hit(key)
 
     def _read(what: str) -> Any:
@@ -101,7 +101,7 @@ def regrid_item(item: Mapping[str, Any], run: RunPlan) -> tuple[CacheKey, bool]:
 
     written = regrid_granule_tile(ctx.cache, tile, gid, loc, max_distance=ctx.max_distance,
                                   regrid_method=ctx.regrid_method, embedded=embedded,
-                                  source_id=checksum)
+                                  source_id=checksum, pad=ctx.tile_pad)
     if written.hash != key.hash:  # the two key derivations must agree, or resolve never hits
         raise PlanError(f"regrid wrote {written.path} but resolve would look for {key.path}")
     return key, hit

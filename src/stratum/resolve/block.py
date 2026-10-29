@@ -111,7 +111,7 @@ def candidates(plan: PlanContext, block: BlockRef, epoch: Epoch) -> list[Granule
 def glt_key_for(plan: PlanContext, tile: TileRef, granule_id: str) -> CacheKey:
     """The key regrid wrote the granule's GLT under: the same inputs, so the same hash."""
     inputs = glt_inputs(granule_id, plan.grid, plan.max_distance, plan.regrid_method,
-                        plan.regrid_algo_version)
+                        plan.regrid_algo_version, pad=plan.tile_pad)
     return plan.cache.key("glt", plan.grid.id, tile, inputs)
 
 
@@ -128,7 +128,7 @@ def aux_keys_for(plan: PlanContext, tile: TileRef) -> dict[str, CacheKey]:
     computable rule. Per tile, not per block: a warp is shared by every block of the tile
     (05 section 4).
     """
-    return {alias: aux_key_for(plan.cache, tile, plan.aux_sources[alias])
+    return {alias: aux_key_for(plan.cache, tile, plan.aux_sources[alias], plan.tile_pad)
             for alias in plan.aux_to_read()}
 
 

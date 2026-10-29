@@ -365,6 +365,13 @@ class PlanContext:
         return self.scorer.instance
 
     @property
+    def tile_pad(self) -> int:
+        """Cells every per-tile artifact reaches past its tile (`TileExtent`, 01 section 4): the
+        scorer's halo, so a block at a tile edge reads the neighbouring ground. 0 for a scorer
+        with no halo, which leaves every GLT and warp - and its key - as it was."""
+        return int(getattr(self.scorer.instance, "halo", 0) or 0)
+
+    @property
     def sensor_masks(self) -> list[PixelMask]:
         return [m.instance for m in self.masks if m.instance.space == "sensor"]
 

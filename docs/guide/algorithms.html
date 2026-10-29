@@ -95,7 +95,7 @@ y[r] = t.f + (r + 0.5) * t.e          <span class="c"># t.e  = -resolution north
 <thead><tr><th>Quantity</th><th>Definition</th><th>Code</th></tr></thead>
 <tbody>
 <tr><td>Cell diagonal</td><td><code>hypot(rx, ry)</code> in the grid's own units — degrees for EPSG:4326</td><td><a class="src" data-sym="diagonal" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/types.py#L88">types.py:88</a></td></tr>
-<tr><td>Cell centres</td><td>the two lines above, as (y, x) meshes over the whole tile</td><td><a class="src" data-sym="cell_centres" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/regrid/__init__.py#L67">regrid:67</a></td></tr>
+<tr><td>Cell centres</td><td>the two lines above, as (y, x) meshes over the whole tile</td><td><a class="src" data-sym="cell_centres" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/regrid/__init__.py#L70">regrid:67</a></td></tr>
 </tbody>
 </table>
 </div>
@@ -113,7 +113,7 @@ of metadata: URLs, footprints, times, cloud cover, checksums. It reads no pixel 
 <tr>
   <td>Resolve the AOI</td>
   <td>AOI bbox → the set of tiles on the grid lattice that intersect it; time range → epochs</td>
-  <td><a class="src" data-sym="plan_run" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/plan/run.py#L902">plan/run.py:677</a></td>
+  <td><a class="src" data-sym="plan_run" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/plan/run.py#L904">plan/run.py:677</a></td>
 </tr>
 <tr>
   <td>Filter</td>
@@ -135,7 +135,7 @@ of metadata: URLs, footprints, times, cloud cover, checksums. It reads no pixel 
   <td>The surviving granule set is written to the run directory and hashed. Every later stage
       reads the frozen set, never the live catalogue, so a re-run cannot silently include a
       granule that appeared since</td>
-  <td><a class="src" data-sym="# -- freeze (02 section 6)" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/plan/run.py#L1031">plan/run.py:773</a></td>
+  <td><a class="src" data-sym="# -- freeze (02 section 6)" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/plan/run.py#L1037">plan/run.py:773</a></td>
 </tr>
 </tbody>
 </table>
@@ -165,14 +165,14 @@ and longitude per sensor pixel. No band, no mask, no science value is opened at 
       <code>rc</code> of the surviving <code>(row, col)</code> so indices can be mapped back to
       the full array</td>
   <td>Stratum</td>
-  <td><a class="src" data-sym="_valid_points" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/regrid/__init__.py#L78">regrid:78</a></td>
+  <td><a class="src" data-sym="_valid_points" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/regrid/__init__.py#L81">regrid:78</a></td>
 </tr>
 <tr>
   <td class="num">2</td>
   <td>Cell centres</td>
   <td>(y, x) meshes for the whole tile from its transform (<a href="#notation">section 2</a>)</td>
   <td>Stratum</td>
-  <td><a class="src" data-sym="cell_centres" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/regrid/__init__.py#L67">regrid:67</a></td>
+  <td><a class="src" data-sym="cell_centres" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/regrid/__init__.py#L70">regrid:67</a></td>
 </tr>
 <tr>
   <td class="num">3</td>
@@ -190,7 +190,7 @@ and longitude per sensor pixel. No band, no mask, no science value is opened at 
       but with its sign flipped — the "interpolated" marker. Default cutoff
       <code>1.5 × cell diagonal</code></td>
   <td><strong>SpectralUtil</strong>, threshold restated by Stratum</td>
-  <td><a class="src" data-sym="resolve_max_distance" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/regrid/__init__.py#L58">regrid:58</a></td>
+  <td><a class="src" data-sym="resolve_max_distance" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/regrid/__init__.py#L61">regrid:58</a></td>
 </tr>
 <tr>
   <td class="num">5</td>
@@ -198,7 +198,7 @@ and longitude per sensor pixel. No band, no mask, no science value is opened at 
   <td>Turn the returned flat index back into a <code>(row, col)</code> of the <em>full</em> sensor
       array via the ledger from step 1, sign preserved, and write the three GLT bands</td>
   <td>Stratum</td>
-  <td><a class="src" data-sym="build_glt_raw" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/regrid/__init__.py#L90">regrid:90</a></td>
+  <td><a class="src" data-sym="build_glt_raw" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/regrid/__init__.py#L93">regrid:90</a></td>
 </tr>
 <tr>
   <td class="num">6</td>
@@ -256,7 +256,7 @@ key, and a hash of the whole <code>stratum/regrid/</code> package is recorded be
 <code>ALGO_HASH</code>. Editing anything in that package fails the test suite until someone
 re-records the hash — an explicit assertion, by a person, that they considered whether output
 changed.
-<a class="src" data-sym="check_recorded_hash" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/regrid/__init__.py#L344">regrid:344</a></p>
+<a class="src" data-sym="check_recorded_hash" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/regrid/__init__.py#L361">regrid:344</a></p>
 
 <h3 id="regrid-adopt">When the product is already on our grid</h3>
 
@@ -274,7 +274,7 @@ adopt_glt(embedded, tile)                <span class="c"># crop/pad onto the til
 <p>The precondition is checked at <em>plan</em> time, on one granule header, so a grid that cannot
 be adopted fails before anything is downloaded &mdash; and it refuses per granule rather than
 falling back, since a silent fallback would mix two derivations under one cache key.
-<a class="src" data-sym="lattice_offset" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/regrid/__init__.py#L131">regrid:131</a></p>
+<a class="src" data-sym="lattice_offset" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/regrid/__init__.py#L134">regrid:131</a></p>
 
 <div class="warn">
   <span class="label">Adopt is not a faster kdtree</span>
@@ -310,7 +310,7 @@ falling back, since a silent fallback would mix two derivations under one cache 
   <td>GLT window</td>
   <td>A windowed read of the cached GLT — internal tiling means only the block's own bytes are
       fetched. A block with no hit is skipped before any granule is opened</td>
-  <td><a class="src" data-sym="read_glt" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/regrid/__init__.py#L254">regrid:254</a></td>
+  <td><a class="src" data-sym="read_glt" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/regrid/__init__.py#L261">regrid:254</a></td>
 </tr>
 <tr>
   <td class="num">3</td>
@@ -318,7 +318,7 @@ falling back, since a silent fallback would mix two derivations under one cache 
   <td>The bounding box of the sensor pixels this GLT window names:
       <code>[min|gy|-1, max|gy|) × [min|gx|-1, max|gx|)</code>. This is the only part of the
       granule that is read</td>
-  <td><a class="src" data-sym="covering" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/types.py#L651">types.py:541</a></td>
+  <td><a class="src" data-sym="covering" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/types.py#L688">types.py:541</a></td>
 </tr>
 <tr>
   <td class="num">4</td>
@@ -357,7 +357,7 @@ falling back, since a silent fallback would mix two derivations under one cache 
   <td>Every alias the scorer and the map-space masks declared, already warped onto this tile by
       the planner, read as a window on this block. The accessor holds the warp keys the snapshot
       key was built from, so it cannot serve an alias the key does not name</td>
-  <td><a class="src" data-sym="class BlockAux" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/ancillary/__init__.py#L318">ancillary</a></td>
+  <td><a class="src" data-sym="class BlockAux" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/ancillary/__init__.py#L332">ancillary</a></td>
 </tr>
 <tr>
   <td class="num">7</td>
@@ -557,22 +557,22 @@ then:</p>
 <tr>
   <td>Cell-centre generation from the tile transform</td>
   <td>Stratum — grid definition, no granule input</td>
-  <td><a class="src" data-sym="cell_centres" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/regrid/__init__.py#L67">cell_centres</a></td>
+  <td><a class="src" data-sym="cell_centres" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/regrid/__init__.py#L70">cell_centres</a></td>
 </tr>
 <tr>
   <td>Dropping non-finite / masked <code>loc</code> pixels before the search</td>
   <td>Stratum — changes which pixels are candidates</td>
-  <td><a class="src" data-sym="_valid_points" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/regrid/__init__.py#L78">_valid_points</a></td>
+  <td><a class="src" data-sym="_valid_points" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/regrid/__init__.py#L81">_valid_points</a></td>
 </tr>
 <tr>
   <td>Flat index → full-array <code>(row, col)</code>, sign preserved</td>
   <td>Stratum — the adapter around the call above; the place to look first if a GLT ever looks wrong</td>
-  <td><a class="src" data-sym="build_glt_raw" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/regrid/__init__.py#L90">build_glt_raw</a></td>
+  <td><a class="src" data-sym="build_glt_raw" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/regrid/__init__.py#L93">build_glt_raw</a></td>
 </tr>
 <tr>
   <td>Cutoff default, <code>1.5 × cell diagonal</code></td>
   <td>Stratum restating SpectralUtil's own default so it enters the cache key — <a href="#regrid-cutoff">same number</a></td>
-  <td><a class="src" data-sym="resolve_max_distance" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/regrid/__init__.py#L58">resolve_max_distance</a></td>
+  <td><a class="src" data-sym="resolve_max_distance" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/regrid/__init__.py#L61">resolve_max_distance</a></td>
 </tr>
 <tr>
   <td>Pixel lookup through the GLT</td>

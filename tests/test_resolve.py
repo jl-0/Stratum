@@ -472,9 +472,12 @@ def test_seam_equivalence_blocks_equal_whole_tile(tmp_path: Path, scorer: NadirS
     for name in whole:
         assert np.array_equal(whole[name], quarters[name], equal_nan=True), name
         assert np.array_equal(whole[name], slivers[name], equal_nan=True), name
-    # and every block read its GLT window from the same tile-wide file
+    # and every block read its GLT window from the same tile-wide file - padded by the halo, so
+    # a tile-space window sits `pad` cells into it (TileExtent, 01 section 4)
     key = glt_key_for(plan_blocks, TILE, "A")
-    assert np.array_equal(read_glt(key.path, Window(10, 10, 10, 10)), read_glt(key.path)[10:, 10:])
+    p = scorer.halo
+    assert np.array_equal(read_glt(key.path, Window(10, 10, 10, 10)),
+                          read_glt(key.path)[10 + p:20 + p, 10 + p:20 + p])
 
 
 def test_halo_window_reads_past_the_tile_edge(pair_plan: PlanContext) -> None:

@@ -8,6 +8,8 @@ not bytes.
 """
 from __future__ import annotations
 
+from collections.abc import Mapping
+from types import MappingProxyType
 from typing import Literal
 
 import numpy as np
@@ -30,6 +32,7 @@ LOCAL_PATTERNS: dict[str, dict[str, str]] = {
     "EMITL2BMIN": {"MIN": "EMIT_L2B_MIN_001_*.nc", "MINUNCERT": "EMIT_L2B_MINUNCERT_001_*.nc"},
     "EMITL1BRAD": {"OBS": "EMIT_L1B_OBS_001_*.nc"},
     "EMITL2AMASK": {"MASK": "EMIT_L2A_MASK_002_*.nc"},
+    "EMITL2ARFL": {"RFL": "EMIT_L2A_RFL_001_*.nc"},
     "EMITL2BFRCOV": {"FRCOVBARE": "EMIT_L2B_FRCOVBARE_001_*.tif"},
 }
 
@@ -66,6 +69,20 @@ class L2AMask(EmitNetCDFReader):
     band_names_var = "mask_bands"
 
 
+class L2ARfl(EmitNetCDFReader):
+    """EMITL2ARFL: `reflectance` is (downtrack, crosstrack, 285) float32, fill -9999, over
+    `sensor_band_parameters/wavelengths` (nm). Bands report `wavelength`, `fwhm` and `good`
+    (`good_wavelengths`, 0 across the water-vapour bands) so a scorer can choose its window and
+    a `match: {wavelength: ...}` alias resolves. A record also ships RFLUNC and a V001 MASK;
+    only RFL is listed, and masks come from EMITL2AMASK as in every other manifest."""
+
+    collections = ("EMITL2ARFL",)
+    space: Literal["sensor", "ortho"] = "sensor"
+    band_names_var = None
+    band_attr_vars: Mapping[str, str] = MappingProxyType(
+        {"wavelength": "wavelengths", "fwhm": "fwhm", "good": "good_wavelengths"})
+
+
 class L2BFrcov(EmitNetCDFReader):
     """The NetCDF form of EMITL2BFRCOV: already orthorectified, so no loc array and no KD-tree
     (12 section 2). Kept for a NetCDF delivery; the SHIPPED EMITL2BFRCOV.001 is per-fraction
@@ -87,4 +104,4 @@ class L2BFrcov(EmitNetCDFReader):
 
 
 __all__ = ["LOCAL_PATTERNS", "EmitNetCDFReader", "GeoTIFFContext", "GeoTIFFReader", "L1BRad",
-           "L2AMask", "L2BFrcov", "L2BFrcovTiff", "L2BMin", "NetCDFContext"]
+           "L2AMask", "L2ARfl", "L2BFrcov", "L2BFrcovTiff", "L2BMin", "NetCDFContext"]

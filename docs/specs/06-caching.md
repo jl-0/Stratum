@@ -25,13 +25,18 @@ a full rebuild into a re-read.
 | Artifact | Key derived from | New scorer invalidates? |
 |---|---|---|
 | **Prepared asset**<br>asset | `asset_checksum`, `prepare_version` | No |
-| **GLT**<br>granule × tile | `granule_id`, `grid_def`, `max_distance`, `regrid_method`, `regrid_algo_version`, and under `adopt` only, `source_checksum` | **No** |
+| **GLT**<br>granule × tile | `granule_id`, `grid_def`, `max_distance`, `regrid_method`, `regrid_algo_version`, under `adopt` only `source_checksum`, and when the scorer has a halo `pad` | **No**, unless it changes the halo |
 | **Masked observation**<br>granule × tile × block | `glt_key`, `asset_roles` (per role read: the collection/asset/variable binding **and** the asset's catalogue checksum, `null` when the source has none), `pixel_mask_spec`, `mask_plugin_version`, `remaps` (per categorical layer: the raw table's fingerprint and a hash of the resolved lookup) | No |
-| **Aux warp**<br>source × tile | `alias`, `source_digest`, `grid_def`, `resampling`, `warp_algo_version` | No |
-| **Ortho role warp**<br>granule × role × tile | `granule_id`, `role`, `asset_checksum`, `var`, `grid_def`, `resampling`, `warp_algo_version` | No |
+| **Aux warp**<br>source × tile | `alias`, `source_digest`, `grid_def`, `resampling`, `warp_algo_version`, `pad` when non-zero | No, unless it changes the halo |
+| **Ortho role warp**<br>granule × role × tile | `granule_id`, `role`, `asset_checksum`, `var`, `grid_def`, `resampling`, `warp_algo_version`, `pad` when non-zero | No, unless it changes the halo |
 | **Epoch snapshot**<br>tile × epoch × block | `snapshot_format`, `obs_keys[]` (sorted), `aux_keys[]`, `scorer_ref`, `scorer_version`, `scorer_params`, `schema.layers_hash`, `epoch_bounds`, `window` | **Yes** |
 | **Product block**<br>tile × block | `snapshot_keys[]`, `aux_keys[]`, `schema.aggregate_hash`; plus `reducer` — `{ref, version, params}`, one nested key rather than three flat ones — when a plugin is named, else `null` | Yes |
 | **Rendered image**<br>tile | `product_keys[]`, `aux_keys[]`, `mapper_ref`, `mapper_version`, `mapper_params` | No — see [07](07-output-mapping.md) |
+
+`pad` is the run's tile pad, the scorer's halo ([01 §4](01-grid-tiling.md)): a GLT or warp that
+reaches `pad` cells past its tile is a different file. It is absent at 0, so a run whose scorer has
+no halo - every shipped scorer but `matched_filter` - keeps every key it had, and a scorer change
+that keeps the halo re-reads the same per-tile artifacts.
 
 Read down the "invalidates" column: that is the iteration story. Changing a **scorer** re-runs
 resolve, reduce and publish, and re-reads cached GLTs. Changing only an aggregation method or the **reducer** re-runs reduce

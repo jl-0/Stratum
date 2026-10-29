@@ -11,7 +11,7 @@ import netCDF4 as nc
 import numpy as np
 import pytest
 from affine import Affine
-from stratum_emit.readers import L1BRad, L2AMask, L2BFrcov, L2BFrcovTiff, L2BMin
+from stratum_emit.readers import L1BRad, L2AMask, L2ARfl, L2BFrcov, L2BFrcovTiff, L2BMin
 
 from stratum.access import AssetStore, LocalAsset, clear_cache, reader_for, to_uri
 from stratum.access.store import AssetCacheUnconfigured
@@ -202,6 +202,32 @@ def test_l1b_rad_reports_a_rad_assets_variables_without_crashing(tmp_path: Path)
     assert set(specs) == {"radiance"}
     assert specs["radiance"].shape == (4, 3, 2) and specs["radiance"].band_attrs == {}
     assert cube.shape == (2, 2, 2) and not cube.mask.any()
+
+
+def test_l2a_rfl_reports_wavelengths_fwhm_and_good_bands(tmp_path: Path):
+    """EMITL2ARFL: per-band wavelength, fwhm and good flag reach `band_attrs`, so a scorer can pick
+    its window and a `match: {wavelength: ...}` alias resolves (11 section 5)."""
+    path = tmp_path / "EMIT_L2A_RFL_001_a.nc"
+    with nc.Dataset(path, "w") as ds:
+        ds.createDimension("downtrack", 4)
+        ds.createDimension("crosstrack", 3)
+        ds.createDimension("bands", 3)
+        rfl = ds.createVariable("reflectance", "f4", ("downtrack", "crosstrack", "bands"),
+                                fill_value=-9999.0)
+        rfl[:] = 0.25
+        rfl[0] = -9999.0
+        params = ds.createGroup("sensor_band_parameters")
+        for name, values in (("wavelengths", [2000.0, 2010.0, 2020.0]), ("fwhm", [8.5, 8.5, 8.6]),
+                             ("good_wavelengths", [1.0, 0.0, 1.0])):
+            params.createVariable(name, "f4", ("bands",))[:] = values
+    reader = L2ARfl()
+    with reader.open(AssetStore().open(str(path))) as ctx:
+        attrs = reader.variables(ctx)["reflectance"].band_attrs
+        cube = reader.read(ctx, "reflectance")
+    assert attrs["wavelength"] == pytest.approx([2000.0, 2010.0, 2020.0])
+    assert attrs["fwhm"] == pytest.approx([8.5, 8.5, 8.6])
+    assert attrs["good"] == [1.0, 0.0, 1.0] and "name" not in attrs
+    assert cube.mask[0].all() and not cube.mask[1:].any()
 
 
 def test_l2a_mask_reports_mask_band_names(make_granule):

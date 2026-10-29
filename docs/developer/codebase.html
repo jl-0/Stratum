@@ -250,10 +250,10 @@ process.</td><td><a class="src" data-sym="def earthdata_login" href="https://git
 <table>
 <thead><tr><th>Module</th><th>Owns</th><th>Start at</th></tr></thead>
 <tbody>
-<tr><td><code>ancillary/</code></td><td>One thing, used twice: warp a raster from any CRS and resolution onto a tile's exact grid, cache it per tile, and window it per block. Behind <code>AuxAccessor</code> for declared external sources, and behind the ortho-native role path for products that ship already orthorectified. Carries its own recorded module hash.</td><td><a class="src" data-sym="def warp_to_tile" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/ancillary/__init__.py#L132">warp_to_tile</a></td></tr>
+<tr><td><code>ancillary/</code></td><td>One thing, used twice: warp a raster from any CRS and resolution onto a tile's exact grid, cache it per tile, and window it per block. Behind <code>AuxAccessor</code> for declared external sources, and behind the ortho-native role path for products that ship already orthorectified. Carries its own recorded module hash.</td><td><a class="src" data-sym="def warp_to_tile" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/ancillary/__init__.py#L133">warp_to_tile</a></td></tr>
 <tr><td><code>regrid/</code></td><td>Pure geometry: sensor <code>loc</code> arrays to a GLT by
 KD-tree, or a product's own embedded lookup table adopted onto the run's lattice. Also the
-recorded module hash that guards the algorithm version.</td><td><a class="src" data-sym="def regrid_granule_tile" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/regrid/__init__.py#L275">regrid_granule_tile</a></td></tr>
+recorded module hash that guards the algorithm version.</td><td><a class="src" data-sym="def regrid_granule_tile" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/regrid/__init__.py#L287">regrid_granule_tile</a></td></tr>
 <tr><td><code>resolve/</code></td><td>The block read path, masks, the gather, scoring, and the
 streaming argmax that produces one epoch snapshot. The densest package in the
 tree.</td><td><a class="src" data-sym="def resolve_block" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/resolve/block.py#L481">resolve_block</a></td></tr>
@@ -275,7 +275,7 @@ record.</td><td><a class="src" data-sym="def publish_period" href="https://githu
 <tbody>
 <tr><td><code>plan/run.py</code></td><td>The plan stage end to end: load, validate, index, filter,
 freeze, budget-gate, inspect real granules, build the work lists. About a thousand lines and the
-largest module in the tree.</td><td><a class="src" data-sym="def plan_run" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/plan/run.py#L902">plan_run</a></td></tr>
+largest module in the tree.</td><td><a class="src" data-sym="def plan_run" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/plan/run.py#L904">plan_run</a></td></tr>
 <tr><td><code>plan/estimate.py</code></td><td>The run's rough order of magnitude: per-item seconds from pixels and bytes per cell, constants fitted to one recorded run, Lambda dollars, downloads and bytes written. Pure arithmetic over the work lists; reads no granule.</td><td><a class="src" data-sym="def estimate(" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/plan/estimate.py#L96">estimate</a></td></tr>
 <tr><td><code>plan/document.py</code></td><td>The serialisation seam: <code>plan.json</code>, the
 work lists, and the paired <code>*_to_doc</code> / <code>*_from_doc</code> functions that let a
@@ -318,13 +318,13 @@ fast.</td><td><a class="src" data-sym="def main() -> None" href="https://github.
 walking, fill handling, band attributes, the sensor-space read.</td><td><a class="src" data-sym="class EmitNetCDFReader" href="https://github.com/jl-0/Stratum/blob/main/plugins/stratum-emit/src/stratum_emit/readers/netcdf.py#L125">EmitNetCDFReader</a></td></tr>
 <tr><td><code>stratum_emit/readers/__init__.py</code></td><td>One subclass per EMIT collection.
 <code>L2BFrcov</code> is the interesting one: already orthorectified, so it overrides the read
-path and reports no geolocation.</td><td><a class="src" data-sym="class L2BFrcov(EmitNetCDFReader)" href="https://github.com/jl-0/Stratum/blob/main/plugins/stratum-emit/src/stratum_emit/readers/__init__.py#L69">L2BFrcov</a></td></tr>
+path and reports no geolocation.</td><td><a class="src" data-sym="class L2BFrcov(EmitNetCDFReader)" href="https://github.com/jl-0/Stratum/blob/main/plugins/stratum-emit/src/stratum_emit/readers/__init__.py#L86">L2BFrcov</a></td></tr>
 <tr><td><code>stratum_emit/masks/</code></td><td>Four <code>PixelMask</code> implementations.
 <code>EdgeTrim</code> is sensor-space &mdash; it needs the absolute cross-track column &mdash;
 which is why the space declaration matters.</td><td><a class="src" data-sym="class EdgeTrim" href="https://github.com/jl-0/Stratum/blob/main/plugins/stratum-emit/src/stratum_emit/masks/__init__.py#L16">EdgeTrim</a></td></tr>
 <tr><td><code>stratum_emit/scorers/__init__.py</code></td><td>Four <code>Scorer</code>
 implementations, the shipped worked examples. Seventy-odd lines for all four &mdash; a scorer is
-meant to be small.</td><td><a class="src" data-sym="class MinViewZenith" href="https://github.com/jl-0/Stratum/blob/main/plugins/stratum-emit/src/stratum_emit/scorers/__init__.py#L10">MinViewZenith</a></td></tr>
+meant to be small.</td><td><a class="src" data-sym="class MinViewZenith" href="https://github.com/jl-0/Stratum/blob/main/plugins/stratum-emit/src/stratum_emit/scorers/__init__.py#L11">MinViewZenith</a></td></tr>
 </tbody>
 </table>
 </div>

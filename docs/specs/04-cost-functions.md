@@ -368,6 +368,7 @@ lives, and `stratum plugins list` is the authority for the installed environment
 | `bare_earth_nadir` | `BareEarthNadir` | `frcov`, `solar_zenith`, `view_zenith` | The same, plus a nadir term. `nadir_weight: 0` reproduces `prefer_bare_earth`. |
 | `low_vegetation_nadir` | `LowVegetationNadir` | `pv`, `solar_zenith`, `view_zenith` | Bare earth defined as green vegetation at most `max_pv` (0.40), ignoring NPV. Cover is `1 - PV`; same tie-breakers as `bare_earth_nadir`; `vegetated_weight` grades a greener look instead of refusing it. |
 | `mode_gated_select` | `ModeGatedSelect` | two categorical snapshot layers (`required_layers`); per weighted metric, the bands below | **`stack`.** The best look among those agreeing with the cell's joint (group 1, group 2) mode. See below. |
+| `matched_filter` | `MatchedFilter` | a reflectance role whose reader reports per-band `wavelength` (`EMITL2ARFL`) | **A continuous output, not a pick.** A continuum-removed matched filter for a packaged target spectrum against a local, overlap-blended background; the score is only how much background stands behind each estimate. `halo = 2 × stride`. See below. |
 | `cleanest_nadir` | `CleanestNadir` | `geometry`, **aux** `slope` + `snow` | Nadir-preferring, penalised for steep terrain, rejecting snow. **Cannot run yet**: it calls `aux.raster("snow", date=…)` and `temporal` date-keying is refused ([05 §2](05-ancillary-data.md)). |
 
 #### `mode_gated_select`
@@ -409,6 +410,36 @@ a window would depend on `block_size` and break block-wise = tile-wise.
 `examples/emit-cmr-cuprite/manifest-mode-gated.yaml` is the worked manifest (one tile); the
 demonstration sites run it at the external tool's defaults (`examples/emit-cm-demo-sites/manifest-mode-gated.yaml`)
 and with `key: independent`, `gate: soft`, `normalize: rank` (`manifest-assistant-pick.yaml`).
+
+#### `matched_filter`
+
+A `streaming` scorer whose purpose is its emitted outputs: a per-look target affinity, reduced
+through time by the schema (`aggregate: median`). Each look gets its own background, because
+illumination and atmosphere differ per granule. Per observation, over the block's halo window:
+
+| Step | Rule | Parameters (default) |
+|---|---|---|
+| Bands | The good bands (`good` band attribute) with `lo ≤ wavelength ≤ hi`. | `role` (`reflectance`), `lo`, `hi` (2000, 2300 nm) |
+| Continuum | Divide every spectrum, and the target, by the straight line through the means of two shoulder intervals, as Tetracorder does for a feature. A per-pixel convex hull was rejected: it does not vectorise and the shoulders are what the library's diagnostics fix anyway. | `shoulders` (`[[2000, 2030], [2260, 2300]]`) |
+| Background | One mean and covariance per window of a lattice anchored to the GRID origin (centres every `stride` cells; a window gathers the valid cells within `stride` of its centre), shrunk toward its diagonal. `trim` re-estimates without the window's most target-like cells. `k` projects onto the top-`k` MNF components (noise from spectral second differences, which duplicated gather cells cannot zero); `null` keeps them all, since the MF already weights each direction by the background's variance along it and truncation can drop the directions a rare target stands out in. A window with fewer than `min_n` valid cells is dropped. | `stride` (100), `shrink` (0.05), `trim` (0.01), `k` (`null`), `min_n` (500) |
+| Score | `mf = sᵀΣ⁻¹(x−μ) / sᵀΣ⁻¹s`, `s = t − μ`, under each of the four windows covering the cell, blended with tent weights `(1 − |dr|/S)(1 − |dc|/S)` that sum to one, renormalised over the windows not dropped. | `target` (`topaz-mt-antero-5`) |
+
+The lattice is anchored to the grid, not the block, so the output does not depend on
+`block_size` (01 §3), and a core cell's farthest window gathers cells two strides away: `halo =
+2 × stride`, which must stay under `block_size / 2`. Across a tile edge that halo is real data
+because every per-tile artifact is padded by the scorer halo ([01 §4](01-grid-tiling.md)).
+
+`mf` is about 0 over background and 1 for a cell of pure target. In between it is the target's
+share of the cell's continuum brightness, not of its area: a fraction `a` of a target with
+continuum `Ct` in a background of continuum `Cb` reads `a·Ct / (a·Ct + (1−a)·Cb)`, which is what
+linear mixing becomes after dividing by the continuum. Emitted outputs, all `float32`, per
+observation: `mf`, `band_depth_208` (the 2.08 µm feature's depth against Tetracorder's topaz
+f1a shoulders, 2.030–2.060 and 2.120–2.150 µm — no statistics, a cross-check), `bg_n` (the
+tent-weighted background cells behind `mf`). The score is `bg_n`, never `mf`, so the epoch does
+not become a maximum over looks. Targets are packaged CSVs under `stratum_emit/targets/` (a
+worker has the distribution, not the manifest's directory); `topaz-mt-antero-5` is splib06
+record 5040 convolved to EMIT (`s06emitc`), the entry Tetracorder 6.00a identifies topaz with.
+`examples/emit-topaz-mf/manifest.yaml` is the worked manifest.
 
 ### Worked examples
 

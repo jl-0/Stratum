@@ -159,6 +159,43 @@ class TileRef:
 
 
 @dataclass(frozen=True)
+class TileExtent:
+    """A tile grown by `pad` cells on every side: the area a per-tile artifact - a GLT, an aux
+    warp, an ortho warp - covers, so a block whose halo crosses the tile edge reads the
+    neighbouring ground rather than an empty border (01 section 4). The run's pad is its scorer's
+    halo; pad 0 is the tile itself, cell for cell.
+
+    It answers what the builders ask of a tile - `grid`, `shape`, `transform`, `bounds` - and
+    nothing a key or a product needs: those stay on the `TileRef`."""
+
+    tile: TileRef
+    pad: int = 0
+
+    def __post_init__(self) -> None:
+        if self.pad < 0:
+            raise ValueError(f"a tile pad is a non-negative cell count; got {self.pad}")
+
+    @property
+    def grid(self) -> GridDef:
+        return self.tile.grid
+
+    @property
+    def shape(self) -> tuple[int, int]:
+        rows, cols = self.tile.shape
+        return (rows + 2 * self.pad, cols + 2 * self.pad)
+
+    @property
+    def transform(self) -> Affine:
+        return self.tile.transform * Affine.translation(-self.pad, -self.pad)
+
+    @property
+    def bounds(self) -> tuple[float, float, float, float]:
+        w, s, e, n = self.tile.bounds
+        px, py = self.pad * self.grid.resolution[0], self.pad * abs(self.grid.resolution[1])
+        return (w - px, s - py, e + px, n + py)
+
+
+@dataclass(frozen=True)
 class BlockRef:
     """A subdivision of a tile; the compute unit. Two windows, deliberately (11 section 3)."""
 

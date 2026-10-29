@@ -265,7 +265,8 @@ def _key_str(k: CacheKey | str) -> str:
 
 
 def glt_inputs(granule_id: str, grid: GridDef, max_distance: float | None, regrid_method: str,
-               regrid_algo_version: int, source: str | None = None) -> dict[str, Any]:
+               regrid_algo_version: int, source: str | None = None,
+               pad: int = 0) -> dict[str, Any]:
     """GLT key: granule x grid x max_distance x method x algorithm version (06 section 2).
     No run, AOI, mask or scorer term - geometry does not depend on them (03 section 5,
     06 section 4). `max_distance` is the number actually used, and is null only for a method
@@ -277,6 +278,10 @@ def glt_inputs(granule_id: str, grid: GridDef, max_distance: float | None, regri
     that the source could not be identified - a local granule with no catalogue checksum - which
     is a real hole rather than a hidden one. The field is absent for every other method, so
     existing keys are unchanged.
+
+    `pad` is the cells the GLT reaches past the tile on every side (`TileExtent`, 01 section 4):
+    a padded GLT is a different file. Absent at 0, so a run whose scorer has no halo keeps every
+    key it had.
     """
     inputs = {
         "artifact_type": "glt",
@@ -288,11 +293,13 @@ def glt_inputs(granule_id: str, grid: GridDef, max_distance: float | None, regri
     }
     if regrid_method == "adopt":
         inputs["source_checksum"] = source
+    if pad:
+        inputs["pad"] = int(pad)
     return inputs
 
 
 def aux_inputs(alias: str, digest: str, grid: GridDef, resampling: str,
-               warp_algo_version: int) -> dict[str, Any]:
+               warp_algo_version: int, pad: int = 0) -> dict[str, Any]:
     """Aux warp key: source x tile x grid x resampling (06 section 2). The tile is in the key's
     path, so it is not a field here.
 
@@ -308,7 +315,7 @@ def aux_inputs(alias: str, digest: str, grid: GridDef, resampling: str,
     stale rasters forever. `stratum.ancillary.ALGO_HASH` records it against the module's content
     hash and a test fails when the module changes without a bump.
     """
-    return {
+    inputs = {
         "artifact_type": "aux",
         "alias": alias,
         "source_digest": digest,
@@ -316,10 +323,13 @@ def aux_inputs(alias: str, digest: str, grid: GridDef, resampling: str,
         "resampling": resampling,
         "warp_algo_version": int(warp_algo_version),
     }
+    if pad:                         # as `glt_inputs`: absent at 0, so unpadded keys are unchanged
+        inputs["pad"] = int(pad)
+    return inputs
 
 
 def ortho_inputs(granule_id: str, role: str, asset_checksum: str | None, var: str, grid: GridDef,
-                 resampling: str, warp_algo_version: int) -> dict[str, Any]:
+                 resampling: str, warp_algo_version: int, pad: int = 0) -> dict[str, Any]:
     """Ortho role warp key: granule x role x tile x grid x resampling (12 section 2).
 
     The ortho twin of `glt_inputs`, and cached for the same reason: an ortho role is warped once
@@ -327,7 +337,7 @@ def ortho_inputs(granule_id: str, role: str, asset_checksum: str | None, var: st
     (05 section 4, "warp once, slice many"). Unlike a GLT this DOES carry the asset's identity
     and the variable, because the pixels - not merely the geometry - are what it holds.
     """
-    return {
+    inputs = {
         "artifact_type": "ortho",
         "granule_id": granule_id,
         "role": role,
@@ -337,6 +347,9 @@ def ortho_inputs(granule_id: str, role: str, asset_checksum: str | None, var: st
         "resampling": resampling,
         "warp_algo_version": int(warp_algo_version),
     }
+    if pad:                         # as `glt_inputs`
+        inputs["pad"] = int(pad)
+    return inputs
 
 
 #: What a snapshot directory holds. 2 added `observed.tif` (cells any observation reached, before

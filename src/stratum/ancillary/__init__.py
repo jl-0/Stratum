@@ -38,6 +38,7 @@ from stratum.types import (
     BlockRef,
     Epoch,
     GranuleFrame,
+    TileExtent,
     TileRef,
     Window,
 )
@@ -129,7 +130,7 @@ def sources_digest(paths: Sequence[Path]) -> str:
 
 
 # --------------------------------------------------------------------- 05 section 1: the warp itself
-def warp_to_tile(paths: Sequence[Path | str], tile: TileRef, *, resampling: str,
+def warp_to_tile(paths: Sequence[Path | str], tile: TileRef | TileExtent, *, resampling: str,
                  dtype: str, nodata: float, band: int = 1) -> np.ndarray:
     """One (rows, cols) array on `tile`'s exact grid and CRS, whatever the sources were on.
 
@@ -175,7 +176,7 @@ def _is_nodata(arr: np.ndarray, nodata: float) -> np.ndarray:
     return np.isnan(arr) if np.isnan(nodata) else arr == nodata
 
 
-def _disjoint(src: rasterio.DatasetReader, tile: TileRef) -> bool:
+def _disjoint(src: rasterio.DatasetReader, tile: TileRef | TileExtent) -> bool:
     """True when the source cannot touch the tile. Compared in the TILE's CRS, and a source whose
     bounds will not transform (a rotated or exotic projection) is conservatively kept."""
     w, s, e, n = tile.bounds
@@ -186,7 +187,7 @@ def _disjoint(src: rasterio.DatasetReader, tile: TileRef) -> bool:
     return sw > e or se < w or ss > n or sn < s
 
 
-def write_raster(path: Path, data: np.ndarray, tile: TileRef, *, nodata: float,
+def write_raster(path: Path, data: np.ndarray, tile: TileRef | TileExtent, *, nodata: float,
                  tags: Mapping[str, Any]) -> Path:
     """A one-band tiled GeoTIFF on the tile's grid, laid out so a block read is a range request.
 
@@ -196,6 +197,9 @@ def write_raster(path: Path, data: np.ndarray, tile: TileRef, *, nodata: float,
     different layout - exactly as GLTs already do. That is benign and must NOT be "fixed" by
     putting `block_size` in the key, which would cause spurious misses for a knob that never
     changes output (01 section 3).
+
+    Over a `TileExtent` the file covers the padded area and says so in its `pad` tag, which
+    `read_window` reads, exactly as `write_glt` / `read_glt` do.
     """
     from stratum.regrid import internal_tile_size
 
@@ -209,7 +213,9 @@ def write_raster(path: Path, data: np.ndarray, tile: TileRef, *, nodata: float,
         blockxsize=bs, blockysize=bs, compress="deflate",
     ) as dst:
         dst.write(data, 1)
-        dst.update_tags(grid_id=tile.grid.id, **{k: str(v) for k, v in tags.items()})
+        pad = getattr(tile, "pad", 0)
+        dst.update_tags(grid_id=tile.grid.id, **({"pad": str(pad)} if pad else {}),
+                        **{k: str(v) for k, v in tags.items()})
     return Path(path)
 
 
@@ -217,12 +223,15 @@ def read_window(path: Path, window: Window, *, nodata: float) -> np.ndarray:
     """`window` of a warped tile, as (height, width).
 
     A block's window includes its halo (01 section 3), so at a tile edge it reaches outside the
-    file with negative offsets. That is a boundless read filled with nodata, exactly as
-    `read_glt` handles the same case - an in-bounds window takes the plain path.
+    tile. A padded warp (its `pad` tag) holds that ground, and the tile-space window is shifted
+    into it; whatever still reaches past the file is a boundless read filled with nodata, exactly
+    as `read_glt` handles the same case - an in-bounds window takes the plain path.
     """
     from rasterio.windows import Window as RioWindow
 
     with rasterio.open(str(path)) as src:
+        pad = int(src.tags().get("pad", 0))
+        window = Window(window.row_off + pad, window.col_off + pad, window.height, window.width)
         rio = RioWindow(window.col_off, window.row_off, window.width, window.height)
         inside = (window.row_off >= 0 and window.col_off >= 0
                   and window.row_off + window.height <= src.height
@@ -233,32 +242,35 @@ def read_window(path: Path, window: Window, *, nodata: float) -> np.ndarray:
 
 
 # ------------------------------------------------------------------ 05 section 4: warp once, slice many
-def aux_key_for(cache: CacheRoot, tile: TileRef, source: AuxSource) -> CacheKey:
+def aux_key_for(cache: CacheRoot, tile: TileRef, source: AuxSource, pad: int = 0) -> CacheKey:
     """The key `warp_aux_tile` writes under. Pure: no IO, no network, no cache probe.
 
     That purity is load-bearing rather than tidy. `snapshot_key` is recomputed by `product_key`
     once per epoch per block through the whole reduce stage and again at publish, so a stat or an
     open in here turns reduce into an IO storm of O(blocks x epochs).
+
+    `pad` is the run's tile pad (`TileExtent`, the scorer halo): a padded warp is another file.
     """
     inputs = aux_inputs(source.alias, source.digest, tile.grid, source.resampling,
-                        WARP_ALGO_VERSION)
+                        WARP_ALGO_VERSION, pad=pad)
     return cache.key("aux", tile.grid.id, tile, inputs)
 
 
-def warp_aux_tile(cache: CacheRoot, tile: TileRef, source: AuxSource) -> CacheKey:
+def warp_aux_tile(cache: CacheRoot, tile: TileRef, source: AuxSource, pad: int = 0) -> CacheKey:
     """One aux source over one tile, cached (05 section 4).
 
     A DEM is static; warping it per block, per epoch, per granule would repeat identical work
     thousands of times. Warped once per (source, tile, grid, resampling), with blocks reading
     windows out of the result - and, like a GLT, shared across runs and experiments.
     """
-    key = aux_key_for(cache, tile, source)
+    key = aux_key_for(cache, tile, source, pad)
     if cache.hit(key):
         return key
-    data = warp_to_tile(source.paths, tile, resampling=source.resampling,
+    area = TileExtent(tile, pad) if pad else tile
+    data = warp_to_tile(source.paths, area, resampling=source.resampling,
                         dtype=source.dtype, nodata=source.nodata)
     cache.write_file(key, lambda p: write_raster(
-        p, data, tile, nodata=source.nodata,
+        p, data, area, nodata=source.nodata,
         tags={"alias": source.alias, "source_uri": source.uri, "source_digest": source.digest,
               "resampling": source.resampling, "warp_algo_version": WARP_ALGO_VERSION}))
     return key
@@ -281,17 +293,18 @@ class OrthoSource:
 
 
 def ortho_key_for(cache: CacheRoot, tile: TileRef, granule_id: str, role: str, var: str,
-                  checksum: str | None, resampling: str) -> CacheKey:
+                  checksum: str | None, resampling: str, pad: int = 0) -> CacheKey:
     """The key `warp_ortho_tile` writes under. Pure, for the reason `aux_key_for` is."""
     from stratum.cache import ortho_inputs
 
     inputs = ortho_inputs(granule_id, role, checksum, var, tile.grid, resampling,
-                          WARP_ALGO_VERSION)
+                          WARP_ALGO_VERSION, pad=pad)
     return cache.key("ortho", tile.grid.id, tile, inputs)
 
 
 def warp_ortho_tile(cache: CacheRoot, tile: TileRef, source: OrthoSource, *, granule_id: str,
-                    role: str, var: str, checksum: str | None, resampling: str) -> CacheKey:
+                    role: str, var: str, checksum: str | None, resampling: str,
+                    pad: int = 0) -> CacheKey:
     """One ortho role of one granule over one tile, cached (12 section 2, 05 section 4).
 
     Cached for exactly the reason a GLT is. Warping inside the block read path would repeat the
@@ -299,14 +312,15 @@ def warp_ortho_tile(cache: CacheRoot, tile: TileRef, source: OrthoSource, *, gra
     "the cheapest possible input" into the most expensive thing in it. Warped once per
     (granule, role, tile) and windowed per block, like everything else on the grid.
     """
-    key = ortho_key_for(cache, tile, granule_id, role, var, checksum, resampling)
+    key = ortho_key_for(cache, tile, granule_id, role, var, checksum, resampling, pad)
     if cache.hit(key):
         return key
     fill = float("nan") if np.dtype(source.dtype).kind == "f" else 0.0
-    data = warp_to_tile([source.uri], tile, resampling=resampling, dtype=source.dtype,
+    area = TileExtent(tile, pad) if pad else tile
+    data = warp_to_tile([source.uri], area, resampling=resampling, dtype=source.dtype,
                         nodata=fill, band=source.band)
     cache.write_file(key, lambda p: write_raster(
-        p, data, tile, nodata=fill,
+        p, data, area, nodata=fill,
         tags={"granule_id": granule_id, "role": role, "var": var, "resampling": resampling,
               "warp_algo_version": WARP_ALGO_VERSION}))
     return key

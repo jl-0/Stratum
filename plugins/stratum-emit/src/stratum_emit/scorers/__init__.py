@@ -4,6 +4,7 @@ from __future__ import annotations
 import numpy as np
 
 from stratum.types import AuxAccessor, ObsWindow
+from stratum_emit.scorers.matched_filter import MatchedFilter
 from stratum_emit.scorers.mode_gated import ModeGatedSelect
 
 
@@ -289,5 +290,5 @@ class MaxBandDepth:
         return obs["mineral_depth"].astype("float32", copy=False)
 
 
-__all__ = ["BareEarthNadir", "CleanestNadir", "LowVegetationNadir", "MaxBandDepth",
-           "MinViewZenith", "ModeGatedSelect", "PreferBareEarth"]
+__all__ = ["BareEarthNadir", "CleanestNadir", "LowVegetationNadir", "MatchedFilter",
+           "MaxBandDepth", "MinViewZenith", "ModeGatedSelect", "PreferBareEarth"]

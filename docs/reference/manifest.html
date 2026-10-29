@@ -190,7 +190,9 @@ in the plan report.</p>
 
 <p><code>index_location</code> and <code>source</code> are each optional, and at least one is
 required. A <code>band:</code> index is checked against the reader's band count at plan time; a
-<code>match:</code> alias must select exactly one band.</p>
+<code>match:</code> alias must select exactly one band. The <code>EMITL2ARFL</code> reader reports
+<code>wavelength</code> (nm), <code>fwhm</code> and <code>good</code> for every band of
+<code>reflectance</code>, so a <code>match: {wavelength: ...}</code> alias resolves against it.</p>
 
 <h3 id="source">source</h3>
 

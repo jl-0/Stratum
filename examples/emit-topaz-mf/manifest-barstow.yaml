@@ -1,0 +1,140 @@
+# The topaz matched filter over the GEMx topaz find near Barstow, California: one whole L3-grid
+# tile. As manifest.yaml except the run, the zone, the index, the aux tiles, DAILY epochs and the
+# two max layers (mf_max, band_depth_208_max): the scorer and masks are the same.
+#
+#     pixi run stratum validate -m examples/emit-topaz-mf/manifest-barstow.yaml
+#     pixi run stratum plan     -m examples/emit-topaz-mf/manifest-barstow.yaml   # Earthdata login
+#     make cloud-run MANIFEST=examples/emit-topaz-mf/manifest-barstow.yaml
+#
+# Why here: AVIRIS (GEMx, 2026) flagged surface-exposed topaz on a volcanic outcrop near Barstow
+# and fieldwork confirmed it - the validation target Topaz Mountain is not, since its topaz sits
+# in rock cavities. AVIRIS pixels are metres to tens of metres; an outcrop that fills them may be
+# a few percent of a 60 m EMIT cell.
+#
+# WHAT IT DOES. Every look is continuum-removed over 2.00-2.30 um (shoulders 2.00-2.03 and
+# 2.26-2.30) and scored by a matched filter for the USGS topaz spectrum (splib06 Mt. Antero #5,
+# the entry Tetracorder 6.00a identifies topaz with) against a LOCAL background: one mean and
+# covariance per window of a fixed lattice (stride 100 cells, ~6 km), blended between the four
+# windows covering each cell with tent weights, so the background has no edges. Within a month
+# the look with the most background behind its estimate wins; the year's months are combined
+# by median. README.md here explains the choices and what `mf` means quantitatively.
+#
+# The stride sets the halo (2 x stride = 200 cells), which must stay under block_size / 2.
+
+run_id: topaz-mf-barstow-2025
+description: Topaz matched-filter affinity, continuum-removed, local blended background; the Barstow CA tile (GEMx topaz find), 2025
+
+grid:                               # the EMIT L3 gridded-reflectance lattice, as emit-cm-demo-sites
+  crs: EPSG:4326
+  resolution: [0.00055, -0.00055]
+  origin: [-0.000275, -0.000275]
+  tile_size: 0.55
+  block_size: 500                   # each block reads a 900 x 900 halo window of 285 bands
+                                    #   (~0.9 GB float32) per look
+  regrid_method: kdtree
+
+aoi:
+  zones: [barstow-tile]
+  registry: ../zones.yaml           # one whole tile; the halo still reads the neighbours' ground
+
+time:
+  start: 2025-01-01
+  end:   2026-01-01
+  epoch: P1D                        # every look its own epoch (EMIT passes at most about daily),
+  deliver: P1Y                      #   so the year's max is over EVERY look, not a monthly pick
+
+inputs:
+  index_location: ./index-barstow
+  source:
+    kind: cmr
+    provider: LPCLOUD
+    prefer: https
+    patterns:
+      EMITL2ARFL:
+        RFL: "EMIT_L2A_RFL_001_*.nc"            # ~1.8 GB each; RFLUNC and the V001 MASK are not fetched
+      EMITL2AMASK:
+        MASK: "EMIT_L2A_MASK_002_*.nc"
+  roles:
+    reflectance: {collection: EMITL2ARFL, asset: RFL, var: reflectance}
+    mask: {collection: EMITL2AMASK, version: "002", var: mask}
+
+aux:
+  landcover:                        # ESA WorldCover 2021: the tile straddles 117 W, so both
+    uri:                            #   3-degree tiles
+      - https://esa-worldcover.s3.eu-central-1.amazonaws.com/v200/2021/map/ESA_WorldCover_10m_2021_v200_N33W120_Map.tif
+      - https://esa-worldcover.s3.eu-central-1.amazonaws.com/v200/2021/map/ESA_WorldCover_10m_2021_v200_N33W117_Map.tif
+    kind: categorical
+    resampling: mode
+
+granule_filter:
+  - {max_cloud_fraction: 0.8, on_missing: fail}
+  - {max_solar_zenith: 70}
+
+pixel_mask:                         # the demo-site set without cos_i: continuum removal divides
+  - {ref: edge_trim, columns: 7}    #   out the illumination that cos_i guards against
+  - {ref: l2a_standard, flags: [cloud, cirrus, water, spacecraft, dilated_cloud]}
+  - {ref: landcover, exclude: [water, built-up]}
+
+scorer:
+  ref: matched_filter
+  params:
+    target: topaz-mt-antero-5       # packaged with stratum-emit (stratum_emit/targets/)
+    lo: 2000.0                      # nm; the good bands inside are used
+    hi: 2300.0
+    shoulders: [[2000.0, 2030.0], [2260.0, 2300.0]]
+    stride: 100                     # cells between window centres; halo = 200
+    shrink: 0.05                    # covariance toward its diagonal
+    k: null                         # every component; an int keeps the top-k MNF components
+    min_n: 500                      # cells a window needs to count
+    trim: 0.01                      # a window's most topaz-like 1 % stay out of its own background
+
+snapshot:
+  name: topaz-mf-v1               # the same schema as manifest.yaml
+  layers:
+    mf:
+      kind: continuous
+      source: scorer.mf
+      aggregate: {method: median}   # the typical look; also delivers mf_n (looks) and the spread
+    mf_max:                         # "did ANY look ever see it": a hit in one clear look survives
+      kind: continuous              #   here. It also takes the year's largest noise excursion, so
+      source: scorer.mf             #   read it against mf (median): a steady signal is high in
+      aggregate: {method: max}      #   both, a one-look spike only here
+    band_depth_208:
+      kind: continuous
+      source: scorer.band_depth_208
+      aggregate: {method: median}
+    band_depth_208_max:
+      kind: continuous
+      source: scorer.band_depth_208
+      aggregate: {method: max}
+    bg_n:
+      kind: continuous
+      source: scorer.bg_n
+      aggregate: {method: median}
+
+outputs:
+  bucket: ./out
+  formats: [cog]
+  stac: true
+  render:
+    mf:
+      mapper: continuous
+      ramp: viridis
+      domain: [0.0, 0.05]           # background sits within +-0.02 (July-August 2025 trial);
+      clip: true                    #   a coherent hit reached 0.14, so it saturates, by design
+    mf_max:
+      mapper: continuous
+      ramp: viridis
+      domain: [0.0, 0.08]           # a max over ~20 looks sits above the median's background
+      clip: true
+    band_depth_208:
+      mapper: continuous
+      ramp: viridis
+      domain: [0.0, 0.1]
+      clip: true
+
+budget:
+  max_tiles: 8
+  max_granules: 120
+  max_vcpu_hours: 20
+  on_exceed: fail
