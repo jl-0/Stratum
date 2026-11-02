@@ -417,6 +417,12 @@ The guard is **free space on the volume**, not a budget per directory:
   `$STRATUM_SCRATCH_RESERVE_BYTES` (default 1.5 GB) and frees past it by a slab, so one tree
   walk buys many writes. The free-space probe is cheap and comes first, so the walk never
   happens on a machine with room — which is every workstation.
+- **A download makes room for itself.** Before the request the store makes room for a 512 MB
+  reserve. When the response's `Content-Length` is larger, it makes room for that size as soon
+  as the headers arrive. An L2A RFL granule is ~1.7 GB.
+  - **[observed] 2026-11-02:** before this, one Barstow topaz resolve item failed with `ENOSPC`
+    halfway through writing an RFL granule. It ran on a warm Lambda whose `/tmp` still held the
+    granule of an earlier item.
 - **Access time, not write time.** A tile's aux warp is read by 25 blocks × 52 epochs and a
   granule's GLT by every epoch that granule appears in, so both keep being refreshed and stay
   resident; a snapshot, written once and never re-read by the stage that wrote it, ages out. A

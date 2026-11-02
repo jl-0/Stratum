@@ -639,6 +639,24 @@ def test_staging_evicts_to_make_room_and_a_hit_refreshes_access(tmp_path, monkey
     assert handle.local.stat().st_atime > before - 500
 
 
+def test_an_asset_larger_than_the_reserve_makes_room_for_its_own_size(tmp_path, monkeypatch):
+    """The regression: a 1.7 GB L2A RFL granule on a warm Lambda. The room made before the
+    request was the 512 MB reserve, so the write ran out of /tmp halfway through. Once the
+    headers say how big the asset is, staging makes room for all of it."""
+    import stratum.access.store as store_mod
+
+    asked: list[int] = []
+    monkeypatch.setattr(store_mod, "ensure_free", lambda need, **kw: asked.append(need) or 5)
+    big = Harness(tmp_path / "big", reserve=100, headers={"Content-Length": "10000"})
+    big.store.open(URL)
+    assert asked == [100, 10000] and big.store.evicted_bytes == 10
+
+    asked.clear()
+    small = Harness(tmp_path / "small", reserve=100, headers={"Content-Length": "50"})
+    small.store.open(URL)
+    assert asked == [100], "an asset inside the reserve needs no second pass"
+
+
 # ----------------------------------------------------------------------------- range reads
 SIGNED = "https://d1nklfio7vscoe.cloudfront.net/s3-abc/X_001_gran.nc?Signature=sig"
 

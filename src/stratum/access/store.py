@@ -65,8 +65,9 @@ RETRY_STATUSES = (429, 502, 503, 504)
 #: whole archive slice is still antisocial: one `plan` over the western states parked 84 GB of
 #: granules in `{root}/assets` because nothing capped it and nothing needed to.
 SCRATCH_BUDGET_ENV = "STRATUM_ASSET_CACHE_BUDGET_BYTES"
-#: Reserved before a stage-in whose size is not known yet. EMIT's largest indexed asset is the
-#: 109 MB L1B OBS; this covers one of those plus a companion and headroom.
+#: Reserved before a stage-in, while its size is not known yet: one 109 MB L1B OBS plus a
+#: companion and headroom. A larger asset (an L2A RFL granule is ~1.7 GB) makes room for its own
+#: `Content-Length` once the response headers arrive.
 DEFAULT_RESERVE_BYTES = 512 * 1024 * 1024
 #: An entry younger than this is never evicted, so a file another thread just opened is not
 #: pulled out from under it. `prefetch` is the only multi-threaded reader and it only writes.
@@ -483,6 +484,15 @@ def _is_request_exception(exc: BaseException) -> bool:
     return type(exc).__module__.split(".")[0] in ("requests", "urllib3")
 
 
+def _content_length(resp: Any) -> int:
+    """The response's `Content-Length` in bytes, `0` when absent or unreadable."""
+    raw = (getattr(resp, "headers", None) or {}).get("Content-Length")
+    try:
+        return max(0, int(raw)) if raw is not None else 0
+    except (TypeError, ValueError):
+        return 0
+
+
 def _netrc_has_earthdata() -> bool:
     """Offline check for an Earthdata Login entry in `$NETRC` or `~/.netrc`."""
     import netrc
@@ -808,6 +818,12 @@ class AssetStore:
                 # likely Earthdata Login redirected a request it could not authenticate
                 raise AssetFetchError(uri, resp.status_code, f"body is {ctype!r}, not an asset; "
                                       "check the Earthdata credentials (08 section 5)")
+            # The room made before the request assumed an asset of at most `reserve` bytes. An
+            # L2A RFL granule is ~1.7 GB, so a warm Lambda whose /tmp still held the previous
+            # one died on ENOSPC halfway through the write. Now the size is known: make room.
+            size = _content_length(resp)
+            if size > self.reserve:
+                self.evicted_bytes += ensure_free(size)
             hasher = hashlib.new(expected[0]) if expected is not None else None
             try:
                 with open(tmp, "wb") as fh:
