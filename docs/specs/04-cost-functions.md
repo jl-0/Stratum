@@ -248,7 +248,7 @@ snapshot:
 | Aspect | Rule |
 |---|---|
 | Spelling | `source: scorer.<output>`. `scorer.` is a reserved prefix in the one namespace ([13 §2](13-snapshot-schema.md)): no role or alias may be named `scorer` or start with `scorer.`. |
-| What a layer may be | One continuous band. `outputs` entries are `BandSpec`s with unique names and dtype `float32` or `float64`; the layer declares `kind: continuous`, no `bands`, no `classes`, and `dtype` omitted or equal to the output's. The planner fills the layer's `dtype` from the `BandSpec`. A categorical output is not offered: it would need a per-granule class remap. |
+| What a layer may be | One band. `outputs` entries are `BandSpec`s with unique names and dtype `float32` or `float64`. **Continuous:** the layer declares `kind: continuous`, no `bands`, no `classes`, and `dtype` omitted or equal to the output's; the planner fills the layer's `dtype` from the `BandSpec`. **Categorical** *(built 2026-10-29)*: `kind: categorical` with `classes: layer:<name>`, naming a categorical layer read from a role. The output's values are product ids of that layer's enumeration - what `obs.layer(name)` gives the scorer - so the layer shares its class table and needs no remap: a scorer never sees a raw class, which is what a per-granule remap would be for. Stored `uint16`; NaN, a negative value or anything at or above 65535 becomes the categorical nodata. This is how a `stack` scorer delivers a consensus class, such as each group's mode, rather than only the class of the look it selected. |
 | When `emit` runs | Iff the schema has at least one `scorer.*` layer — a scorer whose outputs nobody declared is never asked — and then once per `score()` call, immediately after it, with the **same `obs` object** and no other call on the instance in between. A scorer may therefore memoise work in `score()` (keyed on `id(obs)`) and reuse it in `emit()`. On an empty `stack` block neither is called. |
 | Return | A mapping with **exactly** the declared output names; a missing or extra name is a `ValueError`. Values are numeric arrays; masked values become NaN. |
 | Shapes: streaming | `(H, W)` per call — a per-observation value. The framework records it wherever that observation takes the cell, so the snapshot holds the winner's value. |
@@ -379,8 +379,8 @@ A `stack` scorer: with `epoch: P1Y` its argmax is one selected scene per cell fo
 | Step | Rule | Parameters (default) |
 |---|---|---|
 | Key | Each look's (group 1, group 2) product-id pair from `layers`. `g2_mask_classes` first turns group 2 into `none` where it is a listed class, leaving group 1 alone. | `layers` (`[mineral_1, mineral_2]`), `key` (`joint`; `independent` votes each group alone), `g2_mask_classes` (`[]`) |
-| Vote | A valid look votes when either group detects (id > 0) and neither holds a class in that group's `ignore` list; an ignored look still counts in `n_valid`. Under `joint`, a look detecting one group only votes `partial_vote_weight`. `vote_weight: score` scales every vote by the look's quality, 1 − penalty, so fewer but better looks can outvote more poorer ones, raised to `vote_power` to sharpen it (the averaged penalty spans little between looks); `min_count` still counts looks. | `ignore` (`{g1: [], g2: []}`), `partial_vote_weight` (0.01), `vote_weight` (`count`), `vote_power` (1) |
-| Mode | Most votes. Ties: `weighted` takes the key of the tied look with the lowest penalty + `partial_tie_penalty` if partial; `earliest`, `latest`; `nodata` leaves the cell unoccupied. A mode held by fewer than `min_count` looks leaves the cell unoccupied. No voter: no gate. | `tie_break` (`weighted`), `partial_tie_penalty` (0.05), `min_count` (1) |
+| Vote | A valid look votes when either group detects (id > 0) and neither holds a class in that group's `ignore` list; an ignored look still counts in `n_valid`. Under `joint`, a look detecting one group only votes `partial_vote_weight`. `vote_weight: score` scales every vote by the look's quality, 1 − penalty, so fewer but better looks can outvote more poorer ones, raised to `vote_power` to sharpen it (the averaged penalty spans little between looks); `min_count` still counts looks. `nondetect: vote` makes a valid look that saw nothing a voter for `none` (id 0), so one stray detection among looks that saw nothing loses; `abstain` lets only detections vote. | `ignore` (`{g1: [], g2: []}`), `partial_vote_weight` (0.01), `vote_weight` (`count`), `vote_power` (1), `nondetect` (`abstain`) |
+| Mode | Most votes. Ties: `weighted` takes the key of the tied look with the lowest penalty + `partial_tie_penalty` if partial; `earliest`, `latest`; `nodata` leaves the cell unoccupied. A mode held by fewer than `min_count` looks leaves the cell unoccupied, or with `below_min_count: none` makes that group's answer `none` and gates on it, so the looks that saw nothing qualify. No voter: no gate. | `tie_break` (`weighted`), `partial_tie_penalty` (0.05), `min_count` (1), `below_min_count` (`nodata`) |
 | Gate | `hard`: a look off the mode may not occupy the cell (NaN). `soft`: it is ranked with `soft_penalty` added. A look holding an `ignore`d class never matches, also where the cell has no mode, so the hard gate never delivers an ignored class. Under `independent`, a look must carry each group's mode (a group with no voter imposes nothing), so a hard gate can leave a cell where no single look carries both unoccupied. | `gate` (`hard`), `soft_penalty` (10) |
 | Penalty | Per metric a value in [0, 1], 0 best; a value the look cannot derive (below: id 0, grazing airmass, no `cloud_fraction`) scores 1. Fill in a band a weighted metric reads is not that case: required roles decide `valid`, so it removes the look from the vote and from selection, and a granule with no asset for the role is dropped at plan. `fixed` clips `(x - lo) / (hi - lo)` (flipped where higher is better); `rank` is the look's average rank among the cell's valid looks over (n − 1). Weighted sum with positive weights renormalised to 1. Score = −penalty. | `normalize` (`fixed`), `weights` (0.2 each), `bounds`, `aliases` |
 
@@ -401,8 +401,13 @@ Every metric with a positive weight makes its aliases required, so a manifest la
 `weights: {cloud_prob: 0}`). Class names in `ignore` and `g2_mask_classes` resolve through
 `obs.layer_classes`; an unknown name fails at resolve. Emitted outputs, all `float32`: per cell
 `mode_count` (looks on the mode), `mode_votes`, `n_voters`, `n_valid`, `agreement`
-(`mode_count / n_valid`), `runner_up_count` (`joint` only); per observation `selection_penalty`
-(the winner's is recorded). `g2_mask_classes` rewrites the key, never the gathered layer: the
+(`mode_count / n_valid`), `runner_up_count` (`joint` only), and `mode_1` / `mode_2` - each
+group's consensus as a product id of that group's layer, `none` where valid looks voted for
+nothing, NaN where the cell is dropped; per observation `selection_penalty` (the winner's is
+recorded). `mode_1` / `mode_2` are delivered as categorical layers (`classes: layer:<group
+layer>`). Under `independent` they are the per-group answer even where no single look carries both
+modes; the classes gathered from the selected look are not. With one epoch per year they are the
+product, and the reduction is the identity (`examples/emit-cm-demo-sites/manifest-yearly-*.yaml`). `g2_mask_classes` rewrites the key, never the gathered layer: the
 snapshot's group-2 layer holds the winner's raw class, and a manifest that must not deliver a
 masked class lists it in that layer's `aggregate.ignore` (the cell then delivers nodata there).
 Normalisation is fixed bounds or per-cell rank only: any statistic over
@@ -428,6 +433,21 @@ The lattice is anchored to the grid, not the block, so the output does not depen
 `block_size` (01 §3), and a core cell's farthest window gathers cells two strides away: `halo =
 2 × stride`, which must stay under `block_size / 2`. Across a tile edge that halo is real data
 because every per-tile artifact is padded by the scorer halo ([01 §4](01-grid-tiling.md)).
+
+**`background: column`** *(built 2026-10-29)* replaces the lattice with one background per
+**detector column**: each cell's spectrum is scored against the mean and covariance of the cells
+of the same look gathered from the same sensor column, read from a snapshot layer with `source:
+sensor_column` (`column_layer`, [13 §2](13-snapshot-schema.md)). Each cross-track spectrometer of a
+push-broom responds slightly differently, so a background pooled across columns mixes them. A
+column short of `min_n` valid cells pools its neighbours, up to `max_radius` (8) columns either
+side; one still short is NaN. `trim` applies per column; `stride` and `k` do not. `halo` is 0 and
+the statistics are those of the block window, so a smaller `block_size` estimates each column from
+fewer cells and the answer then depends on it - set `block_size` to the tile's cell count. Synthetic
+check (`tests/test_matched_filter.py`): with a per-column spectral ripple and noise level, the
+column-to-column striping of `mf` is less than half the lattice's and its background spread lower,
+with an implant recovered the same. On one real tile (Barstow, August 2025, `examples/emit-topaz-mf/README.md`) it lowered the background spread about 20 % but lowered two known hits more, so it is not the better detector there. Not built: statistics over the WHOLE scene's column (a
+per-granule pass in sensor space before resolve) or pooled over every look of a tile (a `stack`
+scorer holding every look's reflectance - all bands, since a role is read whole).
 
 `mf` is about 0 over background and 1 for a cell of pure target. In between it is the target's
 share of the cell's continuum brightness, not of its area: a fraction `a` of a target with

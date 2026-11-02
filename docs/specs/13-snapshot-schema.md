@@ -65,7 +65,7 @@ snapshot:
 | Field | Meaning |
 |---|---|
 | `kind` | `categorical` or `continuous`. Decides the aggregation vocabulary available and how nodata is represented ([11 §2](11-types.md)) |
-| `source` | Where the value comes from in the *winning* observation. A role name or a band alias; the two share one namespace ([09 §2](09-run-manifest.md)). Or `acquired`, which the framework provides, or `scorer.<output>`, which the scorer's `emit()` computes — both below |
+| `source` | Where the value comes from in the *winning* observation. A role name or a band alias; the two share one namespace ([09 §2](09-run-manifest.md)). Or `acquired` or `sensor_column`, which the framework provides, or `scorer.<output>`, which the scorer's `emit()` computes — both below |
 | `dtype` | Optional. Defaults to the source band's dtype; categorical layers default to `uint16` |
 | `bands` | Optional. Band indices to keep from a multi-band source; default all — see below |
 | `classes` | Categorical only. The enumeration file, or `source` — §3 |
@@ -79,7 +79,15 @@ declares `source: view_zenith`; both resolve through `inputs.roles` and `inputs.
 may not collide. A role whose variable has one band is addressed by the role name; a multi-band
 variable needs an alias. Naming something neither defines is a plan-time error.
 
-**One source the framework provides: `acquired`.** *(Built 2026-10-07.)* The winning
+**`sensor_column`** *(built 2026-10-29)* is the other source the framework provides: the 0-based
+column of the full sensor array that filled the cell, `|GLT X| − 1` ([03 §3](03-regrid-glt.md)),
+one `float32` band, NaN where the GLT has no hit. On a push-broom every column is its own
+detector, so it is what a per-detector statistic groups by (`matched_filter`'s `background:
+column`, [04 §4](04-cost-functions.md)) and what an edge or slit streak maps to. The same rules as
+`acquired` apply: no role or alias may take the name, and the layer is `kind: continuous` with no
+`bands` or `dtype`.
+
+**The source the framework provides for provenance: `acquired`.** *(Built 2026-10-07.)* The winning
 observation's acquisition start, in Unix seconds UTC, the same in every cell that observation
 reaches. It is not a role and is never read from a file, and no role or alias may be named
 `acquired`. A layer that uses it must be `kind: continuous`, with no `bands` and no `dtype`, because
@@ -109,7 +117,10 @@ resolve time, because a reducer cannot recover evidence a snapshot never stored
 outputs with `source: scorer.<output>`. `scorer.` is a **reserved prefix**: no role or alias may be
 named `scorer` or start with `scorer.`, so the one namespace stays unambiguous. Such a layer is
 one continuous band — `kind: continuous`, no `bands`, no `classes`, and `dtype` omitted (the planner
-fills it from the output's `BandSpec`, `float32` or `float64`) or equal to it. Its value is the
+fills it from the output's `BandSpec`, `float32` or `float64`) or equal to it — or one categorical
+band with `classes: layer:<name>` *(built 2026-10-29)*: the output holds product ids of the named
+layer's enumeration, so the two share one class table, no remap applies and nothing about the
+enumeration is new (§3). `<name>` must be a categorical layer read from a role. Its value is the
 winning observation's, or for a `stack` scorer a per-cell property of the whole stack, written only
 where some observation won. Nothing else about it is special: it enters `layers_hash` like any layer
 (§5) and is aggregated by its declared `aggregate` (§4).
@@ -345,7 +356,7 @@ compatibility; it either extends its ancestor or it does not.
 | `ignore: [0, -4]` | Classes are named — `ignore: [none]` — and `-4` had no meaning here |
 | `Scorer.carry` | Gone. Layers are the schema's; the scorer only scores |
 | `Reducer.outputs` and `ModeThroughTime` | Derived from the schema by the built-in reducer. A plugin still declares its own outputs |
-| The `obs[...]` namespace | One namespace: roles and band aliases, which may not collide; `acquired` is reserved for the framework and the prefix `scorer.` for scorer outputs |
+| The `obs[...]` namespace | One namespace: roles and band aliases, which may not collide; `acquired` and `sensor_column` are reserved for the framework and the prefix `scorer.` for scorer outputs |
 
 ---
 

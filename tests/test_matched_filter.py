@@ -165,6 +165,8 @@ def test_mnf_k_keeps_the_answer_when_it_keeps_the_signal():
     ({"stride": 1}, "stride"),
     ({"k": 0}, "k is"),
     ({"target": "beryl"}, "no packaged target"),
+    ({"background": "tile"}, "background must be"),
+    ({"background": "column", "k": 5}, "window only"),
 ])
 def test_bad_parameters_fail_at_construction(kw, match):
     with pytest.raises(ValueError, match=match):
@@ -173,3 +175,81 @@ def test_bad_parameters_fail_at_construction(kw, match):
 
 def test_halo_is_twice_the_stride():
     assert MatchedFilter(stride=60).halo == 120
+
+
+# ------------------------------------------------------------------ per detector column
+SH = ((1950.0, 1990.0), (2300.0, 2350.0))
+
+
+def striped(n: int, *, seed: int = 3) -> tuple[np.ndarray, np.ndarray]:
+    """A background whose every column is its own detector: a column-specific spectral ripple
+    and noise level on top of `cube`. Returns (data, column index per cell)."""
+    rng = np.random.default_rng(seed)
+    ripple = np.sin((WL - 1950.0) / 400.0 * 5 * np.pi)
+    amp = rng.normal(0, 0.004, n)
+    sigma = rng.uniform(0.0005, 0.004, n)
+    data = cube(n, n, noise=0.001) + amp[None, :, None] * ripple \
+        + rng.normal(size=(n, n, WL.size)) * sigma[None, :, None]
+    return data, np.broadcast_to(np.arange(n, dtype=np.float64)[None, :], (n, n))
+
+
+def test_column_background_removes_detector_striping():
+    """Every column a different detector: scored per column, the background is flatter and the
+    column-to-column striping smaller than under the window lattice; the implant is recovered."""
+    n = 240
+    bg, col = striped(n)
+    t = topaz()
+    frac = np.zeros((n, n))
+    frac[100:104, 100:104] = 0.1
+    data = (1 - frac[..., None]) * bg + frac[..., None] * t
+    valid = np.ones((n, n), bool)
+    win = run_tile(data, valid, n, MatchedFilter(stride=60, min_n=300, lo=1950.0, hi=2350.0,
+                                                 shoulders=SH))["mf"]
+    cr = _mf.continuum_removed(data.astype(np.float32), WL, SH)
+    t_cr = _mf.continuum_removed(t[None, :], WL, SH)[0]
+    col_mf, bg_n = _mf.column_mf(cr, valid, col, t_cr, shrink=0.05, min_n=200, trim=0.01,
+                                 max_radius=8)
+    rest = frac == 0
+    stripes = {name: np.nanstd(np.nanmean(np.where(rest, m, np.nan), axis=0))
+               for name, m in (("window", win), ("column", col_mf))}
+    assert stripes["column"] < 0.5 * stripes["window"]
+    assert np.nanstd(col_mf[rest]) < np.nanstd(win[rest])
+    want = brightness_share(0.1, bg[100:104, 100:104], t)
+    assert np.nanmean(col_mf[100:104, 100:104]) == pytest.approx(want, abs=0.06)
+    assert (bg_n[rest] >= 200).all()
+
+
+def test_a_sparse_column_pools_its_neighbours():
+    """Column 5 has 10 cells: it borrows columns either side until min_n is reached; a column
+    that cannot reach min_n within max_radius, or with no known column, is NaN."""
+    bg = cube(60, 60)
+    col = np.broadcast_to(np.arange(60, dtype=np.float64)[None, :], (60, 60)).copy()
+    valid = np.ones((60, 60), bool)
+    valid[10:, 5] = False
+    col[:, 50] = np.nan
+    cr = _mf.continuum_removed(bg.astype(np.float32), WL, SH)
+    t_cr = _mf.continuum_removed(topaz()[None, :], WL, SH)[0]
+    mf, n = _mf.column_mf(cr, valid, col, t_cr, shrink=0.05, min_n=100, trim=0.0, max_radius=2)
+    assert n[0, 5] == 10 + 2 * 60                    # radius 1: columns 4..6
+    assert n[0, 20] == 180                           # radius 1: columns 19..21
+    assert np.isnan(mf[:, 50]).all() and np.isfinite(mf[:, 20]).all()
+    mf, n = _mf.column_mf(cr, valid, col, t_cr, shrink=0.05, min_n=1000, trim=0.0,
+                          max_radius=2)
+    assert np.isnan(mf).all()
+
+
+def test_column_mode_reads_the_sensor_column_layer():
+    s = MatchedFilter(background="column", min_n=100, lo=1950.0, hi=2350.0, shoulders=SH)
+    assert s.halo == 0 and s.required_layers == ("sensor_column",)
+    assert MatchedFilter().required_layers == ()
+    data, col = striped(60)
+    grid = GridDef("EPSG:4326", (0.001, -0.001), (0.0, 0.0), 0.06, block_size=60)
+    block = BlockRef(TileRef(grid, 0, 0), 0, 0, halo=0)
+    obs = ObsWindow(space="block", bands={"reflectance": data.astype(np.float32)},
+                    valid=np.ones((60, 60), bool), granules=[GRANULE], epoch=EPOCH, block=block,
+                    band_attrs={"reflectance": {"wavelength": WL.tolist()}},
+                    layers={"sensor_column": col.astype(np.float32)})
+    score = s.score(obs, None)
+    out = s.emit(obs, None)
+    assert np.isfinite(out["mf"]).all() and (score >= 100).all()
+    assert abs(float(np.mean(out["mf"]))) < 0.01

@@ -920,9 +920,21 @@ def test_validate_scorer_layers(tmp_path: Path) -> None:
     # the layer must be one continuous band of the output's dtype
     want = ("snapshot.layers.{}: a scorer output is one continuous float32 band; declare kind: "
             "continuous with no bands or classes, and dtype omitted or float32 (13 section 2)")
+    # or one categorical band holding the product ids of a categorical layer read from a role
+    cat = {"kind": "categorical", "source": "scorer.looks", "aggregate": {"method": "vote"}}
+    assert _validate_doc(tmp_path, ref, {"cat": {**cat, "classes": "layer:mineral_1"}}) == []
+    for target in ("depth_1", "nothing"):
+        problems = _validate_doc(tmp_path, ref, {"cat": {**cat, "classes": f"layer:{target}"}})
+        assert problems == [(f"snapshot.layers.cat: classes 'layer:{target}' must name a "
+                             "categorical layer read from a role, whose product ids the "
+                             "scorer's output holds (13 section 2)")], target
+    with pytest.raises(ValueError, match="another layer's classes"):
+        _validate_doc(tmp_path, ref, {"cat": {**cat, "classes": "source"}})
+    with pytest.raises(ValueError, match="'source' or '@ref:"):
+        _validate_doc(tmp_path, ref, {"m": {"kind": "categorical", "source": "mineral",
+                                            "classes": "layer:mineral_1",
+                                            "aggregate": {"method": "vote"}}})
     for name, layer in {
-        "cat": {"kind": "categorical", "source": "scorer.looks", "classes": "source",
-                "aggregate": {"method": "vote"}},
         "banded": {"kind": "continuous", "source": "scorer.looks", "bands": [0],
                    "aggregate": {"method": "median"}},
         "typed": {"kind": "continuous", "source": "scorer.looks", "dtype": "float64",

@@ -87,3 +87,44 @@ per-tile artifact (GLT, aux and ortho warps) by the scorer halo (spec 01 section
 the neighbouring ground, and the blended background continues across the edge as it does across a
 block edge. Without that padding the halo across a tile edge is empty, and each tile estimates the
 windows on its edge from its own side only.
+
+## Per detector column (`background: column`)
+
+Every cross-track column of a push-broom is its own spectrometer, with a slightly different response.
+`background: column` scores each cell against the mean and covariance of its own look's cells
+from the same detector column, which it reads from a snapshot layer with `source: sensor_column`.
+Use these settings:
+
+```yaml
+grid:
+  block_size: 1000                 # one block per tile: each column is estimated over the tile
+scorer:
+  ref: matched_filter
+  params: {background: column, min_n: 200, max_radius: 8, shrink: 0.05, trim: 0.01}
+snapshot:
+  layers:
+    sensor_column: {kind: continuous, source: sensor_column, aggregate: {method: median}}
+```
+
+The statistics come from the block window (there is no halo), so `block_size` changes the answer.
+
+**The Barstow tile, August 2025, 7 looks: window lattice against column.**
+
+| | `mf` std | `mf` p99.9 | cell-to-cell step | hit A (34.707 N) | hit B (34.701 N) |
+|---|---|---|---|---|---|
+| window (`stride: 100`) | 0.0048 | 0.021 | 0.0036 | 0.263 | 0.158 |
+| column | 0.0038 | 0.018 | 0.0027 | 0.191 | 0.073 |
+
+- **Column mode lowers the background noise about 20 %.**
+- **It also lowers both hits.** Hit B, the topaz+alunite mixture, loses more than half, so
+  against the background it is harder to see, not easier.
+- **The likely cause is the shape of the sample.** A column is a line across the whole tile, so a
+  column through the altered ground carries that ground into its own background. A 2-D window
+  around the hit holds less of it.
+
+Two variants are not built:
+
+- **Per-scene column statistics.** Every column over the whole granule needs a per-granule pass
+  in sensor space before resolve.
+- **Pooling one column over every look of a tile.** That needs a `stack` scorer holding every
+  look's reflectance, all 285 bands, because a role is read whole.

@@ -11,7 +11,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "stratum-emit"
-version = "0.0.1"
+version = "0.0.2"
 description = "EMIT readers, instrument masks, mineral scorers and a matched filter for Stratum"
 readme = "README.md"
 requires-python = ">=3.11"

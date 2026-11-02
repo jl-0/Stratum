@@ -383,7 +383,7 @@ def test_non_streaming_scorer_is_refused(tmp_path: Path) -> None:
 def test_plugin_version_comes_from_the_distribution() -> None:
     from stratum_emit.scorers import MinViewZenith
 
-    assert plugin_version(MinViewZenith()) == version("stratum")
+    assert plugin_version(MinViewZenith()) == version("stratum-emit")
     assert plugin_version(NadirScorer()) == "unversioned"          # tests are not a distribution
     assert binding(NadirScorer()).ref.endswith(":NadirScorer")
 
@@ -668,3 +668,26 @@ def test_widening_refuses_a_narrow_plane_that_actually_holds_data(tmp_path: Path
            Epoch(datetime(2026, 2, 1, tzinfo=UTC), datetime(2026, 3, 1, tzinfo=UTC))]
     with pytest.raises(ValueError, match="cannot be widened"):
         stack_snapshots([a, b], eps, sch)
+
+
+def test_sensor_column_is_the_detector_column_the_glt_gathered(tmp_path: Path) -> None:
+    """`source: sensor_column` (13 section 2): the 0-based column of the full sensor array that
+    filled each cell, read off the GLT; NaN where the GLT has no hit. In this synthetic geometry
+    sensor column j fills tile column c0 + j."""
+    from stratum.types import Aggregation, LayerSpec, SnapshotSchema
+
+    obs = make_observation("A", datetime(2026, 6, 5, tzinfo=UTC), r0=2, c0=3, rows=10, cols=8,
+                           view_zenith=10.0)
+    base = schema()
+    sch = SnapshotSchema(name=base.name, layers=[*base.layers, LayerSpec(
+        name="column", kind="continuous", source="sensor_column", aggregate=Aggregation("best"),
+        dtype="float32")])
+    plan = build_plan(tmp_path, [obs], scorer=NadirScorer(), snapshot_schema=sch)
+    block = block_of(with_block(plan, 20), 0, 0)
+    result = read_observation(ObsContext(plan, block, EPOCH, plan.granules["A"],
+                                         glt_key_for(plan, TILE, "A")))
+    assert result is not None
+    col = result.layers["column"]
+    assert col.dtype == np.float32
+    assert col[5, 3:11].tolist() == list(range(8))
+    assert np.isnan(col[5, :3]).all() and np.isnan(col[0]).all()

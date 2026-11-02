@@ -37,13 +37,14 @@ from stratum.resolve.observation import (
     is_lonlat,
     read_observation,
 )
-from stratum.resolve.snapshot import empty_layer, write_snapshot
+from stratum.resolve.snapshot import CATEGORICAL_NODATA, empty_layer, write_snapshot
 from stratum.types import (
     AuxAccessor,
     BlockRef,
     Coords,
     Epoch,
     GranuleRef,
+    LayerSpec,
     ObsWindow,
     TileRef,
     canonical_hash,
@@ -170,8 +171,8 @@ def observation_inputs(plan: PlanContext, glt_key: CacheKey, granule: GranuleRef
                              "checksum": granule.checksums.get(key) if key else None}
     remaps: dict[str, Any] = {}
     for layer in plan.schema.layers:
-        if layer.kind != "categorical":
-            continue
+        if layer.kind != "categorical" or scorer_output(layer.source) is not None:
+            continue                     # a scorer's categorical output is never remapped
         remap = granule_remap(plan, layer.name, granule.granule_id)
         remaps[layer.name] = {"raw_fingerprint": remap.raw_fingerprint,
                               "enumeration": remap.enumeration,
@@ -252,7 +253,8 @@ def resolve_window(plan: PlanContext, block: BlockRef, epoch: Epoch,
         won |= take
         for layer in plan.schema.layers:
             output = scorer_output(layer.source)
-            values = result.layers[layer.name] if output is None else emitted[output]
+            values = (result.layers[layer.name] if output is None
+                      else scorer_values(layer, emitted[output]))
             if layer.name not in layers:
                 bands = values.shape[2] if values.ndim == 3 else 1
                 layers[layer.name] = empty_layer(layer, shape, bands)
@@ -421,10 +423,10 @@ def _resolve_stack(plan: PlanContext, block: BlockRef, epoch: Epoch,
         if output is not None and emitted[output].ndim == 2:
             # a per-cell value (a whole-stack property): taken as-is where something won
             out = empty_layer(layer, shape, 1)
-            out[won] = emitted[output][won].astype(out.dtype)
+            out[won] = scorer_values(layer, emitted[output])[won].astype(out.dtype)
             layers[layer.name] = out
             continue
-        values = obs.layer(layer.name) if output is None else emitted[output]
+        values = obs.layer(layer.name) if output is None else scorer_values(layer, emitted[output])
         bands = values.shape[3] if values.ndim == 4 else 1
         pick = idx.reshape((1, *shape) + (1,) * (values.ndim - 3))
         chosen = np.take_along_axis(values, pick, axis=0)[0]
@@ -436,6 +438,17 @@ def _resolve_stack(plan: PlanContext, block: BlockRef, epoch: Epoch,
                     if (won_core & (idx_core == i)).any()]
     return Resolved(layers={k: v[core] for k, v in layers.items()}, score=best[core],
                     valid=won[core], contributing=contributing, observed=observed[core])
+
+
+def scorer_values(layer: LayerSpec, values: np.ndarray) -> np.ndarray:
+    """A scorer output as the layer stores it. A categorical output holds product ids of the
+    layer's shared enumeration (13 section 2): NaN, or anything outside the uint16 id range,
+    becomes the categorical nodata rather than an undefined integer cast."""
+    if layer.kind != "categorical":
+        return values
+    v = np.asarray(values, dtype=np.float64)
+    ok = np.isfinite(v) & (v >= 0) & (v < CATEGORICAL_NODATA)
+    return np.where(ok, np.rint(np.where(ok, v, 0)), CATEGORICAL_NODATA).astype(np.uint16)
 
 
 def _check_emit(plan: PlanContext, emitted: Any, *, n: int | None,
@@ -544,7 +557,8 @@ def _snapshot_key(plan: PlanContext, parsed: ResolveItem,
     inputs["class_tables"] = {
         layer.name: sorted({granule_remap(plan, layer.name, g.granule_id).raw_fingerprint
                             for g, _, _ in reached})
-        for layer in plan.schema.layers if layer.kind == "categorical"}
+        for layer in plan.schema.layers
+        if layer.kind == "categorical" and scorer_output(layer.source) is None}
     return plan.cache.key("snapshot", plan.grid.id, parsed.tile,
                           _with_block(inputs, parsed.block))
 

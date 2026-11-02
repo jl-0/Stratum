@@ -39,6 +39,8 @@ KEYS = ("joint", "independent")
 TIE_BREAKS = ("weighted", "earliest", "latest", "nodata")
 NORMALIZE = ("fixed", "rank")
 VOTE_WEIGHTS = ("count", "score")
+NONDETECT = ("abstain", "vote")
+BELOW_MIN_COUNT = ("nodata", "none")
 GROUPS = ("g1", "g2")
 
 #: the per-cell (and one per-observation) diagnostics this scorer can deliver (04 section 4)
@@ -60,6 +62,11 @@ OUTPUTS = (
              nodata=float("nan")),
     BandSpec("selection_penalty", "float32", "the selected look's weighted penalty, 0 best, "
              "before any soft-gate penalty", units="fraction", nodata=float("nan")),
+    BandSpec("mode_1", "float32", "the cell's group-1 consensus as a product id of the first "
+             "`layers` entry: 0 (none) where nothing was confirmed; deliver it as a categorical "
+             "layer with classes: layer:<that layer>", units="class", nodata=float("nan")),
+    BandSpec("mode_2", "float32", "the same for group 2 and the second `layers` entry",
+             units="class", nodata=float("nan")),
 )
 
 
@@ -163,10 +170,15 @@ class ModeGatedSelect:
        look one vote. `vote_power` raises that quality to a power: the penalty averages ten
        metrics, so 1 - penalty spans only ~0.55-0.75 between looks and needs sharpening before
        a good look outweighs several poor ones. `min_count` still counts looks, not weight.
+       `nondetect: vote` makes a look that saw nothing (id 0, `none`) a voter for `none`, so a
+       cell mostly seen bare of any detection keeps `none` against one stray detection; the
+       default `abstain` lets only detections vote.
     3. **Mode.** The key with the most votes. Ties: `weighted` (default) takes the key of the
        tied look with the lowest penalty plus `partial_tie_penalty` if it is partial; `earliest`
        / `latest` the first / last tied look; `nodata` leaves the cell unoccupied. A mode held by
-       fewer than `min_count` looks leaves the cell unoccupied. No voter at all: no gate.
+       fewer than `min_count` looks leaves the cell unoccupied - or, with `below_min_count:
+       none`, makes that group's answer `none` and gates on it (the looks that saw nothing
+       qualify). No voter at all: no gate.
     4. **Gate.** `hard`: a look whose key differs from the mode may not occupy the cell (NaN).
        `soft`: it is ranked with `soft_penalty` added instead. A look holding an `ignore`d class
        never matches - also where the cell has no mode - so under the hard gate an ignored class
@@ -208,8 +220,12 @@ class ModeGatedSelect:
     cloud-probability band: set `weights: {cloud_prob: 0}`.**
 
     Emitted outputs (`source: scorer.<name>`): `mode_count`, `mode_votes`, `n_voters`,
-    `n_valid`, `agreement` (mode_count / n_valid), `runner_up_count` (per cell) and
-    `selection_penalty` (per observation; the winner's is kept).
+    `n_valid`, `agreement` (mode_count / n_valid), `runner_up_count` (per cell),
+    `selection_penalty` (per observation; the winner's is kept), and `mode_1` / `mode_2`: each
+    group's consensus as a product id of that group's layer, `none` where valid looks voted for
+    nothing. Deliver those as categorical layers with `classes: layer:<group layer>`. They are
+    the per-group answer even where no single look carries both modes, so under `key:
+    independent` they - not the classes gathered from the selected look - are the product.
     """
 
     capability = "stack"
@@ -234,6 +250,8 @@ class ModeGatedSelect:
                  partial_tie_penalty: float = 0.05,
                  vote_weight: str = "count",
                  vote_power: float = 1.0,
+                 nondetect: str = "abstain",
+                 below_min_count: str = "nodata",
                  normalize: str = "fixed",
                  weights: Mapping[str, float] | None = None,
                  bounds: Mapping[str, Sequence[float]] | None = None,
@@ -246,7 +264,9 @@ class ModeGatedSelect:
         for label, value, allowed in (("key", key, KEYS), ("gate", gate, GATES),
                                       ("tie_break", tie_break, TIE_BREAKS),
                                       ("normalize", normalize, NORMALIZE),
-                                      ("vote_weight", vote_weight, VOTE_WEIGHTS)):
+                                      ("vote_weight", vote_weight, VOTE_WEIGHTS),
+                                      ("nondetect", nondetect, NONDETECT),
+                                      ("below_min_count", below_min_count, BELOW_MIN_COUNT)):
             if value not in allowed:
                 raise ValueError(f"{name}: {label} must be one of {list(allowed)}; got {value!r}")
         ignore = dict(ignore or {})
@@ -306,6 +326,8 @@ class ModeGatedSelect:
         self.partial_tie_penalty = float(partial_tie_penalty)
         self.vote_weight = vote_weight
         self.vote_power = float(vote_power)
+        self.nondetect = nondetect
+        self.below_min_count = below_min_count
         self.normalize = normalize
         #: the positive weights renormalised to sum to 1; zero-weight metrics are not computed
         self.weights = {m: v / total for m, v in w.items() if v > 0}
@@ -404,6 +426,14 @@ class ModeGatedSelect:
         mode_votes = np.where(has, np.take_along_axis(votes, pick, axis=0)[0], 0.0)
         mode_count = np.where(has, np.take_along_axis(counts, pick, axis=0)[0], 0.0)
         drop = has & (mode_count < self.min_count)
+        if self.below_min_count == "none":
+            # an unconfirmed mode is not a detection: the cell's answer is `none`, and the gate
+            # then admits the looks that saw nothing (13 section 3: 0 is "observed, nothing")
+            mode = np.where(drop, 0, mode)
+            mode_count = np.where(drop, np.where(voters & (code == 0), counts, 0.0).max(axis=0),
+                                  mode_count)
+            mode_votes = np.where(drop, 0.0, mode_votes)
+            drop = np.zeros_like(drop)
         if self.tie_break == "nodata":
             sentinel = np.iinfo(np.int64).max
             lo = np.where(top, code, sentinel).min(axis=0)
@@ -439,8 +469,9 @@ class ModeGatedSelect:
             if self.vote_weight == "score" else np.ones(P.shape)
         n_valid = valid.sum(axis=0).astype(np.float32)
 
+        votes_none = self.nondetect == "vote"
         if self.key == "joint":
-            voters = valid & (detect1 | detect2) & ~ignored
+            voters = valid & (detect1 | detect2 | votes_none) & ~ignored
             partial = detect1 ^ detect2
             code = (g1 << 32) | (g2 & 0xFFFFFFFF)
             weight = np.where(partial, self.partial_vote_weight, 1.0) * quality
@@ -451,18 +482,23 @@ class ModeGatedSelect:
             mode_count = np.where(has, m["count"], 0.0)
             mode_votes = m["votes"]
             runner_up = m["runner_up"].astype(np.float32)
+            mode1, mode2 = m["mode"] >> 32, m["mode"] & 0xFFFFFFFF
+            has1 = has2 = has
         else:
             match = np.ones(valid.shape, dtype=bool)
             has = np.zeros(valid.shape[1:], dtype=bool)
             drop = np.zeros(valid.shape[1:], dtype=bool)
             voters_any = np.zeros(valid.shape, dtype=bool)
+            modes = []
             for g, det in ((g1, detect1), (g2, detect2)):
-                voters = valid & det & ~ignored
+                voters = valid & (det | votes_none) & ~ignored
                 voters_any |= voters
                 m = self._mode(g, quality, voters, P)
                 match &= (g == m["mode"][None]) | ~m["has"][None]
                 has |= m["has"]
                 drop |= m["drop"]
+                modes.append((m["mode"], m["has"]))
+            (mode1, has1), (mode2, has2) = modes
             match &= ~ignored
             n_voters = voters_any.sum(axis=0).astype(np.float32)
             # the looks carrying BOTH groups' modes: what the gate keeps
@@ -478,6 +514,12 @@ class ModeGatedSelect:
 
         with np.errstate(invalid="ignore", divide="ignore"):
             agreement = np.where(n_valid > 0, mode_count / n_valid, np.nan)
+
+        # the per-group answer: the mode; `none` where looks were valid but none voted; NaN where
+        # the cell is dropped (min_count under `nodata`, a `nodata` tie) or nothing was valid
+        def answer(mode: np.ndarray, has_g: np.ndarray) -> np.ndarray:
+            out = np.where(has_g, mode, 0).astype(np.float32)
+            return np.where((n_valid > 0) & ~drop, out, np.nan).astype(np.float32)
         self._memo = (id(obs), {
             "mode_count": np.asarray(mode_count, dtype=np.float32),
             "mode_votes": np.asarray(mode_votes, dtype=np.float32),
@@ -486,6 +528,8 @@ class ModeGatedSelect:
             "agreement": np.asarray(agreement, dtype=np.float32),
             "runner_up_count": runner_up,
             "selection_penalty": P,
+            "mode_1": answer(mode1, has1),
+            "mode_2": answer(mode2, has2),
         })
         return s
 

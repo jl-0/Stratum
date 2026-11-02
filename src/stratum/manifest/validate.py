@@ -185,10 +185,12 @@ def _scorer_outputs(scorer: Any) -> dict[str, BandSpec]:
 
 
 def _scorer_layer_problems(where: str, ref: str, output: str, layer: Any,
-                           scorer: Any) -> list[str]:
+                           scorer: Any, layers: Mapping[str, Any]) -> list[str]:
     """A `source: scorer.<output>` layer (13 section 2): the output is declared, and the layer is
-    one continuous band of the output's dtype. Nothing is said when the scorer did not
-    instantiate - that already is a problem of its own."""
+    one continuous band of the output's dtype - or one categorical band whose `classes:
+    layer:<name>` names a categorical layer the scorer does not compute, so the output's values
+    are that layer's product ids. Nothing is said when the scorer did not instantiate - that
+    already is a problem of its own."""
     if scorer is None:
         return []
     outputs = _scorer_outputs(scorer)
@@ -196,6 +198,15 @@ def _scorer_layer_problems(where: str, ref: str, output: str, layer: Any,
     if spec is None:
         return [(f"{where}: scorer {ref} declares no output {output!r}; it declares "
                  f"{sorted(outputs)}")]
+    if layer.kind == "categorical":
+        other = layers.get(layer.classes_layer)
+        if other is None or other.kind != "categorical" \
+                or scorer_output(other.source) is not None:
+            return [(f"{where}: classes {layer.classes!r} must name a categorical layer read "
+                     "from a role, whose product ids the scorer's output holds (13 section 2)")]
+        if layer.dtype not in (None, "uint16"):
+            return [f"{where}: a categorical layer is uint16 (13 section 2); omit dtype"]
+        return []
     if layer.kind != "continuous" or layer.bands is not None or layer.classes is not None \
             or layer.dtype not in (None, spec.dtype):
         return [(f"{where}: a scorer output is one continuous {spec.dtype} band; declare "
@@ -281,7 +292,8 @@ def validate_static(m: Manifest) -> list[str]:
         where = f"snapshot.layers.{name}"
         output = scorer_output(layer.source)
         if output is not None:
-            problems.extend(_scorer_layer_problems(where, m.scorer.ref, output, layer, scorer))
+            problems.extend(_scorer_layer_problems(where, m.scorer.ref, output, layer, scorer,
+                                                         layers))
         elif layer.source in BUILTIN_SOURCES:
             want = BUILTIN_SOURCES[layer.source]
             if layer.kind != "continuous" or layer.bands is not None \

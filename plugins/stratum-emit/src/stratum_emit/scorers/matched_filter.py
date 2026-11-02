@@ -13,6 +13,14 @@ window it:
    weights that sum to one (`_mf.blended_mf`), so the background moves smoothly and nothing
    steps where a window ends.
 
+`background: column` replaces steps 2-3: one background per DETECTOR column - the sensor column
+each cell was gathered from, read from a snapshot layer with `source: sensor_column` (13 section
+2) - because each cross-track spectrometer of a push-broom responds slightly differently. Its
+statistics come from the cells of that look and column inside the block window (`halo` 0), so set
+`block_size` to the tile's cell count to estimate each column over the whole tile; a smaller
+block re-estimates per block and can step at block edges. A column short of `min_n` cells pools
+its neighbours, up to `max_radius` columns either side.
+
 The arithmetic is in `stratum_emit.scorers._mf`. `halo = 2 * stride`: a core cell's farthest
 window gathers cells up to two strides away. Inside a tile that halo is real data, so blocks
 blend into each other exactly; across a tile edge it is whatever the GLT covers (01 section 4).
@@ -75,7 +83,10 @@ class MatchedFilter:
     `stride` (cells between window centres; the halo is twice it), `shrink` (0-1, covariance
     toward its diagonal), `k` (None keeps every component; an int keeps the top-k MNF
     components), `min_n` (cells a window needs to be used), `trim` (fraction of a window's most
-    target-like cells left out of its background, 0 to disable).
+    target-like cells left out of its background, 0 to disable). `background` (`window`, the
+    blended lattice; `column`, one background per detector column, read from the snapshot layer
+    `column_layer`, pooling up to `max_radius` neighbouring columns where one is short of
+    `min_n`; `stride` and `k` do not apply).
     """
 
     capability = "streaming"
@@ -88,7 +99,8 @@ class MatchedFilter:
                  lo: float = 2000.0, hi: float = 2300.0,
                  shoulders: Sequence[Sequence[float]] = ((2000.0, 2030.0), (2260.0, 2300.0)),
                  stride: int = 100, shrink: float = 0.05, k: int | None = None,
-                 min_n: int = 500, trim: float = 0.01) -> None:
+                 min_n: int = 500, trim: float = 0.01, background: str = "window",
+                 column_layer: str = "sensor_column", max_radius: int = 8) -> None:
         name = "MatchedFilter"
         if not lo < hi:
             raise ValueError(f"{name}: needs lo < hi; got {lo}, {hi}")
@@ -104,13 +116,25 @@ class MatchedFilter:
             raise ValueError(f"{name}: k is a positive component count or null; got {k}")
         if not 0.0 <= trim < 0.5:
             raise ValueError(f"{name}: trim must be in [0, 0.5); got {trim}")
+        if background not in ("window", "column"):
+            raise ValueError(f"{name}: background must be 'window' or 'column'; "
+                             f"got {background!r}")
+        if background == "column" and k is not None:
+            raise ValueError(f"{name}: k (MNF) applies to background: window only")
+        if int(max_radius) < 0:
+            raise ValueError(f"{name}: max_radius must not be negative; got {max_radius}")
         load_target(target)                 # fail at plan time, not on a worker
         self.target = target
         self.role = role
         self.lo, self.hi = float(lo), float(hi)
         self.shoulders = sh
         self.stride = int(stride)
-        self.halo = 2 * self.stride
+        self.background = background
+        self.column_layer = column_layer
+        self.max_radius = int(max_radius)
+        self.halo = 2 * self.stride if background == "window" else 0
+        self.required_layers: tuple[str, ...] = \
+            (column_layer,) if background == "column" else ()
         self.shrink = float(shrink)
         self.k = None if k is None else int(k)
         self.min_n = int(min_n)
@@ -147,6 +171,13 @@ class MatchedFilter:
 
         block = obs.block
         assert block is not None, "matched_filter runs in block space"
+        if self.background == "column":
+            col = np.asarray(obs.layer(self.column_layer), dtype=np.float64)
+            mf, bg_n = _mf.column_mf(cr, valid, col, t_cr, shrink=self.shrink,
+                                     min_n=self.min_n, trim=self.trim,
+                                     max_radius=self.max_radius)
+            depth = np.where(valid, _mf.band_depth(xk, wl_k), np.nan).astype(np.float32)
+            return {"mf": mf, "band_depth_208": depth, "bg_n": bg_n}
         grid = block.tile.grid
         tr = block.transform
         origin = (round((tr.f - grid.origin[1]) / grid.resolution[1]),

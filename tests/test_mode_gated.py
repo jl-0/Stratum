@@ -374,7 +374,7 @@ def test_mode_gated_emit_outputs() -> None:
     s = ModeGatedSelect(weights=VZ_ONLY)
     names = {b.name for b in s.outputs}
     assert names == {"mode_count", "mode_votes", "n_voters", "n_valid", "agreement",
-                     "runner_up_count", "selection_penalty"}
+                     "runner_up_count", "selection_penalty", "mode_1", "mode_2"}
     assert {b.dtype for b in s.outputs} == {"float32"}
     # two cells, three looks: emit reuses what score computed for the SAME window
     g1 = np.array([[HEM, GOE], [HEM, GOE], [GOE, 0]], np.int32).reshape(3, 1, 2)
@@ -394,6 +394,62 @@ def test_mode_gated_emit_outputs() -> None:
     assert out["n_voters"].tolist() == [[3, 2]]       # (0, 0) does not vote
     assert out["runner_up_count"].tolist() == [[1, 1]]
     assert out["agreement"][0].tolist() == pytest.approx([2 / 3, 1 / 3])
+    assert out["mode_1"].tolist() == [[HEM, GOE]] and out["mode_2"].tolist() == [[KAO, KAO]]
+
+
+# ------------------------------------------------------------- non-detects and the answer
+def test_mode_gated_nondetect_vote() -> None:
+    """Three looks see nothing, one sees (HEM, KAO). Abstaining, the one detection is the
+    answer; voting, `none` wins both groups and a look that saw nothing is selected."""
+    pairs = [(0, 0), (HEM, KAO), (0, 0), (0, 0)]
+    obs = stack(pairs, bands={"view_zenith": [9.0, 1.0, 3.0, 6.0]})
+    s = ModeGatedSelect(weights=VZ_ONLY, key="independent", gate="soft")
+    assert winner(s, obs) == 1
+    out = s.emit(obs, None)
+    assert (out["mode_1"][0, 0], out["mode_2"][0, 0]) == (HEM, KAO)
+    s = ModeGatedSelect(weights=VZ_ONLY, key="independent", gate="soft", nondetect="vote")
+    assert winner(s, obs) == 2                        # the most nadir look that saw nothing
+    out = s.emit(obs, None)
+    assert (out["mode_1"][0, 0], out["mode_2"][0, 0]) == (0, 0)
+    assert out["n_voters"][0, 0] == 4
+    # joint: (0, 0) is a key like any other
+    s = ModeGatedSelect(weights=VZ_ONLY, nondetect="vote")
+    assert winner(s, obs) == 2
+    with pytest.raises(ValueError, match="nondetect"):
+        ModeGatedSelect(nondetect="count")
+
+
+def test_mode_gated_below_min_count_none() -> None:
+    """One stray detection among looks that saw nothing: under min_count 2 it is unconfirmed.
+    `nodata` leaves the cell empty; `none` answers none and selects a look that saw nothing."""
+    obs = stack([(HEM, KAO), (0, 0), (0, 0)], bands={"view_zenith": [1.0, 9.0, 4.0]})
+    s = ModeGatedSelect(weights=VZ_ONLY, key="independent", min_count=2)
+    assert winner(s, obs) is None
+    out = s.emit(obs, None)
+    assert np.isnan(out["mode_1"][0, 0]) and np.isnan(out["mode_2"][0, 0])
+    s = ModeGatedSelect(weights=VZ_ONLY, key="independent", min_count=2, below_min_count="none")
+    assert winner(s, obs) == 2
+    out = s.emit(obs, None)
+    assert (out["mode_1"][0, 0], out["mode_2"][0, 0]) == (0, 0)
+    # a confirmed detection is unaffected
+    obs = stack([(HEM, KAO), (HEM, 0), (0, 0)], bands={"view_zenith": [1.0, 9.0, 4.0]})
+    s.score(obs, None)
+    out = s.emit(obs, None)
+    assert (out["mode_1"][0, 0], out["mode_2"][0, 0]) == (HEM, 0)
+    with pytest.raises(ValueError, match="below_min_count"):
+        ModeGatedSelect(below_min_count="drop")
+
+
+def test_mode_gated_modes_without_a_look_carrying_both() -> None:
+    """Group 1's mode is HEM (3 of 5) and group 2's KAO (2 of 3 voters), and no look holds
+    both. The soft gate still selects a look; mode_1 / mode_2 are each group's own answer."""
+    pairs = [(HEM, ALU), (HEM, 0), (HEM, 0), (GOE, KAO), (GOE, KAO)]
+    obs = stack(pairs, bands={"view_zenith": [1.0, 2.0, 3.0, 4.0, 5.0]})
+    s = ModeGatedSelect(weights=VZ_ONLY, key="independent", gate="soft")
+    assert winner(s, obs) is not None
+    out = s.emit(obs, None)
+    assert (out["mode_1"][0, 0], out["mode_2"][0, 0]) == (HEM, KAO)
+    assert out["mode_count"][0, 0] == 0
 
 
 # ---------------------------------------------------------------------- through resolve
@@ -407,7 +463,10 @@ def _two_layer_schema(*scorer_layers: str) -> SnapshotSchema:
         LayerSpec(name="acquired", kind="continuous", source="acquired",
                   aggregate=Aggregation("none"), dtype="float64"),
     ]
-    layers += [LayerSpec(name=n, kind="continuous", source=f"scorer.{n}",
+    layers += [LayerSpec(name=n, kind="categorical", source=f"scorer.{n}",
+                         aggregate=Aggregation("vote"), dtype="uint16", classes=classes)
+               if n in ("mode_1", "mode_2") else
+               LayerSpec(name=n, kind="continuous", source=f"scorer.{n}",
                          aggregate=Aggregation("none"), dtype="float32")
                for n in scorer_layers]
     return SnapshotSchema(name="mg", layers=layers)
@@ -426,7 +485,7 @@ def test_mode_gated_runs_through_resolve(tmp_path: Path) -> None:
     scorer = ModeGatedSelect(layers=("mineral", "mineral_b"), weights=VZ_ONLY)
     plan = build_plan(tmp_path, [a, b], scorer=scorer,
                       snapshot_schema=_two_layer_schema("mode_count", "agreement",
-                                                        "selection_penalty"))
+                                                        "selection_penalty", "mode_1"))
     snap = read_snapshot(resolve_block(item(TILE, EPOCH, 0, 0), plan).path)
     t_a, t_b = acquired_seconds(a.ref.datetime), acquired_seconds(b.ref.datetime)
     assert snap["valid"].all()
@@ -437,6 +496,10 @@ def test_mode_gated_runs_through_resolve(tmp_path: Path) -> None:
     assert snap["agreement"][:, 5:] == pytest.approx(0.5)
     assert snap["selection_penalty"][:, 5:] == pytest.approx(20 / 30)
     assert snap["selection_penalty"][:, :5] == pytest.approx(2 / 30)
+    # the categorical consensus, as product ids of the shared enumeration: `none` where only the
+    # non-detect look reached, "alpha" where B's detection is the mode
+    assert snap["mode_1"].dtype == np.uint16
+    assert (snap["mode_1"][:, :5] == 0).all() and (snap["mode_1"][:, 5:] == 1).all()
     # masking "alpha" out of group 2 by NAME leaves group 1 voting alone (partial), same winner
     masked = ModeGatedSelect(layers=("mineral", "mineral_b"), weights=VZ_ONLY,
                              g2_mask_classes=["alpha"])

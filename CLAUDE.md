@@ -342,8 +342,12 @@ tile list - and exists to exercise multi-tile fan-out, publish and STAC (719 wor
 `examples/zones.yaml` is the AOI zone registry.
 `examples/emit-cm-demo-sites/` holds the contending configurations over the four demonstration
 sites (A `low_vegetation_nadir` weekly then vote, B `mode_gated_select` at the external tool's defaults,
-C a variant of B); `tests/test_examples.py` validates every example manifest and pins what the
-contenders must share (grid, index, band names, B = the scorer's defaults, C = B plus three changes).
+C a variant of B), and the current **yearly** set (`manifest-yearly-*.yaml`): one P1Y epoch, the
+stack scorer decides and delivers each group's EMIT-10 consensus (`scorer.mode_1/2` as categorical
+layers, `classes: layer:<name>`), reduce is the identity, and each variant changes ONE scorer
+parameter from the base; `tests/test_examples.py` validates every example manifest and pins what the
+contenders must share (grid, index, band names, B = the scorer's defaults, C = B plus three changes,
+yearly variant = base plus one change).
 The first-slice trial over the same tile from a local directory (`examples/trial-nevada/`, with
 the SpectralUtil `build_obs_nc` parity script) IS tracked - its manifests and `parity.py` are
 source - but it cannot run without `trial-data/`, which is git-ignored and never committed.

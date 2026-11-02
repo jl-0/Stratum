@@ -384,7 +384,8 @@ enumeration, never a raw class. Every snapshot in a run shares one schema, and i
 <code>layers_hash</code> is in every snapshot's cache key. A layer with
 <code>source: scorer.&lt;output&gt;</code> holds what the scorer's <code>emit()</code> computed,
 one continuous band whose <code>dtype</code> the planner takes from the scorer's
-<code>BandSpec</code> (<a href="../guide/plugins.html#emit">recording what the scorer computed</a>). See
+<code>BandSpec</code>, or one categorical band of another layer's product ids
+(<code>classes: layer:&lt;name&gt;</code>) (<a href="../guide/plugins.html#emit">recording what the scorer computed</a>). See
 <a href="../guide/plugins.html#snapshot-schema">what the snapshot carries</a>.</p>
 
 <p>Check <code>snaps.valid</code> rather than testing values against a sentinel. An epoch with no

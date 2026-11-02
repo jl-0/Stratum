@@ -538,7 +538,10 @@ class Aggregation:
 #: exact to the second is what makes it name the granule - an EMIT scene's start time is
 #: unique. It is the per-cell provenance that a pixel -> granule -> spectrum click-through needs
 #: and that a published mosaic cannot recover later (04 section 4, "Derived snapshot bands").
-BUILTIN_SOURCES: Mapping[str, str] = {"acquired": "float64"}
+#: `sensor_column` is the 0-based column of the full sensor array that filled the cell, read off
+#: the GLT (|GLT X| - 1), NaN where the GLT has no hit: on a push-broom each column is its own
+#: detector, so it is what a per-detector statistic groups by and what an edge streak maps to.
+BUILTIN_SOURCES: Mapping[str, str] = {"acquired": "float64", "sensor_column": "float32"}
 
 #: A layer source naming one of the SCORER's declared `outputs` (04 section 4, 13 section 2):
 #: `source: scorer.<output>`. Not a role, not an alias - the prefix is reserved in the one

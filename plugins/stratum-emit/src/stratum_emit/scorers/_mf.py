@@ -16,6 +16,11 @@ Three steps, each testable alone:
    anywhere a window ends. A window with too few cells is dropped and the remaining weights are
    renormalised, which keeps partial coverage smooth too.
 
+Or, instead of steps 2-3, **per detector column** (`column_mf`): one mean and covariance per
+column of the sensor array that filled the cells (`sensor_column`), pooled over the neighbouring
+columns only where a column has too few cells. On a push-broom every cross-track column is its
+own spectrometer with its own response, so its background is estimated apart from the others.
+
 The MF is `sᵀΣ⁻¹(x−μ) / sᵀΣ⁻¹s` with `s = t − μ`: about 0 over background, about 1 for a cell that
 is all target. On continuum-removed spectra it is the linear-mixing abundance of the target's
 share of the cell's CONTINUUM, not of its area: a fraction `a` of a target with continuum `Ct`
@@ -100,11 +105,19 @@ def background(x: np.ndarray, target: np.ndarray, *, shrink: float,
     `k` keeps only the top-k MNF components (noise-whitened PCA, ordered by SNR); None keeps
     them all, where the MF already weights every direction by how much the background varies
     along it. None when the target is indistinguishable from the mean."""
-    n, b = x.shape
+    n = x.shape[0]
     mu = x.mean(axis=0)
     xc = x - mu
-    s = target - mu
     cov = (xc.T @ xc) / max(n - 1, 1)
+    return _filter(mu, cov, n, target, shrink=shrink, k=k,
+                   sig=noise_sigma(x) if k is not None else None)
+
+
+def _filter(mu: np.ndarray, cov: np.ndarray, n: int, target: np.ndarray, *, shrink: float,
+            k: int | None, sig: np.ndarray | None) -> Background | None:
+    """The MF projection for a background mean and covariance (`background`, `column_mf`)."""
+    b = mu.size
+    s = target - mu
     cov = (1.0 - shrink) * cov + shrink * np.diag(np.diag(cov))
     if k is None or k >= b:
         # tiny ridge so a degenerate window (constant bands) still inverts
@@ -114,7 +127,7 @@ def background(x: np.ndarray, target: np.ndarray, *, shrink: float,
         except np.linalg.LinAlgError:
             return None
     else:
-        sig = noise_sigma(x)
+        assert sig is not None
         cz = cov / np.outer(sig, sig)
         lam, vec = np.linalg.eigh(cz)
         order = np.argsort(lam)[::-1][:k]
@@ -210,6 +223,97 @@ def blended_mf(x: np.ndarray, valid: np.ndarray, stats: dict[tuple[int, int], Ba
     return out, n_out
 
 
+def _column_moments(x: np.ndarray, col: np.ndarray, ncol: int
+                    ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Per column c < ncol: the cell count, Σx (B) and Σxxᵀ (B, B) of the (n, B) rows `x` whose
+    column `col` is c."""
+    b = x.shape[1]
+    n = np.bincount(col, minlength=ncol).astype(np.float64)
+    s1 = np.zeros((ncol, b))
+    s2 = np.zeros((ncol, b, b))
+    order = np.argsort(col, kind="stable")
+    xs, cs = x[order], col[order]
+    edges = np.flatnonzero(np.diff(cs)) + 1
+    for lo, hi in zip(np.r_[0, edges], np.r_[edges, cs.size], strict=True):
+        if hi > lo:
+            c, part = cs[lo], xs[lo:hi]
+            s1[c] = part.sum(axis=0)
+            s2[c] = part.T @ part
+    return n, s1, s2
+
+
+def _column_filters(n: np.ndarray, s1: np.ndarray, s2: np.ndarray, present: np.ndarray,
+                    target: np.ndarray, *, shrink: float, min_n: int, max_radius: int
+                    ) -> dict[int, Background]:
+    """A filter per present column from the moments of the columns c - r .. c + r, with r the
+    smallest radius (up to `max_radius`) that reaches `min_n` cells."""
+    cn, c1, c2 = (np.concatenate([np.zeros((1, *a.shape[1:])), np.cumsum(a, axis=0)])
+                  for a in (n, s1, s2))
+    last = n.size
+    out: dict[int, Background] = {}
+    for c in present:
+        for r in range(max_radius + 1):
+            lo, hi = max(c - r, 0), min(c + r + 1, last)
+            m = cn[hi] - cn[lo]
+            if m >= min_n:
+                break
+        else:
+            continue
+        mu = (c1[hi] - c1[lo]) / m
+        cov = ((c2[hi] - c2[lo]) - m * np.outer(mu, mu)) / max(m - 1.0, 1.0)
+        bg = _filter(mu, cov, int(m), target, shrink=shrink, k=None, sig=None)
+        if bg is not None:
+            out[int(c)] = bg
+    return out
+
+
+def column_mf(x: np.ndarray, valid: np.ndarray, col: np.ndarray, target: np.ndarray, *,
+              shrink: float, min_n: int, trim: float, max_radius: int
+              ) -> tuple[np.ndarray, np.ndarray]:
+    """(mf, bg_n) for (H, W, B) spectra whose cells came from sensor columns `col` (H, W; NaN
+    where unknown), each column scored against its own background. A column with fewer than
+    `min_n` valid cells pools its neighbours, up to `max_radius` either side, and a column that
+    still has too few is left NaN. `trim` > 0 drops each column's most target-like fraction
+    from the background and re-estimates, as `window_stats` does."""
+    h, w = valid.shape
+    ok = valid & np.isfinite(col)
+    mf = np.full((h, w), np.nan, np.float32)
+    bg_n = np.full((h, w), np.nan, np.float32)
+    if not ok.any():
+        return mf, bg_n
+    pix = x[ok].astype(np.float64)
+    cols = col[ok].astype(np.int64)
+    ncol = int(cols.max()) + 1
+    present = np.unique(cols)
+    n, s1, s2 = _column_moments(pix, cols, ncol)
+    filters = _column_filters(n, s1, s2, present, target, shrink=shrink, min_n=min_n,
+                              max_radius=max_radius)
+
+    def apply(filters: dict[int, Background]) -> tuple[np.ndarray, np.ndarray]:
+        score = np.full(cols.size, np.nan)
+        count = np.full(cols.size, np.nan)
+        for c, bg in filters.items():
+            sel = cols == c
+            score[sel] = (pix[sel] - bg.mu) @ bg.w
+            count[sel] = bg.n
+        return score, count
+
+    score, count = apply(filters)
+    if trim > 0 and filters:
+        keep = np.ones(cols.size, dtype=bool)
+        for c in filters:
+            sel = np.flatnonzero(cols == c)
+            if sel.size:
+                keep[sel] = score[sel] <= np.quantile(score[sel], 1.0 - trim)
+        n, s1, s2 = _column_moments(pix[keep], cols[keep], ncol)
+        trimmed = _column_filters(n, s1, s2, present, target, shrink=shrink, min_n=min_n,
+                                  max_radius=max_radius)
+        score, count = apply(filters | trimmed)
+    mf[ok] = score
+    bg_n[ok] = count
+    return mf, bg_n
+
+
 __all__ = ["F208_CENTRE", "F208_SHOULDERS", "Background", "background", "band_depth",
-           "band_index", "blended_mf", "continuum_removed", "needed_centres", "noise_sigma",
+           "band_index", "blended_mf", "column_mf", "continuum_removed", "needed_centres", "noise_sigma",
            "window_stats"]

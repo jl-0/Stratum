@@ -354,7 +354,7 @@ class PlanContext:
         for layer in self.schema.layers:
             src = layer.source
             if (layer.kind != "continuous" or layer.bands is not None
-                    or scorer_output(src) is not None or src == "acquired"):
+                    or scorer_output(src) is not None or src in BUILTIN_SOURCES):
                 continue
             if src in kept or (src in self.aliases and self.aliases[src].role in whole):
                 out[layer.name] = src

@@ -693,7 +693,9 @@ def inspect_granules(m: Manifest, refs: Mapping[str, GranuleRef], readers: Mappi
                     raise PlanError(f"snapshot.layers.{layer.name}: the scorer declares no "
                                     f"output {output!r} (04 section 4)")
                 band_counts[layer.name] = 1
-                layers.append(dataclasses.replace(layer, dtype=spec_out.dtype))
+                # categorical: product ids of another layer's enumeration, filled in below
+                layers.append(layer if layer.kind == "categorical"
+                              else dataclasses.replace(layer, dtype=spec_out.dtype))
                 continue
             src_role = role_of(m, layer.source)
             spec = specs[src_role]
@@ -771,6 +773,14 @@ def inspect_granules(m: Manifest, refs: Mapping[str, GranuleRef], readers: Mappi
     finally:
         opener.close()
 
+    # a categorical scorer output (`classes: layer:<name>`) shares that layer's resolved table;
+    # it has no remap, because the scorer computed product ids, never raw classes
+    by_name = {layer.name: layer for layer in layers}
+    for i, layer in enumerate(layers):
+        shared = m.snapshot.layers[layer.name].classes_layer
+        if shared is not None:
+            layers[i] = dataclasses.replace(layer, classes=by_name[shared].classes,
+                                            lumping=by_name[shared].lumping)
     schema = SnapshotSchema(name=m.snapshot.name, layers=tuple(layers),
                             extends=tuple(m.snapshot.extends))
     validate_schema(schema)

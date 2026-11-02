@@ -169,3 +169,75 @@ def test_c_changes_exactly_three_of_bs_settings() -> None:
     changed = {k for k in b.keys() | c.keys() if b.get(k) != c.get(k)}
     assert changed == {"key", "gate", "normalize"}
     assert (c["key"], c["gate"], c["normalize"]) == ("independent", "soft", "rank")
+
+
+# ----------------------------------------------------------------------- the yearly set
+YEARLY = ("reference", "base", "min3", "nondetect-vote", "weighted")
+#: what each yearly variant changes from the base - and nothing else
+YEARLY_CHANGES = {
+    "reference": {"key": "joint", "gate": "hard", "normalize": "fixed"},
+    "min3": {"min_count": 3, "below_min_count": "none"},
+    "nondetect-vote": {"nondetect": "vote"},
+    "weighted": {"vote_weight": "score", "vote_power": 8},
+}
+
+
+def _yearly(name: str) -> dict:
+    return _raw(f"yearly-{name}")
+
+
+@pytest.mark.parametrize("key", SHARED)
+def test_yearly_share_the_round_one_sites_grid_and_masks(key: str) -> None:
+    for name in YEARLY:
+        assert _yearly(name)[key] == _raw("baseline")[key], f"yearly-{name}: {key}"
+
+
+def test_yearly_share_one_index_inputs_epoch_and_products() -> None:
+    """One yearly epoch and one granule set; the snapshot (but its name) and the outputs are
+    identical, so every difference between two yearly maps is the scorer's."""
+    base = _yearly("base")
+    for name in YEARLY:
+        doc = _yearly(name)
+        assert doc["inputs"] == _raw("mode-gated")["inputs"], name
+        assert doc["time"]["epoch"] == doc["time"]["deliver"] == "P1Y", name
+        assert doc["scorer"]["ref"] == "mode_gated_select", name
+        assert {k: v for k, v in doc["snapshot"].items() if k != "name"} \
+            == {k: v for k, v in base["snapshot"].items() if k != "name"}, name
+        assert doc["outputs"] == base["outputs"], name
+
+
+def test_yearly_variants_change_one_thing_from_the_base() -> None:
+    base = _yearly("base")["scorer"]["params"]
+    for name, change in YEARLY_CHANGES.items():
+        params = _yearly(name)["scorer"]["params"]
+        changed = {k: params[k] for k in base.keys() | params.keys()
+                   if base.get(k) != params.get(k)}
+        assert changed == change, f"yearly-{name} changes {changed}"
+
+
+def test_yearly_reference_is_bs_selection() -> None:
+    """The reference keeps B's joint selection; only the voted layers (EMIT-10) and the options
+    B leaves at their defaults are spelled out."""
+    b = ModeGatedSelect(**_raw("mode-gated")["scorer"]["params"])
+    ref = ModeGatedSelect(**_yearly("reference")["scorer"]["params"])
+    for attr in ("key", "gate", "normalize", "weights", "bounds", "min_count", "tie_break",
+                 "vote_weight", "nondetect", "below_min_count"):
+        assert getattr(ref, attr) == getattr(b, attr), attr
+
+
+def test_yearly_deliver_the_scorers_emit10_answer() -> None:
+    """emit10_1/2 are the scorer's per-group modes in the EMIT-10 enumeration of the layers it
+    votes on, and the colour table names every EMIT-10 class."""
+    m = load_manifest(DEMO / "manifest-yearly-base.yaml")
+    layers = m.snapshot.layers
+    voted = m.scorer.params["layers"]
+    for group, look in enumerate(voted, start=1):
+        assert layers[f"emit10_{group}"].source == f"scorer.mode_{group}"
+        assert layers[f"emit10_{group}"].classes == f"layer:{look}"
+        assert layers[look].classes == f"@ref:classes/emit10-g{group}.yaml"
+    schema = {layer.name: layer for layer in m.snapshot_schema().layers}
+    assert schema["emit10_2"].classes == schema["emit10_look_2"].classes
+    colours = m.output_colors()
+    names = {n for g in (1, 2) for n in schema[f"emit10_{g}"].classes.entries.column("name").to_pylist()}
+    assert names - {"none"} <= set(colours)
+    assert colours["Hematite.02+Quartz.98 GDS76 W1R1Ha"] == (235, 0, 180)

@@ -113,7 +113,7 @@ of metadata: URLs, footprints, times, cloud cover, checksums. It reads no pixel 
 <tr>
   <td>Resolve the AOI</td>
   <td>AOI bbox → the set of tiles on the grid lattice that intersect it; time range → epochs</td>
-  <td><a class="src" data-sym="plan_run" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/plan/run.py#L904">plan/run.py:677</a></td>
+  <td><a class="src" data-sym="plan_run" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/plan/run.py#L914">plan/run.py:677</a></td>
 </tr>
 <tr>
   <td>Filter</td>
@@ -128,14 +128,14 @@ of metadata: URLs, footprints, times, cloud cover, checksums. It reads no pixel 
       <em>remap</em> — an integer lookup array from that granule's ids to the run's ids — and
       fails if two granules disagree irreconcilably. The remap is applied later, at the gather,
       where the granule is still known</td>
-  <td><a class="src" data-sym="granule_remap" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/resolve/block.py#L135">block.py:96</a></td>
+  <td><a class="src" data-sym="granule_remap" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/resolve/block.py#L136">block.py:96</a></td>
 </tr>
 <tr>
   <td>Freeze</td>
   <td>The surviving granule set is written to the run directory and hashed. Every later stage
       reads the frozen set, never the live catalogue, so a re-run cannot silently include a
       granule that appeared since</td>
-  <td><a class="src" data-sym="# -- freeze (02 section 6)" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/plan/run.py#L1037">plan/run.py:773</a></td>
+  <td><a class="src" data-sym="# -- freeze (02 section 6)" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/plan/run.py#L1047">plan/run.py:773</a></td>
 </tr>
 </tbody>
 </table>
@@ -303,7 +303,7 @@ falling back, since a silent fallback would mix two derivations under one cache 
   <td>Candidates</td>
   <td>Granules in the frozen set whose footprint intersects this block and whose acquisition
       time falls in this epoch</td>
-  <td><a class="src" data-sym="candidates" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/resolve/block.py#L79">block.py:72</a></td>
+  <td><a class="src" data-sym="candidates" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/resolve/block.py#L80">block.py:72</a></td>
 </tr>
 <tr>
   <td class="num">2</td>
@@ -318,7 +318,7 @@ falling back, since a silent fallback would mix two derivations under one cache 
   <td>The bounding box of the sensor pixels this GLT window names:
       <code>[min|gy|-1, max|gy|) × [min|gx|-1, max|gx|)</code>. This is the only part of the
       granule that is read</td>
-  <td><a class="src" data-sym="covering" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/types.py#L688">types.py:541</a></td>
+  <td><a class="src" data-sym="covering" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/types.py#L691">types.py:541</a></td>
 </tr>
 <tr>
   <td class="num">4</td>
@@ -370,13 +370,13 @@ falling back, since a silent fallback would mix two derivations under one cache 
   <td>Class remap</td>
   <td>The granule's own class ids → the run's, by the lookup array plan built. A value with no
       mapping is marked invalid rather than guessed</td>
-  <td><a class="src" data-sym="values = apply_remap(values," href="https://github.com/jl-0/Stratum/blob/main/src/stratum/resolve/observation.py#L354">observation.py:215</a></td>
+  <td><a class="src" data-sym="values = apply_remap(values," href="https://github.com/jl-0/Stratum/blob/main/src/stratum/resolve/observation.py#L359">observation.py:215</a></td>
 </tr>
 <tr>
   <td class="num">9</td>
   <td>Score and keep</td>
   <td>The scorer runs on the block; the running best is updated — see below</td>
-  <td><a class="src" data-sym="resolve_window" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/resolve/block.py#L209">block.py:154</a></td>
+  <td><a class="src" data-sym="resolve_window" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/resolve/block.py#L210">block.py:154</a></td>
 </tr>
 </tbody>
 </table>
@@ -582,7 +582,7 @@ then:</p>
 <tr>
   <td>Per-cell winner within an epoch</td>
   <td>Stratum — the point of the framework; the rule itself is a plugin</td>
-  <td><a class="src" data-sym="resolve_window" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/resolve/block.py#L209">resolve_window</a></td>
+  <td><a class="src" data-sym="resolve_window" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/resolve/block.py#L210">resolve_window</a></td>
 </tr>
 <tr>
   <td>Mode through time, agreement, runner-up, continuous statistics</td>

@@ -342,6 +342,11 @@ def read_observation(ctx: ObsContext) -> Observation | None:
             layers[layer.name] = np.full(glt.shape[:2], acquired_seconds(granule.datetime),
                                          dtype=np.float64)
             continue
+        if layer.source == "sensor_column":
+            # framework-provided (13 section 2): the detector column the GLT gathered from
+            col = (np.abs(glt[..., 0]) - 1).astype(np.float32)
+            layers[layer.name] = np.where(glt[..., 2] != 0, col, np.float32(np.nan))
+            continue
         values = _select_bands(bands[layer.source], layer.bands, layer.name)
         if layer.kind == "categorical":
             try:

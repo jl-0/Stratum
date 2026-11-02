@@ -44,6 +44,7 @@ from stratum.time import (
 )
 from stratum.types import (
     BUILTIN_SOURCES,
+    SCORER_SOURCE_PREFIX,
     Aggregation,
     ClassTable,
     Epoch,
@@ -54,6 +55,9 @@ from stratum.types import (
 )
 
 REF_PREFIX = "@ref:"
+#: `classes: "layer:<name>"` - a categorical scorer output (13 section 2) shares another
+#: categorical layer's product enumeration, because the scorer computes it from that layer's ids
+LAYER_PREFIX = "layer:"
 SCHEMA_VERSION = "1.0"
 
 CATEGORICAL_METHODS = {"vote", "best", "none"}
@@ -446,7 +450,12 @@ class LayerModel(Strict):
             if self.classes is None:
                 raise ValueError("a categorical layer needs classes: '@ref:<file>' or 'source' "
                                  "(13 section 3)")
-            if self.classes != "source" and not self.classes.startswith(REF_PREFIX):
+            from_scorer = self.source.startswith(SCORER_SOURCE_PREFIX)
+            if from_scorer and not self.classes.startswith(LAYER_PREFIX):
+                raise ValueError(f"a categorical scorer output takes another layer's classes: "
+                                 f"'{LAYER_PREFIX}<layer>' (13 section 2); got {self.classes!r}")
+            if not from_scorer and self.classes != "source" \
+                    and not self.classes.startswith(REF_PREFIX):
                 raise ValueError(f"classes must be 'source' or '{REF_PREFIX}<path>'; "
                                  f"got {self.classes!r}")
             if self.bands is not None:
@@ -477,6 +486,13 @@ class LayerModel(Strict):
         """The path after `@ref:`, or None for `source` / continuous."""
         if self.classes and self.classes.startswith(REF_PREFIX):
             return self.classes[len(REF_PREFIX):]
+        return None
+
+    @property
+    def classes_layer(self) -> str | None:
+        """The layer named by `layer:<name>` (a categorical scorer output), or None."""
+        if self.classes and self.classes.startswith(LAYER_PREFIX):
+            return self.classes[len(LAYER_PREFIX):]
         return None
 
 
@@ -811,9 +827,10 @@ class Manifest(Strict):
                 dtype = BUILTIN_SOURCES[layer.source]
             if layer.kind == "categorical":
                 dtype = dtype or "uint16"
-                if name in enums:
-                    classes = enums[name].class_table()
-                    lumping = enums[name].fingerprint()
+                shared = layer.classes_layer or name   # layer:<name> shares that layer's table
+                if shared in enums:
+                    classes = enums[shared].class_table()
+                    lumping = enums[shared].fingerprint()
             layers.append(LayerSpec(
                 name=name, kind=layer.kind, source=layer.source,
                 aggregate=layer.aggregate.to_aggregation(), dtype=dtype,

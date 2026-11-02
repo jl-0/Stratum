@@ -506,7 +506,9 @@ Exactly the layers `SnapshotSchema` declares, plus `score` and `valid`, which th
 adds. A categorical layer holds product ids from its enumeration, never a raw class
 ([13 §3](13-snapshot-schema.md)). A layer with `source: scorer.<output>` holds what the scorer's
 `emit()` computed — the winning observation's value, or for a `stack` scorer a per-cell property of
-the whole stack — as one continuous band, NaN where nothing won ([04 §4](04-cost-functions.md)).
+the whole stack — as one continuous band, NaN where nothing won, or as one categorical band of
+product ids in another layer's enumeration (`classes: layer:<name>`), whose `LayerSpec.classes` the
+planner copies from that layer ([04 §4](04-cost-functions.md)).
 **[design]** It is stored and keyed like any other layer: `SCORER_SOURCE_PREFIX` and
 `scorer_output(source)` in `src/stratum/types.py` are the only new names, and `LayerSpec` gained no
 field.
