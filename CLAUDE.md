@@ -236,6 +236,9 @@ Established by reading code and data. Do not re-derive; do not assume the opposi
   `granules.json` maps value -> granule id. Do not swap it for a run-local granule index: that
   index changes when the granule set does, which would invalidate (or worse, mislabel) cached
   snapshots - the timestamp is intrinsic to the granule, so adding 2026 never reprocesses 2025.
+  The `granule_*` band publish derives from each `acquired_*` band does number granules per run
+  (sorted frozen index, 1..N, class name = granule id). That is safe ONLY because it is built at
+  publish, after every cache: keep it there.
 - **The run estimate is fitted, not guessed — and partly wrong in a known way.** Constants come from
   the recorded cold run `nevada-regrid-cost-probe-20260917-d095b352` (regrid 6.56 + 23.44 s x tile
   cover, resolve 0.074 + 0.080 s per candidate, reduce 8.65 s, publish 3.87 s, at 10 bytes a cell).

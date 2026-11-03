@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Any
 
 import numpy as np
+import pyarrow as pa
 
 from stratum.publish.cogs import check_formats, is_categorical, raster_format, write_data_cogs
 from stratum.publish.colors import shared_colors
@@ -22,8 +23,11 @@ from stratum.publish.mappers import build_mappers, categorical_legend, write_ima
 from stratum.publish.provenance import iso_utc
 from stratum.publish.stac import stamp, write_stac_item
 from stratum.publish.stitch import stitch
-from stratum.reduce import product_bands
+from stratum.reduce import CATEGORICAL_DTYPE, CATEGORICAL_NODATA, product_bands
 from stratum.types import (
+    ACQUIRED_UNITS,
+    BandSpec,
+    BandStack,
     BlockRef,
     ClassTable,
     Epoch,
@@ -34,6 +38,8 @@ from stratum.types import (
 )
 
 GRANULES_NAME = "granules.json"
+#: Product ids a categorical band can carry: 1..65534, with 0 `none` and 65535 nodata.
+MAX_GRANULE_ID = int(CATEGORICAL_NODATA) - 1
 
 
 @dataclass(frozen=True)
@@ -106,10 +112,13 @@ def write_granules(out_dir: Path, stack: Any, schema: SnapshotSchema,
     """`granules.json`: every `acquired` value delivered in this tile, beside the granule it
     names (10 section 3). The band says WHEN the winning look was taken; this says WHICH granule
     that was, so a viewer can go cell -> granule -> spectrum without the frozen index. None when
-    the schema delivers no `acquired` layer."""
-    names = [layer.name for layer in schema.layers
-             if layer.source == "acquired" and layer.aggregate.method != "none"
-             and any(b.name == layer.name for b in stack.specs)]
+    no delivered band is in `ACQUIRED_UNITS`.
+
+    The bands are found by their units, not by the schema's `source: acquired` layers. A reducer
+    that carries a look's acquisition through, such as `confirmed_mineral_vote`, delivers it
+    under a name of its own. Its product shipped without a `granules.json` until 2026-11-03."""
+    _ = schema
+    names = [b.name for b in stack.specs if b.units == ACQUIRED_UNITS]
     if not names:
         return None
     by_second: dict[float, list[GranuleRef]] = {}
@@ -125,9 +134,66 @@ def write_granules(out_dir: Path, stack: Any, schema: SnapshotSchema,
         rows.append({"acquired": s, "datetime": iso_utc(refs[0].datetime) if refs else None,
                      "granule_ids": [r.granule_id for r in refs]})
     path = Path(out_dir) / GRANULES_NAME
-    path.write_text(json.dumps({"layers": names, "units": "s since 1970-01-01 UTC",
+    path.write_text(json.dumps({"layers": names, "units": ACQUIRED_UNITS,
                                 "granules": rows}, indent=1) + "\n")
     return path
+
+
+def granule_band_name(acquired_band: str, taken: Sequence[str]) -> str:
+    """`acquired_1` -> `granule_1`, `acquired` -> `granule`; `{band}_granule` for any other name,
+    or when that name is already a delivered band."""
+    if acquired_band.startswith("acquired"):
+        name = "granule" + acquired_band[len("acquired"):]
+        if name not in taken:
+            return name
+    return f"{acquired_band}_granule"
+
+
+def add_granule_bands(stack: BandStack, granules: Mapping[str, GranuleRef]
+                      ) -> tuple[BandStack, dict[str, ClassTable]]:
+    """For every delivered band in `ACQUIRED_UNITS`, a categorical band whose classes ARE the
+    granule ids (10 section 3): the selected scene, readable as a name in any viewer.
+
+    A pixel holds a number, never a string, so the id is a class. The numbering is the run's:
+    the frozen index's granules, sorted by id, are 1..N, so every tile numbers a granule the same
+    way and the tiles mosaic. Each tile's table lists only the granules present in it, which the
+    mosaic merges by value. `acquired_*` stays: it is the exact time, and `granules.json` lists
+    every granule sharing a second. Where a second names several granules, the band carries the
+    first by id. A run over more than 65,534 granules cannot number them in uint16; it gets no
+    granule band, and `granules.json` still answers."""
+    order = sorted(granules)
+    if not order or len(order) > MAX_GRANULE_ID:
+        return stack, {}
+    number = {gid: i + 1 for i, gid in enumerate(order)}
+    by_second: dict[float, int] = {}
+    for gid in order:
+        by_second.setdefault(acquired_seconds(granules[gid].datetime), number[gid])
+
+    taken = [spec.name for spec in stack.specs]
+    bands = {spec.name: stack[spec.name] for spec in stack.specs}
+    specs: list[BandSpec] = []
+    tables: dict[str, ClassTable] = {}
+    for spec in stack.specs:
+        specs.append(spec)
+        if spec.units != ACQUIRED_UNITS:
+            continue
+        name = granule_band_name(spec.name, taken)
+        values = np.asarray(stack[spec.name], dtype=np.float64)
+        out = np.full(values.shape, CATEGORICAL_NODATA, dtype=np.uint16)
+        for v in np.unique(values[np.isfinite(values)]):
+            gid = by_second.get(float(v))
+            if gid is not None:
+                out[values == v] = gid
+        present = sorted(int(i) for i in np.unique(out) if i != CATEGORICAL_NODATA)
+        tables[name] = ClassTable(key="id", entries=pa.table(
+            {"id": [0, *present], "name": ["none", *(order[i - 1] for i in present)]}),
+            source=f"granules:{len(order)}")
+        bands[name] = out
+        specs.append(BandSpec(name, CATEGORICAL_DTYPE,
+                              f"{spec.name} as its granule id: the selected scene",
+                              nodata=CATEGORICAL_NODATA))
+        taken.append(name)
+    return BandStack(bands, specs), tables
 
 
 def render_colors(outputs: Mapping[str, Any], layer: str,
@@ -184,6 +250,8 @@ def publish_period(out_dir: Path, product_dirs: Sequence[tuple[BlockRef, Path]],
     bands = product_bands(schema, reducer, band_counts=band_counts)
     mappers = build_mappers(outputs, schema)              # validate before any IO
     stack = stitch(product_dirs, tile, bands)
+    stack, granule_tables = (add_granule_bands(stack, granules) if granules is not None
+                             else (stack, {}))
 
     # One product table when every categorical layer shares one - the common case, and what
     # `classes.json` is. Several enumerations over the same detections means there is no single
@@ -206,6 +274,10 @@ def publish_period(out_dir: Path, product_dirs: Sequence[tuple[BlockRef, Path]],
     all_tags = {"run_id": run_id, "manifest_hash": manifest_hash, "schema": schema.name,
                 "period_start": period.start.isoformat(), "period_end": period.end.isoformat(),
                 **dict(tags or {})}
+    # a granule band carries its own table, drawn in the deterministic palette: no class
+    # colour table names a scene
+    per_band = {**per_band, **granule_tables}
+    colors_by_band.update({name: None for name in granule_tables})
     data_paths = write_data_cogs(out_dir, stack, tile, class_table=class_table, tags=all_tags,
                                  fmt=fmt, colors=colors,
                                  class_tables=per_band or None,
@@ -215,13 +287,18 @@ def publish_period(out_dir: Path, product_dirs: Sequence[tuple[BlockRef, Path]],
     images = write_images(out_dir, {n: m.render(stack) for n, m in mappers.items()}, tile,
                           tags=all_tags, fmt=fmt)
     legends = {n: write_legend(out_dir, n, m.legend()) for n, m in mappers.items()}
-    band_tables = per_band or {s.name: class_table for s in stack.specs
-                               if class_table is not None}
+    band_tables = {**{s.name: class_table for s in stack.specs if class_table is not None},
+                   **per_band}
     legends.update(default_legends(out_dir, stack.specs, band_tables, outputs,
-                                   [m.layer for m in mappers.values()] + list(mappers)))
+                                   [m.layer for m in mappers.values()] + list(mappers)
+                                   + list(granule_tables)))
+    legends.update({name: write_legend(out_dir, name, categorical_legend(table))
+                    for name, table in granule_tables.items()})
     classes = write_classes(out_dir, class_table) if class_table is not None else None
     class_files = ({} if class_table is not None
                    else {n: write_classes(out_dir, tb, layer=n) for n, tb in by_layer.items()})
+    class_files.update({n: write_classes(out_dir, tb, layer=n)
+                        for n, tb in granule_tables.items()})
 
     granules_path = (write_granules(out_dir, stack, schema, granules)
                      if granules is not None else None)
@@ -231,7 +308,9 @@ def publish_period(out_dir: Path, product_dirs: Sequence[tuple[BlockRef, Path]],
         item = write_stac_item(out_dir, run_id=run_id, manifest_hash=manifest_hash, tile=tile,
                                period=period, stack=stack, class_table=class_table, colors=colors,
                                class_tables=per_band or None,
-                               class_tables_by_layer=(by_layer if class_table is None else None),
+                               class_tables_by_layer=(
+                                   {**(by_layer if class_table is None else {}), **granule_tables}
+                                   or None),
                                colors_by_band=colors_by_band or None,
                                data_paths=data, images=images, legends=legends,
                                classes_path=classes, classes_paths=class_files or None,

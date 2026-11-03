@@ -42,8 +42,8 @@ dictionary:
 <tr><td><code>reducer</code></td><td><code>stratum.reducers</code></td><td><a class="src" data-sym="class Reducer(Protocol)" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/hooks.py#L97">Reducer</a></td><td>none — the built-in schema reducer is not a plugin</td></tr>
 <tr><td><code>mapper</code></td><td><code>stratum.mappers</code></td><td><a class="src" data-sym="class OutputMapper(Protocol)" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/hooks.py#L122">OutputMapper</a></td><td>none — the config mappers are built in</td></tr>
 <tr><td><code>filter</code></td><td><code>stratum.filters</code></td><td><a class="src" data-sym="class GranuleFilter(Protocol)" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/hooks.py#L22">GranuleFilter</a></td><td>none registered — the built-ins are named by keyword</td></tr>
-<tr><td><code>reader</code></td><td><code>stratum.readers</code></td><td><a class="src" data-sym="class GranuleReader(Protocol)" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/types.py#L767">GranuleReader</a></td><td>4, keyed by EMIT collection name</td></tr>
-<tr><td><code>source</code></td><td><code>stratum.sources</code></td><td><a class="src" data-sym="class GranuleSource(Protocol)" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/types.py#L783">GranuleSource</a></td><td><code>local</code> and <code>cmr</code></td></tr>
+<tr><td><code>reader</code></td><td><code>stratum.readers</code></td><td><a class="src" data-sym="class GranuleReader(Protocol)" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/types.py#L771">GranuleReader</a></td><td>4, keyed by EMIT collection name</td></tr>
+<tr><td><code>source</code></td><td><code>stratum.sources</code></td><td><a class="src" data-sym="class GranuleSource(Protocol)" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/types.py#L787">GranuleSource</a></td><td><code>local</code> and <code>cmr</code></td></tr>
 </tbody>
 </table>
 </div>
@@ -202,7 +202,7 @@ the frozen file.</p>
 
 <ol>
   <li>Implement <code>search</code>, <code>assets</code>, and <code>checksums</code>. Return
-  <a class="src" data-sym="class GranuleRecord" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/types.py#L732">GranuleRecord</a>
+  <a class="src" data-sym="class GranuleRecord" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/types.py#L736">GranuleRecord</a>
   objects &mdash; source-shaped, not schema-shaped; the translation to index rows belongs to
   <a class="src" data-sym="def row_from_record" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/index/build.py#L70">row_from_record</a>.</li>
   <li>Carry the source's metadata through verbatim. Promoted columns are the ones the index

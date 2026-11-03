@@ -177,10 +177,60 @@ def test_a_bucket_root_lists_runs_without_walking_them(tmp_path: Path, monkeypat
     assert fake.gets, "the STAC has to come from somewhere"
     assert all(k.endswith(".json") for k in fake.gets), "a raster was fetched to draw no tile"
 
-    # And the mirror now holds them, so a second read is free.
+    # And the mirror now holds the items, so a second read fetches only the collection - the
+    # one document rewritten after publish.
     fake.gets.clear()
     remote.items("run-a")
-    assert fake.gets == []
+    assert [k.rsplit("/", 1)[-1] for k in fake.gets] == ["collection.json"]
+
+
+def test_a_bucket_collection_is_never_served_stale(tmp_path: Path, monkeypatch) -> None:
+    """The regression: a local viewer over a bucket mirrored `collection.json` on first read and
+    kept it, so a run mosaicked afterwards showed no mosaics until the mirror was deleted."""
+    monkeypatch.setenv("STRATUM_SCRATCH", str(tmp_path / "scratch"))
+    fake = install(monkeypatch, tmp_path / "s3")
+    staged = write_products(tmp_path / "staged").parent.parent
+    for path in sorted(staged.rglob("*")):
+        if path.is_file():
+            fake.upload_file(str(path), "bkt", path.relative_to(staged).as_posix())
+
+    remote = Products.open("s3://bkt/", client=fake)
+    assert remote.mosaics("run-a") == []
+
+    collection = staged / "products" / "run-a" / "collection.json"
+    doc = json.loads(collection.read_text())
+    doc["assets"] = {"mosaic:p:mineral": {"href": "./mosaic/p/mineral.tif",
+                                          "roles": ["data", "overview"],
+                                          "stratum:asset": "mineral"}}
+    collection.write_text(json.dumps(doc))
+    fake.upload_file(str(collection), "bkt", "products/run-a/collection.json")
+
+    assert [m["href"] for m in remote.mosaics("run-a")] == ["run-a/mosaic/p/mineral.tif"]
+    assert "overview" in json.dumps(remote.read_json("run-a/collection.json"))
+
+
+def test_the_gdal_env_carries_bucket_credentials_as_a_session(products: Products,
+                                                              monkeypatch) -> None:
+    """The regression: `rasterio.Env(**gdal_config())` raised EnvError on the AWS credential
+    options, so every map tile of a bucket's layer mosaic was a 500 and the viewer drew nothing.
+    The credentials reach GDAL through an `AWSSession`, which sets them itself once the
+    environment is entered; the other options pass through as they are."""
+    from rasterio.session import AWSSession
+
+    monkeypatch.setattr(Products, "gdal_config", lambda self: {
+        "AWS_REGION": "us-west-2", "GDAL_DISABLE_READDIR_ON_OPEN": "EMPTY_DIR",
+        "AWS_ACCESS_KEY_ID": "AKIDEXAMPLE", "AWS_SECRET_ACCESS_KEY": "secret",
+        "AWS_SESSION_TOKEN": "token"})
+    env = products.gdal_env()
+    with env:
+        assert isinstance(env.session, AWSSession)
+        assert env.session.credentials["aws_access_key_id"] == "AKIDEXAMPLE"
+        assert env.options["GDAL_DISABLE_READDIR_ON_OPEN"] == "EMPTY_DIR"
+
+    monkeypatch.setattr(Products, "gdal_config", lambda self: {"AWS_REGION": "us-west-2",
+                                                               "AWS_NO_SIGN_REQUEST": "YES"})
+    with products.gdal_env() as env:
+        assert env.session.unsigned
 
 
 # ------------------------------------------------------------------------------- the rendering

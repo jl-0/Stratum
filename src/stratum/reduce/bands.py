@@ -12,7 +12,7 @@ from typing import Any
 
 import numpy as np
 
-from stratum.types import BandSpec, ClassTable, LayerSpec, SnapshotSchema
+from stratum.types import ACQUIRED_UNITS, BandSpec, ClassTable, LayerSpec, SnapshotSchema
 
 # Delivered dtypes and nodata (11 section 2).
 CATEGORICAL_DTYPE = "uint16"
@@ -289,7 +289,7 @@ def delivered_bands(schema: SnapshotSchema, *,
         dtype = "float64" if layer.dtype == "float64" else CONTINUOUS_DTYPE
         out.append(BandSpec(layer.name, dtype, f"{layer.name}: {what}",
                             nodata=float("nan"), bands=nb,
-                            units="s since 1970-01-01 UTC" if layer.source == "acquired"
+                            units=ACQUIRED_UNITS if layer.source == "acquired"
                             else "unitless"))
         out.append(BandSpec(f"{layer.name}_n", COUNT_DTYPE,
                             f"{layer.name}: epochs aggregated", units="count"))

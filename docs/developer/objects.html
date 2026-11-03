@@ -155,7 +155,7 @@ flowchart TB
 <table>
 <thead><tr><th>Object</th><th>Space</th><th>Note</th></tr></thead>
 <tbody>
-<tr><td><a class="src" data-sym="class SensorWindow" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/types.py#L682">SensorWindow</a></td><td>sensor</td><td>Carries its <strong>origin</strong>, not just a shape. A sensor-space mask that needs the absolute cross-track column — <code>EdgeTrim</code> — is wrong without it</td></tr>
+<tr><td><a class="src" data-sym="class SensorWindow" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/types.py#L686">SensorWindow</a></td><td>sensor</td><td>Carries its <strong>origin</strong>, not just a shape. A sensor-space mask that needs the absolute cross-track column — <code>EdgeTrim</code> — is wrong without it</td></tr>
 <tr><td><a class="src" data-sym="class ObsWindow" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/types.py#L283">ObsWindow</a></td><td>both</td><td>One class, two forms; the difference is one axis. <code>space</code> is explicit and checked, never inferred from shape</td></tr>
 <tr><td><a class="src" data-sym="class Gathered" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/resolve/gather.py#L17">Gathered</a></td><td>block</td><td>The output of the only function that touches both spaces</td></tr>
 <tr><td><a class="src" data-sym="class Observation" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/resolve/observation.py#L111">Observation</a></td><td>block</td><td>The block <code>ObsWindow</code> plus each schema layer's values, with categorical remapping already applied</td></tr>
@@ -185,9 +185,9 @@ flowchart TB
 <table>
 <thead><tr><th>Object</th><th>Is</th><th>Handed to</th></tr></thead>
 <tbody>
-<tr><td><a class="src" data-sym="class SnapshotSchema" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/types.py#L591">SnapshotSchema</a></td><td>One declaration per run of what a snapshot holds; carries <code>layers_hash</code> and <code>aggregate_hash</code> separately</td><td>Everything downstream of resolve</td></tr>
-<tr><td><a class="src" data-sym="class SnapshotStack" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/types.py#L621">SnapshotStack</a></td><td>Epoch-major: every epoch's snapshot over one window, all written under the same schema</td><td>A <code>Reducer</code></td></tr>
-<tr><td><a class="src" data-sym="class BandStack" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/types.py#L652">BandStack</a></td><td>Finished bands for one tile</td><td>An <code>OutputMapper</code></td></tr>
+<tr><td><a class="src" data-sym="class SnapshotSchema" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/types.py#L595">SnapshotSchema</a></td><td>One declaration per run of what a snapshot holds; carries <code>layers_hash</code> and <code>aggregate_hash</code> separately</td><td>Everything downstream of resolve</td></tr>
+<tr><td><a class="src" data-sym="class SnapshotStack" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/types.py#L625">SnapshotStack</a></td><td>Epoch-major: every epoch's snapshot over one window, all written under the same schema</td><td>A <code>Reducer</code></td></tr>
+<tr><td><a class="src" data-sym="class BandStack" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/types.py#L656">BandStack</a></td><td>Finished bands for one tile</td><td>An <code>OutputMapper</code></td></tr>
 <tr><td><a class="src" data-sym="class BandSpec" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/types.py#L513">BandSpec</a></td><td>One delivered band: name, dtype, nodata, units, description</td><td>The COG writer and the STAC item</td></tr>
 </tbody>
 </table>

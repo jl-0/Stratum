@@ -76,7 +76,7 @@ Each yearly contender delivers the same bands:
 | `emit10_1`, `emit10_2` | **The product.** Each group's EMIT-10 consensus over the year, or `none` |
 | `emit10_look_1`, `emit10_look_2` | The selected look's EMIT-10 class. It differs from `emit10_*` only where no single look carries both groups' modes: about 0.5 % of cells over two Cuprite tiles |
 | `mineral_1`, `mineral_2`, `depth_1`, `depth_2` | The selected look's native Tetracorder classes and band depths |
-| `acquired_1` | The selected granule. `granules.json` maps the value to its granule id |
+| `acquired_1`, `granule_1` | The selected granule: its start time, and the same cells as a categorical band whose class names are the granule ids. `granules.json` maps a time to its id |
 | `bare`, `pv` | The selected look's FRCOV, never a median through time |
 | `mode_count`, `n_voters`, `n_valid`, `agreement`, `selection_penalty` | The scorer's diagnostics |
 
@@ -126,7 +126,8 @@ delivers `acquired_2`, because its two groups can come from different scenes. B 
 the scorer's own diagnostics (`mode_count`, `n_valid`, `agreement`, `selection_penalty`).
 
 - **`acquired_*` is the selected-granule map**: which scene won each cell, as the winning look's
-  start time. `granules.json` beside each product maps a value to its granule id.
+  start time. Publish adds `granule_*` beside each one, the same map with the granule id as the
+  class name. `granules.json` beside each product maps a time to its granule id.
 - **`bare` / `pv` / `npv` are the FRCOV pass-through**: the cover fractions behind each selection.
   B and C report the selected look's values. A reports the median over the weeks that elected
   group 1's answer.

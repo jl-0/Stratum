@@ -33,8 +33,6 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, unquote, urlparse
 
-import rasterio
-
 from stratum.preview import render
 from stratum.preview.catalog import CatalogError, Products
 
@@ -164,7 +162,7 @@ class PreviewHandler(BaseHTTPRequestHandler):
             if self.products.is_mosaic(asset):
                 # A mosaic is read in place, by range: a map tile is one of its blocks, and
                 # mirroring the whole file first would be gigabytes for the first tile.
-                with rasterio.Env(**self.products.gdal_config()):
+                with self.products.gdal_env():
                     png = render.render_tile(self.products.gdal_path(asset), z, x, y, style)
             else:
                 png = render.render_tile(self.products.materialise(asset), z, x, y, style)
@@ -195,7 +193,7 @@ class PreviewHandler(BaseHTTPRequestHandler):
         # is the entire run at once - no sampling of tiles and nothing mirrored.
         mosaics = [m["href"] for m in self.products.mosaics(run) if m.get("stratum:asset") == layer]
         if mosaics:
-            with rasterio.Env(**self.products.gdal_config()):
+            with self.products.gdal_env():
                 return self.ranges.give(key, render.measure(
                     *(self.products.gdal_path(h) for h in mosaics), size=MEASURE_MOSAIC))
         hrefs = [item["assets"][layer]["href"] for item in self.products.items(run)

@@ -100,7 +100,10 @@ still leads back to its run.
 **Per-cell provenance** is a layer, not metadata. A layer with `source: acquired`
 ([13 §2](13-snapshot-schema.md)) delivers the winning look's start time. Each published
 (tile, period) then writes `granules.json`, listing every `acquired` value present in that tile
-with the granule id it names:
+with the granule id it names. Publish finds these bands by their units, `ACQUIRED_UNITS`
+(`s since 1970-01-01 UTC`), not by their source. A reducer that carries a look's acquisition
+through under its own name, as `confirmed_mineral_vote` does, declares those units and gets the
+same file:
 
 ```json
 {"layers": ["acquired_1", "acquired_2"], "units": "s since 1970-01-01 UTC",
@@ -111,6 +114,21 @@ with the granule id it names:
 `granule_ids` is a list because the format permits several. One entry per value is the EMIT
 case, observed on every row of the US West proof tile. Cell → `acquired` → granule id → that
 granule's own GLT → the source pixel: the spectrum is reachable without the frozen index.
+
+**The granule band.** Publish also writes a categorical band beside every band in
+`ACQUIRED_UNITS`: `acquired_1` gets `granule_1`, `acquired` gets `granule`, and any other name
+`{band}_granule`. A pixel can hold only a number, so the granule id is the band's class name:
+`classes.granule_1.json`, the asset's `classification:classes` and its legend all name each
+value by its id. A click in the viewer, QGIS or MMGIS then reads the id with no lookup.
+
+- **Numbering.** The run's frozen-index granules, sorted by id, are numbered 1…N. A granule has
+  the same number in every tile, so the band mosaics like any other categorical band.
+- **Each tile's table** lists only the granules present in that tile.
+- **Colours** come from the deterministic palette, because no colour table names a scene.
+- **No class remap** is involved: nothing upstream changes, so adding the band to an existing
+  run costs a re-publish only.
+- **Above 65,534 granules** a run cannot be numbered in `uint16`. It gets no granule band, and
+  `granules.json` still answers.
 
 ---
 
@@ -128,7 +146,7 @@ legend.
 
 Also non-standard but necessary: links back to the frozen index and the provenance record, the
 fingerprint of every input class table the run resolved against, and a `granules` asset
-(`granules.json`, §3) when the schema delivers an `acquired` layer. That band's `raster:bands`
+(`granules.json`, §3) when the product delivers a band in `ACQUIRED_UNITS`. That band's `raster:bands`
 entry is `float64` with unit `s since 1970-01-01 UTC`.
 
 The class table appearing in the STAC item is what closes the loop on AMD's problem — the meaning

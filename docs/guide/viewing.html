@@ -40,7 +40,9 @@ takes a bucket:</p>
 
 <p>Over a bucket it reads with your own credentials and copies each raster into a local mirror the
 first time a tile needs it, so the first look at a tile is slow and every later one is not. The
-catalogue itself is read without fetching a single raster.</p>
+catalogue itself is read without fetching a single raster. A run's <code>collection.json</code> is
+the one file read fresh every time. <code>stratum mosaic</code> rewrites it after publishing, so a
+run mosaicked while the viewer is up shows its mosaics on the next load.</p>
 
 <div class="warn">
 <p><strong>The server binds to loopback and has no authentication.</strong> It is a development

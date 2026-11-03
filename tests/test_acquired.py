@@ -66,6 +66,33 @@ def test_granules_json_names_the_granule_behind_every_value(run: PlanResult) -> 
     assert bands["data_type"] == "float64" and bands["unit"] == "s since 1970-01-01 UTC"
 
 
+def test_granule_band_names_the_selected_scene_as_a_class(run: PlanResult) -> None:
+    """`acquired_1` delivered means `granule_1` delivered: the same cells, as a categorical band
+    whose class names ARE the granule ids, so a click in any viewer reads the id itself."""
+    products = _products(run)
+    with rasterio.open(products / "acquired_1.tif") as src:
+        acquired = src.read(1)
+    with rasterio.open(products / "granule_1.tif") as src:
+        assert src.dtypes[0] == "uint16" and src.nodata == 65535
+        granule = src.read(1)
+    assert ((granule != 65535) == np.isfinite(acquired)).all()
+
+    table = json.loads((products / "classes.granule_1.json").read_text())
+    names = {e["id"]: e["name"] for e in table["entries"]}
+    gj = json.loads((products / "granules.json").read_text())
+    by_second = {row["acquired"]: row["granule_ids"][0] for row in gj["granules"]}
+    for v in np.unique(acquired[np.isfinite(acquired)]):
+        ids = np.unique(granule[acquired == v])
+        assert ids.size == 1 and names[int(ids[0])] == by_second[float(v)]
+
+    item = json.loads((products / "item.json").read_text())
+    classes = item["assets"]["granule_1"]["classification:classes"]
+    assert {c["name"] for c in classes} >= set(by_second.values())
+    assert (products / "granule_1_legend.json").is_file()
+    # the mineral table is still the product's one shared table
+    assert (products / "classes.json").is_file()
+
+
 def test_the_estimate_prices_acquired_at_eight_bytes(run: PlanResult) -> None:
     # 3 layers (uint16 + float32 + float32 = 10 bytes; view_zenith is not stored) + 8
     assert run.document["estimate"]["bytes_per_cell"] == 2 + 4 + 4 + 8
@@ -90,3 +117,69 @@ def test_acquired_cannot_name_a_role(tmp_path: Path) -> None:
     path.write_text(json.dumps(doc))
     problems = validate_static(load_manifest(path))
     assert any("framework-provided source" in p for p in problems)
+
+
+def test_a_reducer_delivered_acquisition_gets_its_granules_json(tmp_path: Path) -> None:
+    """The regression: `confirmed_mineral_vote` delivers `acquired_1` / `acquired_2` under names
+    of its own, so publish - which looked for `source: acquired` layers - wrote no granules.json
+    and the bands could not be turned into granule ids. Bands are found by their units now."""
+    from dataclasses import dataclass
+    from datetime import UTC, datetime
+
+    from stratum.publish import write_granules
+    from stratum.types import ACQUIRED_UNITS, BandSpec, GranuleRef
+
+    when = datetime(2025, 3, 24, 22, 10, 17, tzinfo=UTC)
+    ref = GranuleRef("20250324T221017_2508314_005", "EMITL2BMIN", when, when,
+                     (0.0, 0.0, 1.0, 1.0), {}, "010", "V001", "001", None)
+
+    @dataclass
+    class Stack:
+        specs: tuple[BandSpec, ...]
+        bands: dict[str, np.ndarray]
+
+        def __getitem__(self, name: str) -> np.ndarray:
+            return self.bands[name]
+
+    stack = Stack((BandSpec("acquired_2", "float64", "reducer's", units=ACQUIRED_UNITS),
+                   BandSpec("depth_2", "float32", "not a time")),
+                  {"acquired_2": np.array([[acquired_seconds(when), np.nan]]),
+                   "depth_2": np.array([[0.1, 0.2]])})
+    path = write_granules(tmp_path, stack, schema=None, granules={ref.granule_id: ref})
+    assert path is not None
+    doc = json.loads(path.read_text())
+    assert doc["layers"] == ["acquired_2"]
+    assert doc["granules"][0]["granule_ids"] == [ref.granule_id]
+
+
+def test_granule_numbering_is_the_runs_so_tiles_mosaic() -> None:
+    """Two tiles see different granules, but a granule has ONE number in both - its place in the
+    run's sorted granule list - and each tile's table lists only what it holds. A reducer's
+    `acquired_2` gets `granule_2` the same way."""
+    from datetime import UTC, datetime
+
+    from stratum.publish.period import add_granule_bands
+    from stratum.types import ACQUIRED_UNITS, BandSpec, BandStack, GranuleRef
+
+    def ref(gid: str, minute: int) -> GranuleRef:
+        when = datetime(2025, 5, 1, 18, minute, tzinfo=UTC)
+        return GranuleRef(gid, "EMITL2BMIN", when, when, (0.0, 0.0, 1.0, 1.0), {}, "010",
+                          "V001", "001", None)
+
+    run = {r.granule_id: r for r in (ref("G_a", 1), ref("G_b", 2), ref("G_c", 3))}
+    t = {gid: acquired_seconds(r.datetime) for gid, r in run.items()}
+    specs = (BandSpec("acquired_1", "float64", "", units=ACQUIRED_UNITS),
+             BandSpec("acquired_2", "float64", "", units=ACQUIRED_UNITS))
+    west = BandStack({"acquired_1": np.array([[t["G_a"], t["G_c"]]]),
+                      "acquired_2": np.array([[t["G_c"], np.nan]])}, specs)
+    east = BandStack({"acquired_1": np.array([[t["G_c"], t["G_c"]]]),
+                      "acquired_2": np.array([[np.nan, np.nan]])}, specs)
+
+    w, w_tables = add_granule_bands(west, run)
+    e, e_tables = add_granule_bands(east, run)
+    assert [s.name for s in w.specs] == ["acquired_1", "granule_1", "acquired_2", "granule_2"]
+    assert w["granule_1"].tolist() == [[1, 3]] and e["granule_1"].tolist() == [[3, 3]]
+    assert w["granule_2"].tolist() == [[3, 65535]]
+    assert w_tables["granule_1"].entries.to_pydict() == {"id": [0, 1, 3],
+                                                        "name": ["none", "G_a", "G_c"]}
+    assert e_tables["granule_1"].entries.to_pydict() == {"id": [0, 3], "name": ["none", "G_c"]}

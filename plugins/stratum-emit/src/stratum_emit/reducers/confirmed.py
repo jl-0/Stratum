@@ -32,7 +32,7 @@ from collections.abc import Mapping, Sequence
 import numpy as np
 
 from stratum.reduce import CATEGORICAL_NODATA
-from stratum.types import BandSpec, SnapshotStack
+from stratum.types import ACQUIRED_UNITS, BandSpec, SnapshotStack
 
 _NODATA = np.uint16(CATEGORICAL_NODATA)
 
@@ -101,7 +101,8 @@ class ConfirmedMineralVote:
                 BandSpec(g["depth"], "float32", "band depth, score x fit weighted mean over the "
                          "looks that identified the delivered class", nodata=float("nan")),
                 BandSpec(g["acquired_out"], "float64", "acquisition start (Unix seconds) of the "
-                         "highest-weighted agreeing look", units="s", nodata=float("nan")),
+                         "highest-weighted agreeing look", units=ACQUIRED_UNITS,
+                         nodata=float("nan")),
             ]
         out.append(BandSpec("n_epochs", "uint16", "valid looks", units="count"))
         self.outputs = tuple(out)

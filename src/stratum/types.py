@@ -542,6 +542,10 @@ class Aggregation:
 #: the GLT (|GLT X| - 1), NaN where the GLT has no hit: on a push-broom each column is its own
 #: detector, so it is what a per-detector statistic groups by and what an edge streak maps to.
 BUILTIN_SOURCES: Mapping[str, str] = {"acquired": "float64", "sensor_column": "float32"}
+#: The units of a delivered band that holds `acquired` values. Publish writes `granules.json`
+#: for every band in these units, whether the schema derived it or a reducer declared it, so a
+#: reducer that delivers a look's acquisition declares this rather than plain "s".
+ACQUIRED_UNITS = "s since 1970-01-01 UTC"
 
 #: A layer source naming one of the SCORER's declared `outputs` (04 section 4, 13 section 2):
 #: `source: scorer.<output>`. Not a role, not an alias - the prefix is reserved in the one

@@ -112,10 +112,15 @@ class Products:
     def materialise(self, rel: str) -> Path:
         """`resolve`, and for a bucket root fetch the object into the mirror if it is not there.
 
-        Idempotent: a file already mirrored is left alone. This is the only place a preview
-        session touches the network for data.
+        Idempotent: a file already mirrored is left alone - except a run's `collection.json`,
+        the one document rewritten after publish (`stratum mosaic` records its mosaics there).
+        A mirrored copy of that one hides every mosaic built after it was fetched, so it is
+        fetched again on every read. This is the only place a preview session touches the
+        network for data.
         """
         target = self.resolve(rel)
+        if self.is_collection(rel):
+            self.workspace.drop_mirror(target)
         if not target.is_file() and not self.workspace.pull_file(target):
             raise CatalogError(f"{rel!r} is not in the products tree")
         return target
@@ -124,11 +129,37 @@ class Products:
         """`resolve`, as GDAL should open it WITHOUT mirroring it (`Workspace.gdal_path`): a
         range read over a bucket, the file itself locally. For a layer mosaic, which is one file
         of several gigabytes of which a map tile needs one block. Open it inside
-        `rasterio.Env(**self.gdal_config())`."""
+        `self.gdal_env()`."""
         return self.workspace.gdal_path(self.resolve(rel))
 
     def gdal_config(self) -> dict[str, str]:
         return self.workspace.gdal_config()
+
+    def gdal_env(self) -> Any:
+        """A `rasterio.Env` that opens `gdal_path` results. `rasterio.Env` refuses the AWS
+        credential options `gdal_config` carries, which GDAL itself accepts. They go in through
+        an `AWSSession` instead. Passing them straight in made every map tile of a bucket's
+        mosaic a 500, and the viewer drew nothing."""
+        import rasterio
+        from rasterio.session import AWSSession
+
+        config = dict(self.gdal_config())
+        creds = {k: config.pop(k, None) for k in ("AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY",
+                                                  "AWS_SESSION_TOKEN", "AWS_REGION",
+                                                  "AWS_NO_SIGN_REQUEST")}
+        if not any(creds.values()):
+            return rasterio.Env(**config)
+        session = AWSSession(aws_access_key_id=creds["AWS_ACCESS_KEY_ID"],
+                             aws_secret_access_key=creds["AWS_SECRET_ACCESS_KEY"],
+                             aws_session_token=creds["AWS_SESSION_TOKEN"],
+                             region_name=creds["AWS_REGION"],
+                             aws_unsigned=creds["AWS_NO_SIGN_REQUEST"] == "YES")
+        return rasterio.Env(session=session, **config)
+
+    @staticmethod
+    def is_collection(rel: str) -> bool:
+        """`{run}/collection.json`: the run's STAC collection."""
+        return rel.lstrip("/").split("/")[1:] == ["collection.json"]
 
     @staticmethod
     def is_mosaic(rel: str) -> bool:
