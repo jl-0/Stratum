@@ -419,9 +419,24 @@ def test_the_server_renders_a_tile(server: int) -> None:
     base = "run-a/0_0/20260101_20260201"
     status, body, content_type = get(
         server, f"/tiles/{base}/mineral_1.tif/6/32/31.png"
-                f"?kind=categorical&legend={base}/mineral_1_legend.json")
+                f"?kind=categorical&run=run-a&layer=mineral_1")
     assert status == 200 and content_type == "image/png"
     assert read_png(body).shape == (render.TILE, render.TILE, 4)
+
+
+def test_a_categorical_layer_has_one_legend_merged_over_its_tiles(products: Products,
+                                                                   server: int) -> None:
+    """A granule band's tile lists only the scenes in that tile, so the layer's legend is the
+    union: drawing every tile with the first tile's legend blanked every class it lacked."""
+    legend = products.resolve("run-a/1_0/20260101_20260201/mineral_1_legend.json")
+    doc = json.loads(legend.read_text())
+    doc["entries"] = [doc["entries"][0], {"id": 3, "name": "Calcite", "color": [10, 200, 10]}]
+    legend.write_text(json.dumps(doc))
+    merged = json.loads(get(server, "/api/legend?run=run-a&layer=mineral_1")[1])
+    assert [e["id"] for e in merged["entries"]] == [0, 1, 2, 3]
+    status, _, _ = get(server, "/tiles/run-a/0_0/20260101_20260201/mineral_1.tif/6/32/31.png"
+                               "?kind=categorical")
+    assert status == 400, "a categorical tile without run and layer must be refused"
 
 
 def test_measure_pools_every_raster_it_is_given(tmp_path: Path) -> None:

@@ -30,7 +30,7 @@ const state = { products: '', runs: [], run: null, items: [], mosaics: [], bbox:
  *  and the tile grid showed through as boxes in a layer that has no tile edges. */
 function rasterLayer(asset, opts) {
   const query = new URLSearchParams(
-    opts.kind === 'categorical' ? { kind: 'categorical', legend: opts.legendHref }
+    opts.kind === 'categorical' ? { kind: 'categorical', run: opts.run, layer: opts.layer }
     : opts.kind === 'rgba' ? { kind: 'rgba' }
     : { kind: 'continuous', ramp: opts.ramp, vmin: opts.vmin, vmax: opts.vmax });
   // Opacity is not set here: it belongs to the layer's pane, so one slider covers a layer drawn
@@ -284,10 +284,15 @@ async function styleFor(src, key, ramp) {
   if (roles.includes('visual')) {
     opts.kind = 'rgba';
   } else {
-    legend = await legendFor(first, key);
+    // The layer's legend, merged over the run's tiles by the server: a tile's own legend may list
+    // only the classes in that tile (a granule band's does), so the first tile's is not the layer's.
+    legend = first.assets[`${key}_legend`]
+      ? await fetchJSON(`api/legend?${new URLSearchParams({ run: src.run, layer: key })}`)
+          .catch(() => null)
+      : null;
     if (legend?.kind === 'categorical') {
       Object.assign(opts, { kind: 'categorical', entries: legend.entries,
-                            legendHref: first.assets[`${key}_legend`].href,
+                            run: src.run, layer: key,
                             present: presentClasses(src.items, key) });
     } else {
       opts.kind = 'continuous';

@@ -156,8 +156,8 @@ def mosaicked(products: Products):
 def test_the_preview_draws_a_categorical_mosaic_in_legend_colours(mosaicked) -> None:
     _, port = mosaicked
     rel = f"{RUN}/mosaic/{PERIOD}/mineral_1.tif"
-    legend = f"{RUN}/0_0/{PERIOD}/mineral_1_legend.json"
-    status, body, media = get(port, f"/tiles/{rel}/7/64/63.png?kind=categorical&legend={legend}")
+    status, body, media = get(port, f"/tiles/{rel}/7/64/63.png"
+                                    f"?kind=categorical&run={RUN}&layer=mineral_1")
     assert status == 200 and media == "image/png"
     rgba = read_png(body)
     drawn = {tuple(p) for p in rgba[rgba[..., 3] == 255][:, :3]}

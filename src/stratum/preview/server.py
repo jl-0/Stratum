@@ -13,6 +13,7 @@ It serves four things:
 | `/api/config`             | where the products are, and the colour ramps the page draws legends with |
 | `/api/runs`               | the run directories under the products root |
 | `/api/range`              | one continuous layer's stretch, pooled over the run's tiles |
+| `/api/legend`             | one categorical layer's legend, merged over the run's tiles |
 | `/api/value`              | every named asset sampled at one point - what a click asks |
 | `/stac/<path>`            | any JSON in the products tree - collections, items, legends |
 | `/tiles/<path>/z/x/y.png` | one asset, one web-mercator tile - a tile's raster, or a layer mosaic |
@@ -81,7 +82,8 @@ class _LRU(OrderedDict):
 
 
 class PreviewHandler(BaseHTTPRequestHandler):
-    """One request. `products`, `tiles` and `ranges` are bound by `serve`."""
+    """One request. `products`, `tiles` and `ranges` are bound by `serve`; `ranges` also holds
+    the merged legends."""
 
     products: Products
     tiles: _LRU
@@ -117,6 +119,10 @@ class PreviewHandler(BaseHTTPRequestHandler):
                 # request and prints it on the legend, so the legend and every tile agree.
                 span = self._layer_range(query["run"][0], query["layer"][0])
                 return self._json({"vmin": span[0], "vmax": span[1]})
+            if route == "/api/legend":
+                # One legend for a whole layer, for the same reason: a tile's legend lists only
+                # the classes in that tile, so drawing every tile with one of them blanks the rest.
+                return self._json(self._layer_legend(query["run"][0], query["layer"][0]))
             if route.startswith("/stac/"):
                 return self._stac(route[len("/stac/"):])
             if route == "/api/value":
@@ -178,6 +184,31 @@ class PreviewHandler(BaseHTTPRequestHandler):
             return None
 
     # -- the style -------------------------------------------------------------------------
+    def _layer_legend(self, run: str, layer: str) -> dict[str, Any]:
+        """One categorical layer's legend, merged over every product tile that has one.
+
+        A tile's legend is entitled to list only what that tile holds - the `granule_*` band's
+        does (10 section 3) - so no single tile's legend describes the layer. The merge is by id,
+        and the ids mean the same thing in every tile, so the first tile naming an id wins.
+        Cached per layer.
+        """
+        key = ("legend", run, layer)
+        cached = self.ranges.take(key)
+        if cached is not None:
+            return cached
+        hrefs = [item["assets"][f"{layer}_legend"]["href"] for item in self.products.items(run)
+                 if f"{layer}_legend" in item.get("assets", {})]
+        if not hrefs:
+            raise CatalogError(f"no tile in {run!r} has a {layer!r} legend")
+        with ThreadPoolExecutor(max_workers=16) as pool:
+            docs = list(pool.map(self.products.read_json, hrefs))
+        entries: dict[int, dict[str, Any]] = {}
+        for doc in docs:
+            for entry in doc.get("entries", ()):
+                entries.setdefault(int(entry["id"]), entry)
+        merged = {**docs[0], "entries": [entries[i] for i in sorted(entries)]}
+        return self.ranges.give(key, merged)
+
     def _layer_range(self, run: str, layer: str) -> tuple[float, float]:
         """The stretch for one layer of one run, pooled over its product tiles.
 
@@ -208,6 +239,7 @@ class PreviewHandler(BaseHTTPRequestHandler):
     def _style(self, asset: str, query: dict[str, list[str]]) -> render.Style:
         """What the page asked for.
 
+        A categorical tile carries `run` and `layer`, and is drawn with the layer's merged legend.
         A continuous tile MUST carry `vmin` and `vmax`. The server used to measure each asset
         itself when they were missing, which is one stretch per product tile, and that drew tile
         edges into a layer that has none. There is no per-tile fallback now: the range comes
@@ -218,8 +250,10 @@ class PreviewHandler(BaseHTTPRequestHandler):
         if kind == "rgba":
             return render.Style(kind="rgba")
         if kind == "categorical":
-            legend = json.loads(self.products.materialise(one["legend"]).read_text())
-            return render.style_for("", ["data"], legend)
+            if "run" not in one or "layer" not in one:
+                raise BadRequest("a categorical tile needs run and layer - one legend per layer, "
+                                 "from /api/legend?run=&layer=")
+            return render.style_for("", ["data"], self._layer_legend(one["run"], one["layer"]))
         if "vmin" not in one or "vmax" not in one:
             raise BadRequest("a continuous tile needs vmin and vmax - one stretch per layer, "
                              "from /api/range?run=&layer=")

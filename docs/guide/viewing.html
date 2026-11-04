@@ -88,7 +88,8 @@ name.</p>
 <tr><td><code>visual</code> — a published rendering</td><td>Straight through. The colours are the
 ones publish wrote into the image; the viewer chooses nothing.</td></tr>
 <tr><td><code>data</code>, with a <code>legend</code> asset beside it</td><td>Each value looked up
-in that legend. Resampled <strong>nearest</strong>, always — averaging class ids would invent
+in the layer's legend: every tile's legend merged by id, because a tile's own legend may list only
+the classes in that tile (a <code>granule_*</code> band's does). Resampled <strong>nearest</strong>, always — averaging class ids would invent
 classes nothing identified.</td></tr>
 <tr><td><code>data</code>, continuous</td><td>Stretched between the layer's 2nd and 98th
 percentile through a colour ramp. The range is measured <strong>once for the whole layer</strong>,

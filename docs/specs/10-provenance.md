@@ -123,7 +123,8 @@ value by its id. A click in the viewer, QGIS or MMGIS then reads the id with no 
 
 - **Numbering.** The run's frozen-index granules, sorted by id, are numbered 1…N. A granule has
   the same number in every tile, so the band mosaics like any other categorical band.
-- **Each tile's table** lists only the granules present in that tile.
+- **Each tile's table** lists only the granules present in that tile, so no single tile's
+  legend describes the band: the viewer merges every tile's legend by id.
 - **Colours** come from the deterministic palette, because no colour table names a scene.
 - **No class remap** is involved: nothing upstream changes, so adding the band to an existing
   run costs a re-publish only.
