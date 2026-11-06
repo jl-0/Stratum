@@ -121,6 +121,7 @@ async function loadRun(runId) {
   state.selected = null;          // the legend follows the pickers again
   const p = collection.extent?.temporal?.interval?.[0] ?? [];
   $('runmeta').textContent =
+    (state.runTitles?.get(runId) ? `${runId} · ` : '') +
     `${items.length} tile${items.length === 1 ? '' : 's'}` +
     (state.mosaics.length ? ' · mosaicked' : '') +
     (p[0] ? ` · ${p[0].slice(0, 10)} to ${(p[1] || '').slice(0, 10)}` : '');
@@ -911,7 +912,17 @@ async function start() {
   if (asked && !state.runs.includes(asked)) state.runs.push(asked);
   if (!state.runs.length) return say('no published runs under this products root', true);
 
-  $('run').innerHTML = state.runs.map((r) => `<option>${escapeHTML(r)}</option>`).join('');
+  // A run whose collection carries a STAC `title` (e.g. "Y0 - yearly-base", set after publish to
+  // match a report's keys) is listed by it, titled runs first in natural order; the id stays the
+  // option's value and its tooltip. A collection that cannot be read is listed by id.
+  const titles = await Promise.all(state.runs.map((r) => fetchJSON(`stac/${r}/collection.json`)
+    .then((c) => (typeof c.title === 'string' && c.title.trim()) || null).catch(() => null)));
+  const label = new Map(state.runs.map((r, i) => [r, titles[i]]));
+  const order = [...state.runs].sort((a, b) => (!label.get(a) - !label.get(b)) ||
+    (label.get(a) || a).localeCompare(label.get(b) || b, undefined, { numeric: true }));
+  state.runTitles = label;
+  $('run').innerHTML = order.map((r) => `<option value="${escapeHTML(r)}" title="${escapeHTML(r)}">` +
+    `${escapeHTML(label.get(r) || r)}</option>`).join('');
   // Newest last by name, and a run id carries its date - so the last one is the useful default.
   $('run').value = asked && state.runs.includes(asked) ? asked : state.runs[state.runs.length - 1];
   await loadRun($('run').value);

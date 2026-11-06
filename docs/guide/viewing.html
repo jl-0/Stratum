@@ -33,6 +33,12 @@ its own.</p>
 the assets each item declares, and <strong>basemap</strong> is the imagery underneath. Nothing about
 the run is configured anywhere — a run that delivers a new band shows it in the layer list.</p>
 
+<p>A run whose <code>collection.json</code> has a STAC <code>title</code> is listed by that title, and titled
+runs come first in natural order (<code>Y0</code> before <code>Y10</code>). The run id is still the value
+behind it: hover to see it, it shows in the line under the picker, and <code>?run=</code> takes the id.
+Publish does not write a title. Add one after publishing to give a set of runs the names a report
+uses; the viewer picks it up on the next page load.</p>
+
 <p><code>--root</code> takes either the storage root or the products directory inside it, and it
 takes a bucket:</p>
 
