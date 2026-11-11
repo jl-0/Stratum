@@ -6,7 +6,7 @@ selected scene, and the snapshot's `acquired` layer names it.
 """
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from typing import Any
 
 import numpy as np
@@ -36,7 +36,8 @@ _ARITY = {"bd_unc": 2, "fit": 2, "banddepth": 2, "airmass": 2, "scene_cloudiness
 
 GATES = ("hard", "soft")
 KEYS = ("joint", "independent")
-TIE_BREAKS = ("weighted", "earliest", "latest", "nodata")
+TIE_BREAKS = ("weighted", "combine", "earliest", "latest", "nodata")
+COMBINE = ("weighted", "borda", "copeland", "hybrid")
 NORMALIZE = ("fixed", "rank")
 VOTE_WEIGHTS = ("count", "score")
 NONDETECT = ("abstain", "vote")
@@ -145,6 +146,63 @@ def rank_penalty(raw: np.ndarray, feasible: np.ndarray, better: str) -> np.ndarr
     return np.where(feasible, pen, 1.0).astype(np.float32)
 
 
+def borda_points(ballots: Sequence[np.ndarray], cand: np.ndarray) -> np.ndarray:
+    """Per cell, each candidate's Borda count over `ballots` - one (N, H, W) penalty per metric,
+    lower better. On each ballot the best of the cell's n candidates scores n - 1 and the worst
+    0; tied penalties share the average of the points they span. 0 for a non-candidate."""
+    n_c = cand.sum(axis=0).astype(np.float64)
+    pts = np.zeros(cand.shape, dtype=np.float64)
+    for pen in ballots:
+        key = np.where(cand, pen, np.inf).astype(np.float64)
+        order = np.argsort(key, axis=0, kind="stable")
+        start, end = _runs(np.take_along_axis(key, order, axis=0))
+        avg = np.empty(key.shape, dtype=np.float64)
+        np.put_along_axis(avg, order, (start + end) / 2.0, axis=0)
+        pts += np.where(cand, n_c[None] - 1.0 - avg, 0.0)
+    return pts
+
+
+def copeland_points(ballots: Sequence[np.ndarray], cand: np.ndarray) -> np.ndarray:
+    """Per cell, each candidate's Copeland score: over every pair of candidates, the one more
+    `ballots` rank strictly better wins 1 and an even split gives each 0.5. 0 for a
+    non-candidate. O(N^2) pairs per block, each over every ballot."""
+    pen = np.stack([np.asarray(b, dtype=np.float64) for b in ballots])     # (M, N, H, W)
+    n = cand.shape[0]
+    pts = np.zeros(cand.shape, dtype=np.float64)
+    for i in range(n - 1):
+        if not cand[i].any():
+            continue
+        for j in range(i + 1, n):
+            both = cand[i] & cand[j]
+            if not both.any():
+                continue
+            vi = (pen[:, i] < pen[:, j]).sum(axis=0)
+            vj = (pen[:, j] < pen[:, i]).sum(axis=0)
+            pts[i] += np.where(both, np.where(vi > vj, 1.0, np.where(vi == vj, 0.5, 0.0)), 0.0)
+            pts[j] += np.where(both, np.where(vj > vi, 1.0, np.where(vi == vj, 0.5, 0.0)), 0.0)
+    return pts
+
+
+def lexical_rank(keys: Sequence[np.ndarray], cand: np.ndarray) -> np.ndarray:
+    """Per cell, each candidate's dense rank (0 best) by `keys` in order, each higher-better,
+    later keys breaking ties of earlier ones; candidates equal on every key share a rank.
+    +inf for a non-candidate. Exact: no key is ever scaled into another."""
+    ks = [np.where(cand, np.asarray(k, dtype=np.float64), -np.inf) for k in keys]
+    order = np.broadcast_to(np.arange(cand.shape[0]).reshape((-1,) + (1,) * (cand.ndim - 1)),
+                            cand.shape).copy()
+    for k in reversed(ks):                       # stable sorts, least significant key first
+        step = np.argsort(-np.take_along_axis(k, order, axis=0), axis=0, kind="stable")
+        order = np.take_along_axis(order, step, axis=0)
+    new = np.zeros(cand.shape, dtype=bool)
+    for k in ks:
+        s = np.take_along_axis(k, order, axis=0)
+        new[1:] |= s[1:] != s[:-1]
+    dense = np.cumsum(new, axis=0).astype(np.float64)
+    rank = np.empty(cand.shape, dtype=np.float64)
+    np.put_along_axis(rank, order, dense, axis=0)
+    return np.where(cand, rank, np.inf)
+
+
 class ModeGatedSelect:
     """Pick, per cell, the best look among those that agree with the cell's mineral consensus.
 
@@ -191,6 +249,18 @@ class ModeGatedSelect:
        there, not fill), an airmass at a grazing angle (cos <= 1e-3), a granule without
        `cloud_fraction`. Fill in a band a weighted metric reads is not a missing metric: it
        makes the look invalid (11 section 2), so it neither votes nor wins - see below.
+    6. **Combine.** How the gated looks are ordered. `weighted` (default): by the step-5 sum.
+       `borda`, `copeland` and `hybrid` instead treat each positively weighted metric as one
+       unweighted ballot ranking the looks that pass the gate, and ONLY those, by its step-5
+       penalty: `borda` takes the most Borda points (n - 1 for a ballot's best of n, 0 for its
+       worst, ties sharing the average), `copeland` the most pairwise wins (a pair goes to the
+       look more ballots prefer; an even split gives each half), `hybrid` Borda then Copeland
+       among the Borda-tied. Each breaks its remaining tie by the step-5 sum, then the earliest
+       observation. They need `gate: hard`: under a soft gate every look is a candidate, and a
+       ballot over all of them is not a ranking of the agreeing ones. The score is then minus
+       the look's rank in that order, so only its order means anything. `tie_break: combine`
+       breaks a tie between modes the same way, over the tied looks: the mode is the key of the
+       look the combination puts first among them.
 
     Defaults are the external tiled aggregator's. Deliberate differences from it:
 
@@ -201,7 +271,9 @@ class ModeGatedSelect:
       not the cloudy share of the scene inside one tile; `None` scores 1.0.
     - Cloud and low illumination are pixel masks (`l2a_standard`, `cos_i`), not terms inside
       the selector; a masked look neither votes nor wins, as there.
-    - `weighted` combination only (no Borda/Copeland); no `top_k`/`mode_k` composites.
+    - Borda, Copeland and hybrid run only under the hard gate, as there. A metric's tied
+      penalties share their Borda points (the standard rule); the external tool hands tied
+      looks different points by scene order. No `top_k`/`mode_k` composites.
     - The final tie between equally scored looks goes to the earliest observation (the
       framework's rule), not the lowest scene index.
     - Every band a positively weighted metric reads is a required role, and required roles
@@ -253,6 +325,7 @@ class ModeGatedSelect:
                  nondetect: str = "abstain",
                  below_min_count: str = "nodata",
                  normalize: str = "fixed",
+                 combine: str = "weighted",
                  weights: Mapping[str, float] | None = None,
                  bounds: Mapping[str, Sequence[float]] | None = None,
                  aliases: Mapping[str, str | Sequence[str]] | None = None) -> None:
@@ -264,11 +337,15 @@ class ModeGatedSelect:
         for label, value, allowed in (("key", key, KEYS), ("gate", gate, GATES),
                                       ("tie_break", tie_break, TIE_BREAKS),
                                       ("normalize", normalize, NORMALIZE),
+                                      ("combine", combine, COMBINE),
                                       ("vote_weight", vote_weight, VOTE_WEIGHTS),
                                       ("nondetect", nondetect, NONDETECT),
                                       ("below_min_count", below_min_count, BELOW_MIN_COUNT)):
             if value not in allowed:
                 raise ValueError(f"{name}: {label} must be one of {list(allowed)}; got {value!r}")
+        if combine != "weighted" and gate != "hard":
+            raise ValueError(f"{name}: combine: {combine} ranks only the looks that pass the "
+                             f"gate, so it needs gate: hard; got gate: {gate}")
         ignore = dict(ignore or {})
         bad = [g for g in ignore if g not in GROUPS]
         if bad:
@@ -329,6 +406,7 @@ class ModeGatedSelect:
         self.nondetect = nondetect
         self.below_min_count = below_min_count
         self.normalize = normalize
+        self.combine = combine
         #: the positive weights renormalised to sum to 1; zero-weight metrics are not computed
         self.weights = {m: v / total for m, v in w.items() if v > 0}
         self.bounds = b
@@ -399,14 +477,32 @@ class ModeGatedSelect:
 
     def penalty(self, obs: ObsWindow, g1: np.ndarray, g2: np.ndarray) -> np.ndarray:
         """The combined (N, H, W) penalty: sum of weight x metric penalty, in [0, 1]."""
-        total = np.zeros(np.shape(obs.valid), dtype=np.float32)
-        for metric, pen in self.penalties(obs, g1, g2).items():
+        return self._weighted(self.penalties(obs, g1, g2), np.shape(obs.valid))
+
+    def _weighted(self, pens: Mapping[str, np.ndarray], shape: tuple[int, ...]) -> np.ndarray:
+        total = np.zeros(shape, dtype=np.float32)
+        for metric, pen in pens.items():
             total += np.float32(self.weights[metric]) * pen
         return total
 
+    def order(self, ballots: Sequence[np.ndarray], cand: np.ndarray,
+              fallback: np.ndarray) -> np.ndarray:
+        """Each candidate's rank (0 best, +inf off the candidates) under `combine`, with
+        `fallback` (a penalty, lower better) breaking what the combination leaves tied."""
+        if self.combine == "weighted":
+            return lexical_rank([-fallback], cand)
+        keys: list[np.ndarray] = []
+        if self.combine in ("borda", "hybrid"):
+            keys.append(borda_points(ballots, cand))
+        if self.combine in ("copeland", "hybrid"):
+            keys.append(copeland_points(ballots, cand))
+        return lexical_rank([*keys, -np.asarray(fallback, dtype=np.float64)], cand)
+
     # ------------------------------------------------------------------------------- mode
     def _mode(self, code: np.ndarray, weight: np.ndarray, voters: np.ndarray,
-              tie_score: np.ndarray) -> dict[str, np.ndarray]:
+              tie_score: np.ndarray,
+              tie_order: Callable[[np.ndarray], np.ndarray] | None = None
+              ) -> dict[str, np.ndarray]:
         """The mode of `code` over `voters` per cell: its code, weighted votes and look count,
         whether the cell has one (`has`), whether it is suppressed (`drop`: min_count or a
         `nodata` tie) and the runner-up count."""
@@ -419,6 +515,9 @@ class ModeGatedSelect:
             row = n - 1 - np.argmax(top[::-1], axis=0)
         elif self.tie_break == "weighted":
             row = np.argmin(np.where(top, tie_score, np.inf), axis=0)
+        elif self.tie_break == "combine":
+            assert tie_order is not None
+            row = np.argmin(tie_order(top), axis=0)
         else:                                            # earliest, nodata
             row = np.argmax(top, axis=0)
         pick = row[None]
@@ -463,7 +562,12 @@ class ModeGatedSelect:
                    | np.isin(g2, self._class_ids(obs, lay2, [n for n in self.ignore["g2"]
                                                              if n != "none"])))
         detect1, detect2 = g1 > 0, g2 > 0
-        P = self.penalty(obs, g1, g2)
+        pens = self.penalties(obs, g1, g2)
+        P = self._weighted(pens, valid.shape)
+        ballots = list(pens.values())
+
+        def tie_order(tie_score: np.ndarray) -> Callable[[np.ndarray], np.ndarray]:
+            return lambda top: self.order(ballots, top, tie_score)
         # a look's vote: 1, or its quality (penalty is in [0, 1], 0 best)
         quality = (1.0 - P).astype(np.float64) ** self.vote_power \
             if self.vote_weight == "score" else np.ones(P.shape)
@@ -475,7 +579,8 @@ class ModeGatedSelect:
             partial = detect1 ^ detect2
             code = (g1 << 32) | (g2 & 0xFFFFFFFF)
             weight = np.where(partial, self.partial_vote_weight, 1.0) * quality
-            m = self._mode(code, weight, voters, P + self.partial_tie_penalty * partial)
+            tie_score = P + self.partial_tie_penalty * partial
+            m = self._mode(code, weight, voters, tie_score, tie_order(tie_score))
             match = ((code == m["mode"][None]) | ~m["has"][None]) & ~ignored
             has, drop = m["has"], m["drop"]
             n_voters = voters.sum(axis=0).astype(np.float32)
@@ -493,7 +598,7 @@ class ModeGatedSelect:
             for g, det in ((g1, detect1), (g2, detect2)):
                 voters = valid & (det | votes_none) & ~ignored
                 voters_any |= voters
-                m = self._mode(g, quality, voters, P)
+                m = self._mode(g, quality, voters, P, tie_order(P))
                 match &= (g == m["mode"][None]) | ~m["has"][None]
                 has |= m["has"]
                 drop |= m["drop"]
@@ -506,7 +611,10 @@ class ModeGatedSelect:
             mode_votes = mode_count
             runner_up = np.full(n_valid.shape, np.nan, dtype=np.float32)
 
-        if self.gate == "hard":
+        if self.combine != "weighted":
+            cand = valid & match & ~drop[None]
+            s = np.where(cand, -self.order(ballots, cand, P), np.nan)
+        elif self.gate == "hard":
             s = np.where(match, -P, np.nan)
         else:
             s = np.where(match, -P, -(P + np.float32(self.soft_penalty)))
@@ -544,4 +652,5 @@ class ModeGatedSelect:
         return out
 
 
-__all__ = ["METRICS", "ModeGatedSelect", "rank_penalty", "tally"]
+__all__ = ["METRICS", "ModeGatedSelect", "borda_points", "copeland_points", "lexical_rank",
+           "rank_penalty", "tally"]

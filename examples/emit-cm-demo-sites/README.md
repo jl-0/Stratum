@@ -59,7 +59,8 @@ contender is built the same way:
   gather by `classes/emit10-g1.yaml` and `-g2.yaml`. Two classes in the same EMIT-10 mineral, such
   as two grain sizes of hematite, no longer count as a disagreement.
 - **The variants change one thing each from the base.** A difference between two maps then has
-  one cause. `tests/test_examples.py` holds the manifests to that.
+  one cause. The hybrid is the exception: it changes the ranking rule of the reference, the
+  one yearly contender with the hard gate that voting needs. `tests/test_examples.py` holds the manifests to that.
 
 | Manifest | Changes from the base | Question it answers |
 |---|---|---|
@@ -68,6 +69,7 @@ contender is built the same way:
 | `manifest-yearly-nondetect-vote.yaml` | `nondetect: vote` | should a look that saw nothing vote for `none`? It is conservative, and loses intermittently vegetated ground |
 | `manifest-yearly-weighted.yaml` | `vote_weight: score`, `vote_power: 8` | should better looks outvote more looks? |
 | `manifest-yearly-reference.yaml` | `key: joint`, `gate: hard`, `normalize: fixed` | contender B's joint (G1, G2) selection, on the EMIT-10. A **reference**, not a primary: vegetation degrades group 2 before group 1, so a joint key favours bare ground |
+| `manifest-yearly-hybrid.yaml` | the reference plus `combine: hybrid`, `tie_break: combine` | does ranking the looks on the mode by voting (each metric one ballot: Borda, then Copeland on a Borda tie) pick better than the weighted sum? The external tiled aggregator's hybrid method, which needs the hard gate |
 
 Each yearly contender delivers the same bands:
 

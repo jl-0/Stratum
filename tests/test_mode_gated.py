@@ -15,7 +15,14 @@ import pyarrow as pa
 import pytest
 from stratum_emit.masks import CosineI
 from stratum_emit.scorers import ModeGatedSelect
-from stratum_emit.scorers.mode_gated import METRICS, rank_penalty, tally
+from stratum_emit.scorers.mode_gated import (
+    METRICS,
+    borda_points,
+    copeland_points,
+    lexical_rank,
+    rank_penalty,
+    tally,
+)
 from synthetic import (
     ENUMERATION,
     EPOCH,
@@ -543,3 +550,95 @@ def test_mode_gated_vote_power_sharpens() -> None:
     assert s.emit(obs, None)["mode_votes"][0, 0] == pytest.approx(2 * 0.8 ** 4, rel=1e-5)
     with pytest.raises(ValueError, match="vote_power"):
         ModeGatedSelect(vote_power=0)
+
+
+# ------------------------------------------------------------------------- combine
+THREE = {m: 0.0 for m in METRICS} | {"vza": 1.0, "sza": 1.0, "path_length": 1.0}
+
+
+def _path(pen: float) -> float:
+    lo, hi = METRICS["path_length"][1]
+    return lo + pen * (hi - lo)
+
+
+def _xyz(extra: Sequence[tuple[int, int]] = (),
+         extra_bands: Sequence[tuple[float, float, float]] = ()) -> ObsWindow:
+    """Three looks X, Y, Z on one key; ballots vza and sza rank X > Y > Z, path_length Y > Z > X
+    and by far the most. Weighted sum: Y. Borda: X and Y tie at 4. Copeland: X beats both."""
+    pairs = [(HEM, KAO)] * 3 + list(extra)
+    vz, sz, pl = [1.0, 2.0, 3.0], [10.0, 11.0, 12.0], [_path(.9), _path(.1), _path(.2)]
+    for v, z, p in extra_bands:                      # (vza, sza, path_length penalty)
+        vz.append(v); sz.append(z); pl.append(_path(p))
+    return stack(pairs, bands={"view_zenith": vz, "solar_zenith": sz, "path_length": pl})
+
+
+def test_borda_and_copeland_points() -> None:
+    """Five ballots: 3 x (X > Y > Z), 2 x (Y > Z > X). Borda elects Y (7 to X's 6); Copeland X,
+    who beats each rival 3-2 - the Condorcet winner Borda can miss."""
+    order = {"XYZ": [0.0, 0.5, 1.0], "YZX": [1.0, 0.0, 0.5]}
+    ballots = [np.array(order[b]).reshape(3, 1, 1) for b in ("XYZ",) * 3 + ("YZX",) * 2]
+    cand = np.ones((3, 1, 1), bool)
+    assert borda_points(ballots, cand)[:, 0, 0].tolist() == [6.0, 7.0, 2.0]
+    assert copeland_points(ballots, cand)[:, 0, 0].tolist() == [2.0, 1.0, 0.0]
+    # a tie on a ballot shares the points; a non-candidate gets none and is not counted
+    tied = [np.array([0.2, 0.2, 0.9]).reshape(3, 1, 1)]
+    assert borda_points(tied, cand)[:, 0, 0].tolist() == [1.5, 1.5, 0.0]
+    two = np.array([True, False, True]).reshape(3, 1, 1)
+    assert borda_points(ballots, two)[:, 0, 0].tolist() == [3.0, 0.0, 2.0]
+    assert copeland_points(tied, cand)[:, 0, 0].tolist() == [1.5, 1.5, 0.0]
+
+
+def test_lexical_rank_is_exact_and_dense() -> None:
+    cand = np.array([True, True, True, False]).reshape(4, 1, 1)
+    a = np.array([2.0, 2.0, 1.0, 9.0]).reshape(4, 1, 1)
+    b = np.array([0.0, 1e-12, 5.0, 9.0]).reshape(4, 1, 1)
+    r = lexical_rank([a, b], cand)[:, 0, 0]
+    assert r[:3].tolist() == [1.0, 0.0, 2.0] and np.isinf(r[3])
+    assert lexical_rank([a], cand)[:3, 0, 0].tolist() == [0.0, 0.0, 1.0]   # shared rank
+
+
+def test_mode_gated_combine_methods_pick_differently() -> None:
+    obs = _xyz()
+    pick = {c: winner(ModeGatedSelect(weights=THREE, combine=c), obs)
+            for c in ("weighted", "borda", "copeland", "hybrid")}
+    # Borda's X/Y tie falls to the weighted sum (Y); hybrid breaks it by Copeland (X)
+    assert pick == {"weighted": 1, "borda": 1, "copeland": 0, "hybrid": 0}
+    s = ModeGatedSelect(weights=THREE, combine="hybrid")
+    assert s.score(obs, None)[:, 0, 0].tolist() == [0.0, -1.0, -2.0]      # minus the rank
+    # the reported penalty is still the weighted sum
+    assert s.emit(obs, None)["selection_penalty"][0, 0, 0] == pytest.approx(
+        (1 / 30 + 10 / 70 + 0.9) / 3, rel=1e-5)
+
+
+def test_mode_gated_combine_ranks_only_the_gated_looks() -> None:
+    """Two off-mode looks, worst on vza and sza and between Z and X on path_length. On the
+    ballots they would hand Y the Borda count, 10 to X's 8 (Borda is not independent of
+    irrelevant alternatives); the hard gate keeps them off, and X still wins."""
+    obs = _xyz(extra=[(GOE, ALU), (JAR, ALU)],
+               extra_bands=[(29.0, 69.0, 0.3), (29.5, 69.5, 0.4)])
+    s = ModeGatedSelect(weights=THREE, combine="hybrid")
+    v, g1, g2 = (np.asarray(x) for x in (obs.valid, obs.layer("mineral_1"),
+                                          obs.layer("mineral_2")))
+    everyone = borda_points(list(s.penalties(obs, g1, g2).values()), v)[:3, 0, 0]
+    assert everyone.tolist() == [8.0, 10.0, 7.0]
+    score = s.score(obs, None)[:, 0, 0]
+    assert np.isnan(score[3:]).all() and winner(s, obs) == 0
+    with pytest.raises(ValueError, match="gate: hard"):
+        ModeGatedSelect(weights=THREE, combine="borda", gate="soft")
+    with pytest.raises(ValueError, match="combine must be one of"):
+        ModeGatedSelect(combine="condorcet")
+
+
+def test_mode_gated_tie_break_combine() -> None:
+    """Two keys, one look each, so the modes tie. `weighted` takes the key of the lower-penalty
+    look (Y); `combine` under copeland takes X, which two of three ballots prefer."""
+    obs = stack([(HEM, KAO), (GOE, ALU)],
+                bands={"view_zenith": [1.0, 2.0], "solar_zenith": [10.0, 11.0],
+                       "path_length": [_path(.9), _path(.1)]})
+    assert winner(ModeGatedSelect(weights=THREE, combine="copeland"), obs) == 1
+    s = ModeGatedSelect(weights=THREE, combine="copeland", tie_break="combine")
+    assert winner(s, obs) == 0
+    assert s.emit(obs, None)["mode_1"][0, 0] == HEM
+    # under key: independent each group's tie is broken the same way
+    s = ModeGatedSelect(weights=THREE, combine="hybrid", tie_break="combine", key="independent")
+    assert winner(s, obs) == 0

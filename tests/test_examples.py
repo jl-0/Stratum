@@ -172,7 +172,7 @@ def test_c_changes_exactly_three_of_bs_settings() -> None:
 
 
 # ----------------------------------------------------------------------- the yearly set
-YEARLY = ("reference", "base", "min3", "nondetect-vote", "weighted")
+YEARLY = ("reference", "base", "min3", "nondetect-vote", "weighted", "hybrid")
 #: what each yearly variant changes from the base - and nothing else
 YEARLY_CHANGES = {
     "reference": {"key": "joint", "gate": "hard", "normalize": "fixed"},
@@ -213,6 +213,16 @@ def test_yearly_variants_change_one_thing_from_the_base() -> None:
         changed = {k: params[k] for k in base.keys() | params.keys()
                    if base.get(k) != params.get(k)}
         assert changed == change, f"yearly-{name} changes {changed}"
+
+
+def test_yearly_hybrid_is_the_reference_ranked_by_borda_then_copeland() -> None:
+    """The hybrid keeps the reference's joint mode and hard gate and changes only how the looks
+    on the mode are ranked, and how a tie between modes is broken."""
+    ref = _yearly("reference")["scorer"]["params"]
+    hyb = _yearly("hybrid")["scorer"]["params"]
+    changed = {k: hyb.get(k) for k in ref.keys() | hyb.keys() if ref.get(k) != hyb.get(k)}
+    assert changed == {"combine": "hybrid", "tie_break": "combine"}
+    assert ModeGatedSelect(**hyb).gate == "hard"
 
 
 def test_yearly_reference_is_bs_selection() -> None:

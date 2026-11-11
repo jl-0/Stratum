@@ -20,6 +20,7 @@ KEYS = {
     "cm-demo-yearly-nondetect-vote-2025": "Y2 - yearly-nondetect-vote",
     "cm-demo-yearly-weighted-2025": "Y3 - yearly-weighted",
     "cm-demo-yearly-reference-2025": "Y4 - yearly-reference",
+    "cm-demo-yearly-hybrid-2025": "Y5 - yearly-hybrid",
     "cm-demo-baseline-2025": "A - baseline",
     "cm-demo-mode-gated-2025": "B - mode-gated",
     "cm-demo-assistant-pick-2025": "C - assistant-pick",

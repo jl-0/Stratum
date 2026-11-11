@@ -350,7 +350,8 @@ stack scorer decides and delivers each group's EMIT-10 consensus (`scorer.mode_1
 layers, `classes: layer:<name>`), reduce is the identity, and each variant changes ONE scorer
 parameter from the base; `tests/test_examples.py` validates every example manifest and pins what the
 contenders must share (grid, index, band names, B = the scorer's defaults, C = B plus three changes,
-yearly variant = base plus one change).
+yearly variant = base plus one change, except `yearly-hybrid` = reference plus `combine: hybrid`,
+`tie_break: combine`).
 The first-slice trial over the same tile from a local directory (`examples/trial-nevada/`, with
 the SpectralUtil `build_obs_nc` parity script) IS tracked - its manifests and `parity.py` are
 source - but it cannot run without `trial-data/`, which is git-ignored and never committed.
