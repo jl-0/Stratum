@@ -16,6 +16,7 @@ version the planner recorded, so a worker's keys are the planner's keys.
 """
 from __future__ import annotations
 
+import hashlib
 import json
 from collections.abc import Mapping, Sequence
 from dataclasses import asdict, dataclass
@@ -344,6 +345,14 @@ def read_plan(run_dir: Path) -> dict[str, Any]:
     return json.loads(path.read_text())
 
 
+def plan_digest(run_dir: Path) -> str:
+    """sha256 of `plan.json` as written: which plan this is. A `run_id` does not say - it is
+    label + date + manifest hash, and the index is not in that hash, so re-planning the same
+    manifest the same day over a rebuilt index reuses the id for a different work list. Anything
+    holding a copy of a run directory (a warm Lambda container, 08 section 1) compares this."""
+    return "sha256:" + hashlib.sha256((Path(run_dir) / PLAN_NAME).read_bytes()).hexdigest()
+
+
 def load_run(run_dir: Path) -> RunPlan:
     """Read `plan.json` and rebuild everything a stage handler needs."""
     run_dir = Path(run_dir).resolve()
@@ -406,7 +415,8 @@ __all__ = [
     "BudgetExceeded", "PlanError", "RunPlan", "class_table_from_doc", "class_table_to_doc",
     "context_from_doc", "context_to_doc", "epoch_from_doc", "epoch_to_doc", "granule_from_doc",
     "granule_to_doc", "grid_from_doc", "grid_to_doc", "load_run", "period_from_doc",
-    "period_to_doc", "plugin_from_doc", "plugin_to_doc", "read_plan", "read_results",
+    "period_to_doc", "plan_digest", "plugin_from_doc", "plugin_to_doc", "read_plan",
+    "read_results",
     "read_work", "remaps_from_doc", "remaps_to_doc", "results_path", "schema_from_doc",
     "schema_to_doc", "work_path", "write_plan", "write_work",
 ]

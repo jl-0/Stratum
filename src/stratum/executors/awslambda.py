@@ -8,10 +8,15 @@
 3. calls `exec_item` - the same function `stratum exec`, the local pool and a SLURM array task
    call, which is what keeps the four paths from diverging.
 
-The event is four scalars, because a Step Functions child execution input is capped at 256 KiB
+The event is five scalars, because a Step Functions child execution input is capped at 256 KiB
 and a work item must never carry geometry:
 
-    {"root": "s3://bucket/prefix/", "run_id": "cm-20260914-a1b2c3d4", "stage": "regrid", "index": 41}
+    {"root": "s3://bucket/prefix/", "run_id": "cm-20260914-a1b2c3d4", "stage": "regrid",
+     "index": 41, "plan": "sha256:..."}
+
+`plan` is the digest of the plan.json the dispatcher is running (`plan_digest`). A run id does not
+identify a plan - re-planning one manifest the same day over a rebuilt index reuses it - so a
+warm container compares the digest with the plan it holds and starts over when they differ.
 
 **No credential is ever configured into the function.** A value in Terraform's `environment`
 block lands in Terraform state and in the function configuration, where `lambda:GetFunction` can
@@ -25,7 +30,8 @@ import logging
 import os
 from typing import Any
 
-from stratum.executors.worker import exec_item
+from stratum.executors.worker import clear_cache, exec_item
+from stratum.plan.document import plan_digest
 from stratum.storage import Workspace
 
 log = logging.getLogger(__name__)
@@ -92,15 +98,33 @@ def reset_credentials() -> None:
 
 
 # ----------------------------------------------------------------------------------- the run
-def run_dir_for(root: str, run_id: str) -> Any:
+def run_dir_for(root: str, run_id: str, plan: str | None = None) -> Any:
     """The local run directory for `{root}/runs/{run_id}`, pulled from the bucket if this
-    container has not seen it. A warm container skips the pull entirely."""
+    container has not seen it. A warm container skips the pull - provided the plan it holds is
+    the one being run.
+
+    `plan` is the dispatcher's `plan_digest`. When this container's copy differs, the run was
+    re-planned under the same id since the container last pulled it: the mirrored run directory
+    is dropped and pulled again (`pull_tree` leaves an existing file alone, so the stale plan and
+    work lists would otherwise survive), and the `RunPlan` memoised in this process goes with it.
+    If the bucket's plan is still not the dispatcher's, the dispatcher is the stale one, and the
+    item is refused rather than run from a work list it was not numbered against. An event with
+    no `plan` is taken as it always was."""
     ws = Workspace.for_root(root)
     run_dir = ws.path / "runs" / run_id
-    if not (run_dir / "plan.json").is_file():
+    plan_path = run_dir / "plan.json"
+    if plan is not None and plan_path.is_file() and plan_digest(run_dir) != plan:
+        log.info("run %s was re-planned; dropping this container's copy", run_id)
+        ws.drop_mirror(run_dir)
+        clear_cache()
+    if not plan_path.is_file():
         ws.pull_tree(run_dir)
-    if not (run_dir / "plan.json").is_file():
+    if not plan_path.is_file():
         raise HandlerError(f"no plan.json under {ws.url(run_dir)}; run `stratum plan` first")
+    if plan is not None and plan_digest(run_dir) != plan:
+        raise HandlerError(f"{ws.url(run_dir)} holds another plan than the one this item was "
+                           "dispatched from: the run was re-planned while it was executing. "
+                           "Start it again from the re-plan")
     return run_dir
 
 
@@ -111,7 +135,9 @@ def handler(event: dict[str, Any], context: Any = None) -> dict[str, Any]:
     if missing:
         raise HandlerError(f"event lacks {missing}; expected root, run_id, stage, index")
     load_credentials()
-    run_dir = run_dir_for(str(event["root"]), str(event["run_id"]))
+    plan = event.get("plan")
+    run_dir = run_dir_for(str(event["root"]), str(event["run_id"]),
+                          str(plan) if plan is not None else None)
     return exec_item(run_dir, str(event["stage"]), int(event["index"]))
 
 

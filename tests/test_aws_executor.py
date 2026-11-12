@@ -101,14 +101,17 @@ def test_a_local_root_is_refused(monkeypatch, tmp_path: Path) -> None:
 
 
 # ----------------------------------------------------------------------------------- the event
-def test_the_event_is_four_scalars(monkeypatch, s3_run) -> None:
+def test_the_event_is_five_scalars(monkeypatch, s3_run) -> None:
     """A work item carries keys and never geometry: the 256 KiB child-execution cap in 08
-    section 3 is a design constraint, not an implementation detail."""
+    section 3 is a design constraint, not an implementation detail. `plan` is the digest of the
+    plan.json the dispatcher is running, so a worker can tell it holds another."""
+    from stratum.plan.document import plan_digest
     fake = FakeLambda()
     run_stage(s3_run.run_dir, "regrid", function="fn", client=fake)
     assert fake.events, "the stage had items"
     for event in fake.events:
-        assert set(event) == {"root", "run_id", "stage", "index"}
+        assert set(event) == {"root", "run_id", "stage", "index", "plan"}
+        assert event["plan"] == plan_digest(s3_run.run_dir)
         assert event["root"] == "s3://stratum-test/"
         assert event["run_id"] == s3_run.run_id
         assert len(json.dumps(event)) < 1024
@@ -125,6 +128,46 @@ def test_the_handler_reports_a_missing_run(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.setenv("STRATUM_SCRATCH", str(tmp_path / "scratch"))
     with pytest.raises(HandlerError, match="no plan.json"):
         handler({"root": "s3://stratum-test/", "run_id": "nope", "stage": "regrid", "index": 0})
+
+
+def test_a_warm_container_drops_a_plan_that_was_replaced(monkeypatch, tmp_path: Path,
+                                                         s3_run) -> None:
+    """A run id is label + date + manifest hash, and the index is not in the hash: rebuild the
+    index and re-plan the same day and the SAME run id names a different work list. A warm
+    container still holds the first plan in /tmp and in memory; it used to skip the pull, run
+    item i of the old list and report ok. The event now says which plan is being run."""
+    from stratum.plan.document import plan_digest
+    bucket_run = tmp_path / "bucket" / "stratum-test" / "runs" / s3_run.run_id
+    event = {"root": "s3://stratum-test/", "run_id": s3_run.run_id, "stage": "regrid",
+             "index": 0, "plan": plan_digest(bucket_run)}
+    # the container: its own /tmp, and a process that keeps the plan it loaded
+    monkeypatch.setenv("STRATUM_SCRATCH", str(tmp_path / "container"))
+    first = handler(event)
+    assert first["ok"] and not first["hit"]
+
+    # the same-day re-plan, as it lands in the bucket: a new plan.json and a new work list
+    work = bucket_run / "work" / "regrid.jsonl"
+    lines = work.read_text().splitlines()
+    assert len(lines) >= 2 and lines[0] != lines[-1]
+    work.write_text("\n".join(reversed(lines)) + "\n")
+    doc = json.loads((bucket_run / "plan.json").read_text())
+    doc["index"]["hash"] = "sha256:rebuilt"
+    (bucket_run / "plan.json").write_text(json.dumps(doc))
+    replanned = {**event, "plan": plan_digest(bucket_run)}
+    assert replanned["plan"] != event["plan"]
+
+    second = handler(replanned)                       # NOT a cold container: no clear_cache()
+    assert second["ok"] and second["key"] != first["key"], \
+        "the warm container executed item 0 of the plan it already had"
+    from stratum.executors.worker import load_cached
+    mirror_run = Path(second["key"]).parents[4] / "runs" / s3_run.run_id
+    assert load_cached(mirror_run).index_hash == "sha256:rebuilt"
+    # a dispatcher still running the replaced plan is refused rather than served the new one
+    with pytest.raises(HandlerError, match="re-planned"):
+        handler(event)
+    # and an event with no `plan` (an older dispatcher) behaves as it always did
+    assert handler({k: v for k, v in replanned.items() if k != "plan"})["ok"]
+    clear_cache()
 
 
 # ----------------------------------------------------------------------------- the credential

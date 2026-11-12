@@ -111,8 +111,9 @@ executors; only the dispatch differs.
 
 | Property | Contract |
 |---|---|
-| Unit of work | An invocation carrying `{root, run_id, stage, index}` — four scalars, no geometry, well under the 256 KiB of §3 |
-| Worker | `stratum/executors/awslambda.py`: load the credential, mirror the run directory if this container has not seen it, `exec_item` |
+| Unit of work | An invocation carrying `{root, run_id, stage, index, plan}` — five scalars, no geometry, well under the 256 KiB of §3 |
+| Worker | `stratum/executors/awslambda.py`: load the credential, mirror the run directory if this container has not seen it **or holds another plan for it**, `exec_item` |
+| Plan identity | `plan` is the sha256 of the dispatcher's `plan.json` (`plan_digest`). A `run_id` is label + date + manifest hash and the index is not in the hash ([09 §5](09-run-manifest.md)), so a same-day re-plan over a rebuilt index reuses the id for a different work list. A warm container whose copy has another digest drops its mirrored run directory and its loaded plan and pulls again; if the bucket's plan is still not the dispatcher's, the item is refused. Without it the container ran item *i* of the old list and reported `ok` |
 | Pool | `--workers`, else `$STRATUM_LAMBDA_CONCURRENCY`, else 32. The ceiling that binds is the function's reserved concurrency, which is a deployment setting |
 | Outcomes | Identical records to `local`, including a handler exception, so `stratum status --failed` parses one format |
 | Failure | All-or-nothing, as `local`. §4's tolerated percentage is still a later slice |

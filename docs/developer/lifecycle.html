@@ -286,8 +286,8 @@ leaves either nothing or a temp name, never a half-artifact that the next run wo
 <table>
 <thead><tr><th>Raised</th><th>Means</th><th>Surfaces as</th></tr></thead>
 <tbody>
-<tr><td><a class="src" data-sym="class PlanError" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/plan/document.py#L62">PlanError</a></td><td>The manifest, the data or the index make the run impossible</td><td>A clean CLI message; nothing is written</td></tr>
-<tr><td><a class="src" data-sym="class BudgetExceeded" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/plan/document.py#L66">BudgetExceeded</a></td><td>Fan-out exceeds the manifest's budget and <code>on_exceed</code> is not <code>warn</code></td><td>Exit 2, with the plan and report still written so you can see <em>why</em></td></tr>
+<tr><td><a class="src" data-sym="class PlanError" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/plan/document.py#L63">PlanError</a></td><td>The manifest, the data or the index make the run impossible</td><td>A clean CLI message; nothing is written</td></tr>
+<tr><td><a class="src" data-sym="class BudgetExceeded" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/plan/document.py#L67">BudgetExceeded</a></td><td>Fan-out exceeds the manifest's budget and <code>on_exceed</code> is not <code>warn</code></td><td>Exit 2, with the plan and report still written so you can see <em>why</em></td></tr>
 <tr><td><code>FileNotFoundError</code> from a handler</td><td>An upstream stage did not run for this item</td><td>One failed outcome record, naming the missing key path and the stage to run</td></tr>
 <tr><td><a class="src" data-sym="class ExecutionError" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/executors/local.py#L41">ExecutionError</a></td><td>One or more items of a stage failed</td><td>The stage stops the run; up to ten failures listed, plus the first traceback in full</td></tr>
 <tr><td><code>FilterError</code></td><td>A <code>granule_filter</code> met missing metadata under <code>on_missing: fail</code></td><td>Wrapped into a <code>PlanError</code> — a policy decision, not a traceback</td></tr>

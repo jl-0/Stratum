@@ -27,7 +27,7 @@ from typing import Any
 
 from stratum import console
 from stratum.executors.worker import load_cached
-from stratum.plan.document import read_work
+from stratum.plan.document import plan_digest, read_work
 
 FUNCTION_ENV = "STRATUM_LAMBDA_FUNCTION"
 CONCURRENCY_ENV = "STRATUM_LAMBDA_CONCURRENCY"
@@ -109,7 +109,9 @@ def run_stage(run_dir: Path | str, stage: str, workers: int | None = None, *,
     items: Sequence[Any] = read_work(run_dir, stage)
     name = function_name(function)
     cli = _client(client)
-    base = {"root": ws.uri, "run_id": run.run_id, "stage": stage}
+    # `plan` says WHICH plan: a run id is reused by a same-day re-plan, and a warm container
+    # still holding the earlier one must not execute its work list (08 section 1)
+    base = {"root": ws.uri, "run_id": run.run_id, "stage": stage, "plan": plan_digest(run_dir)}
     results: list[dict[str, Any]] = []
     if items:
         with (ThreadPoolExecutor(max_workers=min(concurrency(workers), len(items))) as pool,

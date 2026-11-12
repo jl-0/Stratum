@@ -279,7 +279,7 @@ largest module in the tree.</td><td><a class="src" data-sym="def plan_run" href=
 <tr><td><code>plan/estimate.py</code></td><td>The run's rough order of magnitude: per-item seconds from pixels and bytes per cell, constants fitted to one recorded run, Lambda dollars, downloads and bytes written. Pure arithmetic over the work lists; reads no granule.</td><td><a class="src" data-sym="def estimate(" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/plan/estimate.py#L96">estimate</a></td></tr>
 <tr><td><code>plan/document.py</code></td><td>The serialisation seam: <code>plan.json</code>, the
 work lists, and the paired <code>*_to_doc</code> / <code>*_from_doc</code> functions that let a
-worker rebuild a planner's context from plain JSON.</td><td><a class="src" data-sym="class RunPlan" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/plan/document.py#L300">RunPlan</a></td></tr>
+worker rebuild a planner's context from plain JSON.</td><td><a class="src" data-sym="class RunPlan" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/plan/document.py#L301">RunPlan</a></td></tr>
 <tr><td><code>executors/worker.py</code></td><td>The portability seam: one handler per stage, and
 the single <code>exec_item</code> entry point every executor
 reduces to.</td><td><a class="src" data-sym="def exec_item" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/executors/worker.py#L274">exec_item</a></td></tr>
@@ -294,7 +294,7 @@ boto3.</td><td><a class="src" data-sym="def run_stage(run_dir: Path | str, stage
 <tr><td><code>executors/preflight.py</code></td><td>The executor's half of validation, run after the plan and before dispatch: disk for <code>local</code>; credentials, the worker function, its timeout and concurrency for <code>aws</code>. Returns findings; the CLI refuses on a failure.</td><td><a class="src" data-sym="def preflight(" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/executors/preflight.py#L44">preflight</a></td></tr>
 <tr><td><code>executors/awslambda.py</code></td><td>The worker half: the Lambda entrypoint. Credential
 from Secrets Manager, run directory mirrored from the bucket, then the same
-<code>exec_item</code>.</td><td><a class="src" data-sym="def handler(event" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/executors/awslambda.py#L107">handler</a></td></tr>
+<code>exec_item</code>.</td><td><a class="src" data-sym="def handler(event" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/executors/awslambda.py#L131">handler</a></td></tr>
 <tr><td><code>console.py</code></td><td>Terminal rendering of the plan report, via <code>rich</code>. <code>report.md</code> stays markdown because it is an artifact; only the screen view is rendered, and digests and absolute paths are abbreviated on the way there. Output is plain whenever stdout is not a tty, so pipes, CI and Lambda logs are unchanged.</td><td><a class="src" data-sym="def render_markdown" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/console.py#L88">render_markdown</a></td></tr>
 <tr><td><code>preview/</code></td><td>The viewer: a products tree read through its STAC, and a
 web-mercator tile rendered from a published raster. Takes no part in a run and writes nothing
