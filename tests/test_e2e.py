@@ -188,3 +188,34 @@ def test_cli_surface(e2e: tuple[Path, PlanResult]) -> None:
     assert r.exit_code == 1 and "09 section 3" in r.output
     r = runner.invoke(main, ["run", "-m", str(root / "manifest.yaml"), "--executor", "slurm"])
     assert r.exit_code == 1 and "08 section" in r.output
+
+
+def test_a_same_day_replan_does_not_link_tiles_the_new_plan_dropped(tmp_path: Path) -> None:
+    """A re-plan on the same day reuses the run directory and the products tree (the run id is
+    label + date + manifest hash). After an index rebuild that loses a period's only granule,
+    that period's product directory is still on disk from the first run; the collection lists
+    what THIS plan publishes, not what the directory happens to hold."""
+    write_scenes(tmp_path / "granules")
+    manifest = write_manifest(tmp_path / "manifest.yaml", time={
+        "start": "2026-06-01", "end": "2026-08-01", "epoch": "P1M", "deliver": "P1M"})
+    first = plan_run(manifest)
+    run_all(first.run_dir, workers=1)
+    products = Path(first.document["products_dir"])
+
+    def linked() -> list[str]:
+        doc = json.loads((products / "collection.json").read_text())
+        return sorted(ln["href"] for ln in doc["links"] if ln["rel"] == "item")
+
+    tile = f"{TILE.tx}_{TILE.ty}"
+    assert linked() == [f"./{tile}/20260601_20260701/item.json",
+                        f"./{tile}/20260701_20260801/item.json"]
+
+    for path in (tmp_path / "granules").glob("*20260703T100000*"):    # C, the only July granule
+        path.unlink()
+    (tmp_path / "index" / "granules.parquet").unlink()
+    second = plan_run(manifest)
+    assert second.run_dir == first.run_dir
+    assert len(read_work(second.run_dir, "publish")) == 1
+    run_all(second.run_dir, workers=1)
+    assert (products / tile / "20260701_20260801" / "item.json").is_file()   # stale, still there
+    assert linked() == [f"./{tile}/20260601_20260701/item.json"]

@@ -57,7 +57,7 @@ executor is below.
 | Pool | `--workers 1` runs every item in-process (debuggable); more uses a **spawn**-context `ProcessPoolExecutor`, because netCDF4/HDF5 are not fork-safe and a reader context is not picklable |
 | Outcomes | `work/{stage}.results.jsonl`, one line per item: `index`, `ok`, the key or the error plus traceback, `hit`, `seconds` — written whether or not the stage succeeded, so `stratum status` can say what happened |
 | Failure | All-or-nothing: any failed item raises after the stage completes, listing the failures. §4's tolerated percentage is a later slice |
-| Order | regrid → resolve → reduce → publish, then Finalize: the STAC collection, `provenance.json` ([10 §2](10-provenance.md)) and an execution section appended to `report.md` |
+| Order | regrid → resolve → reduce → publish, then Finalize: the STAC collection, `provenance.json` ([10 §2](10-provenance.md)) and an execution section appended to `report.md`. The collection links the items of **this plan's publish list**, not whatever the products directory holds: a same-day re-plan reuses the run and products directories ([09 §5](09-run-manifest.md)), and a tile or period the new plan no longer covers stays on disk but is not linked |
 | Budget gate | Runs before the first stage ([09 §4](09-run-manifest.md)): over budget refuses unless `on_exceed: warn`; `require_approval` refuses too, naming `stratum approve` as the later slice (§3) |
 | Exit codes | `0` ok; `1` invalid or failed; `2` valid but over budget — from both `plan` and `run` |
 
