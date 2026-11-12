@@ -13,6 +13,7 @@ import json
 import logging
 import multiprocessing
 import os
+import subprocess
 import time
 import traceback
 from collections.abc import Callable, Mapping
@@ -170,6 +171,60 @@ def run_all(run_dir: Path | str, workers: int | None = None, *,
     return execution
 
 
+#: Where the dispatcher learns which worker image is deployed: `make image` prints the digest,
+#: it is kept in `.env`, and `scripts/stratum.sh` exports it beside the AWS profile.
+IMAGE_DIGEST_ENV = "STRATUM_IMAGE_DIGEST"
+
+
+def stratum_commit(source: Path | str | None = None) -> str | None:
+    """The git commit of the checkout `source` (this package, by default) is running from, with
+    `-dirty` appended when tracked files differ from it. None when the file is not tracked by a
+    git repository - an installed wheel, the worker image - or git is not there to ask. The
+    tracked-file check matters: a package installed into an environment that merely sits INSIDE
+    some repository must not be reported as that repository's commit."""
+    path = Path(source) if source is not None else Path(__file__).resolve()
+
+    def git(*args: str) -> subprocess.CompletedProcess[str]:
+        return subprocess.run(["git", "-C", str(path.parent), *args], capture_output=True,
+                              text=True, timeout=10, check=False)
+
+    try:
+        if git("ls-files", "--error-unmatch", path.name).returncode != 0:
+            return None
+        head = git("rev-parse", "HEAD")
+        if head.returncode != 0 or not head.stdout.strip():
+            return None
+        dirty = git("status", "--porcelain", "--untracked-files=no").stdout.strip()
+    except (OSError, subprocess.SubprocessError):
+        return None
+    return head.stdout.strip() + ("-dirty" if dirty else "")
+
+
+def code_identity(ctx: Any, executor: str | None) -> dict[str, Any]:
+    """The `code` block of the run record (10 section 2): what ran, by content rather than by a
+    version number somebody has to remember to bump.
+
+    Nothing here is computed for the record. The algorithm versions and the content hashes are
+    the ones the cache keys were built from (06 section 3 rule 3), read off the plan context so
+    the record and the keys cannot disagree; a context that carries no content hash records
+    none. `stratum_commit` is the dispatcher's checkout. `image_digest` is recorded for an
+    `aws` run only - a local run executes no image - and is the digest the deployment was
+    pinned to (`$STRATUM_IMAGE_DIGEST`), not a read-back of the function's configuration."""
+    code: dict[str, Any] = {"regrid_algo_version": ctx.regrid_algo_version,
+                            "warp_algo_version": WARP_ALGO_VERSION}
+    for name in ("resolve_code", "reduce_code"):
+        value = getattr(ctx, name, None)
+        if value:
+            code[name] = value
+    commit = stratum_commit()
+    if commit:
+        code["stratum_commit"] = commit
+    digest = (os.environ.get(IMAGE_DIGEST_ENV) or "").strip()
+    if executor == "aws" and digest:
+        code["image_digest"] = digest
+    return code
+
+
 def provenance_record(run: RunPlan, started: datetime, finished: datetime,
                       execution: dict[str, Any]) -> dict[str, Any]:
     """The 10 section 2 record from the plan document and the execution counts."""
@@ -202,8 +257,7 @@ def provenance_record(run: RunPlan, started: datetime, finished: datetime,
         aux=[{"alias": a, "uri": src.uri, "kind": src.kind, "resampling": src.resampling,
               "digest": src.digest, "etag": src.etag}
              for a, src in sorted(ctx.aux_sources.items())],
-        code={"regrid_algo_version": ctx.regrid_algo_version,
-              "warp_algo_version": WARP_ALGO_VERSION},
+        code=code_identity(ctx, execution.get("executor")),
         plugins={"scorer": ctx.scorer.identity(),
                  "masks": [m.identity() for m in ctx.masks],
                  # the plugin's identity when one is named; "schema" means the built-in
@@ -235,5 +289,5 @@ def render_execution(execution: dict[str, Any], provenance: Path) -> str:
     return "\n".join(lines) + "\n"
 
 
-__all__ = ["ExecutionError", "budget_gate", "provenance_record", "render_execution", "run_all",
-           "run_stage"]
+__all__ = ["IMAGE_DIGEST_ENV", "ExecutionError", "budget_gate", "code_identity",
+           "provenance_record", "render_execution", "run_all", "run_stage", "stratum_commit"]
