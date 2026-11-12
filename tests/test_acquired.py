@@ -110,6 +110,27 @@ def test_acquired_must_be_one_continuous_float64_band(tmp_path: Path, layer: dic
     assert any(message in p for p in validate_static(m))
 
 
+@pytest.mark.parametrize("aggregate", [
+    {"method": "median"}, {"method": "mean"}, {"method": "percentile", "p": 50},
+    {"method": "score_weighted"}, {"method": "mean", "conditional_on": "mineral_1"},
+])
+def test_acquired_refuses_an_aggregation_that_blends_looks(tmp_path: Path,
+                                                           aggregate: dict) -> None:
+    """The value names a granule. The mean or median of two looks' timestamps is a time at which
+    nothing was acquired and matches no row of `granules.json`, so it is refused at validation."""
+    layer = {"kind": "continuous", "source": "acquired", "aggregate": aggregate}
+    m = load_manifest(write_manifest(tmp_path / "m.yaml", snapshot=_layers(acquired_1=layer)))
+    assert any("no granule was acquired" in p for p in validate_static(m))
+
+
+@pytest.mark.parametrize("method", ["best", "min", "max", "none"])
+def test_acquired_accepts_an_aggregation_that_selects_one_look(tmp_path: Path,
+                                                               method: str) -> None:
+    layer = {"kind": "continuous", "source": "acquired", "aggregate": {"method": method}}
+    m = load_manifest(write_manifest(tmp_path / "m.yaml", snapshot=_layers(acquired_1=layer)))
+    assert not any("acquired_1" in p for p in validate_static(m))
+
+
 def test_acquired_cannot_name_a_role(tmp_path: Path) -> None:
     doc = manifest_doc()
     doc["inputs"]["band_aliases"]["acquired"] = {"role": "geometry", "band": 9}
