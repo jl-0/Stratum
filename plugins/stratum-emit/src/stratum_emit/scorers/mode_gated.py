@@ -236,7 +236,11 @@ class ModeGatedSelect:
        / `latest` the first / last tied look; `nodata` leaves the cell unoccupied. A mode held by
        fewer than `min_count` looks leaves the cell unoccupied - or, with `below_min_count:
        none`, makes that group's answer `none` and gates on it (the looks that saw nothing
-       qualify). No voter at all: no gate.
+       qualify). No voter at all: no gate. Under `key: independent` a suppressed mode (thin, or
+       a `nodata` tie) costs only its own group: that group has no answer (`mode_N` is NaN) and
+       gates nothing, and the cell is left unoccupied only where both groups are suppressed.
+       The selected look is then chosen on the other group alone, so the class gathered from it
+       in the suppressed group is whatever that look holds, confirmed or not.
     4. **Gate.** `hard`: a look whose key differs from the mode may not occupy the cell (NaN).
        `soft`: it is ranked with `soft_penalty` added instead. A look holding an `ignore`d class
        never matches - also where the cell has no mode - so under the hard gate an ignored class
@@ -589,21 +593,23 @@ class ModeGatedSelect:
             runner_up = m["runner_up"].astype(np.float32)
             mode1, mode2 = m["mode"] >> 32, m["mode"] & 0xFFFFFFFF
             has1 = has2 = has
+            drop1 = drop2 = drop
         else:
             match = np.ones(valid.shape, dtype=bool)
             has = np.zeros(valid.shape[1:], dtype=bool)
-            drop = np.zeros(valid.shape[1:], dtype=bool)
             voters_any = np.zeros(valid.shape, dtype=bool)
             modes = []
             for g, det in ((g1, detect1), (g2, detect2)):
                 voters = valid & (det | votes_none) & ~ignored
                 voters_any |= voters
                 m = self._mode(g, quality, voters, P, tie_order(P))
-                match &= (g == m["mode"][None]) | ~m["has"][None]
+                # a suppressed mode (min_count, a refused tie) is no mode: it gates nothing
+                match &= (g == m["mode"][None]) | ~m["has"][None] | m["drop"][None]
                 has |= m["has"]
-                drop |= m["drop"]
-                modes.append((m["mode"], m["has"]))
-            (mode1, has1), (mode2, has2) = modes
+                modes.append((m["mode"], m["has"], m["drop"]))
+            (mode1, has1, drop1), (mode2, has2, drop2) = modes
+            # each group loses only its own answer; the cell is empty where both are suppressed
+            drop = drop1 & drop2
             match &= ~ignored
             n_voters = voters_any.sum(axis=0).astype(np.float32)
             # the looks carrying BOTH groups' modes: what the gate keeps
@@ -624,10 +630,10 @@ class ModeGatedSelect:
             agreement = np.where(n_valid > 0, mode_count / n_valid, np.nan)
 
         # the per-group answer: the mode; `none` where looks were valid but none voted; NaN where
-        # the cell is dropped (min_count under `nodata`, a `nodata` tie) or nothing was valid
-        def answer(mode: np.ndarray, has_g: np.ndarray) -> np.ndarray:
+        # the group is dropped (min_count under `nodata`, a `nodata` tie) or nothing was valid
+        def answer(mode: np.ndarray, has_g: np.ndarray, drop_g: np.ndarray) -> np.ndarray:
             out = np.where(has_g, mode, 0).astype(np.float32)
-            return np.where((n_valid > 0) & ~drop, out, np.nan).astype(np.float32)
+            return np.where((n_valid > 0) & ~drop_g, out, np.nan).astype(np.float32)
         self._memo = (id(obs), {
             "mode_count": np.asarray(mode_count, dtype=np.float32),
             "mode_votes": np.asarray(mode_votes, dtype=np.float32),
@@ -636,8 +642,8 @@ class ModeGatedSelect:
             "agreement": np.asarray(agreement, dtype=np.float32),
             "runner_up_count": runner_up,
             "selection_penalty": P,
-            "mode_1": answer(mode1, has1),
-            "mode_2": answer(mode2, has2),
+            "mode_1": answer(mode1, has1, drop1),
+            "mode_2": answer(mode2, has2, drop2),
         })
         return s
 
