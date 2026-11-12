@@ -118,8 +118,11 @@ def style_for(asset_key: str, roles: list[str], legend: dict | None,
     if "visual" in roles:
         return Style(kind="rgba")
     if legend and legend.get("kind") == "categorical":
+        # An entry with no colour is a class publish left uncoloured under `on_unmapped: fail`,
+        # which it may only do for a class the product does not contain. It is skipped, so it
+        # would draw as a hole (`Style.lut`); iterating its `None` was a 500 on every tile.
         colors = tuple((int(e["id"]), tuple(int(c) for c in e["color"]))  # type: ignore[misc]
-                       for e in legend.get("entries", ()))
+                       for e in legend.get("entries", ()) if e.get("color") is not None)
         return Style(kind="categorical", colors=colors)
     # An agreement layer is a fraction by construction (07 section 7); everything else gets its
     # range measured off the raster.

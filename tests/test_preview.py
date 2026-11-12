@@ -348,6 +348,27 @@ def test_measure_clips_to_percentiles(products: Products) -> None:
     assert 0.0 < lo < 0.05 and 0.95 < hi < 1.0, "a 2nd-98th percentile stretch, not min-max"
 
 
+def test_a_legend_with_an_uncoloured_class_still_styles_the_layer() -> None:
+    """Under the default `on_unmapped: fail` a class missing from the colours and absent from
+    the tile is published with `"color": null`. Styling raised on it, so every tile request of
+    that layer was a 500."""
+    import pyarrow as pa
+
+    from stratum.publish.legend import legend_record
+    from stratum.publish.mappers import categorical_legend
+    from stratum.types import ClassTable
+
+    table = ClassTable(key="id", source="test", entries=pa.table(
+        {"id": [0, 1, 2], "name": ["none", "Goethite", "Kaolinite"]}))
+    legend = legend_record(categorical_legend(table, {"Goethite": [1, 2, 3]}, on_unmapped="fail"))
+    assert any(e["color"] is None for e in legend["entries"]), "the published shape under test"
+    style = render.style_for("mineral_1", ["data"], legend)
+    assert style.kind == "categorical"
+    assert dict(style.colors)[1] == (1, 2, 3) and 2 not in dict(style.colors)
+    _, drawn = style.lut()
+    assert drawn[1]
+
+
 def test_the_page_carries_no_colour_table_of_its_own() -> None:
     """The ramps are served from `render.RAMPS` and interpolated in the browser only for the
     legend's gradient. A literal palette in `viewer.js` would be a second copy of a colour table,
