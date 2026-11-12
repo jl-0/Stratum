@@ -420,6 +420,12 @@ The guard is **free space on the volume**, not a budget per directory:
 - **A download makes room for itself.** Before the request the store makes room for a 512 MB
   reserve. When the response's `Content-Length` is larger, it makes room for that size as soon
   as the headers arrive. An L2A RFL granule is ~1.7 GB.
+  If the volume still has less free than that size — eviction is allowed to free nothing —
+  the download raises `ScratchFull` before writing a byte, in place of an `ENOSPC` part-way
+  through. It is transient and retried like a `503`. Two gaps remain, deliberately: a response
+  with no `Content-Length` is only covered by the 512 MB reserve, and the check is
+  check-then-act, so several local workers starting large downloads at once can each pass it.
+  One item per Lambda container means neither bites there.
   - **[observed] 2026-11-02:** before this, one Barstow topaz resolve item failed with `ENOSPC`
     halfway through writing an RFL granule. It ran on a warm Lambda whose `/tmp` still held the
     granule of an earlier item.

@@ -668,6 +668,26 @@ def test_an_asset_larger_than_the_reserve_makes_room_for_its_own_size(tmp_path, 
     assert asked == [100], "an asset inside the reserve needs no second pass"
 
 
+def test_an_asset_that_cannot_fit_fails_clearly_before_writing(tmp_path, monkeypatch):
+    """Eviction may free nothing: everything left is hot or in flight. The download used to
+    proceed anyway and die on ENOSPC part-way through. It now fails before the first byte, as a
+    transient error naming the size and the free space."""
+    import shutil
+
+    import stratum.access.store as store_mod
+    from stratum.access.store import ScratchFull
+
+    real = shutil.disk_usage
+    monkeypatch.setattr(store_mod, "ensure_free", lambda need, **kw: 0)
+    monkeypatch.setattr(store_mod.shutil, "disk_usage",
+                        lambda p: type(real("/"))(total=10**6, used=10**6 - 500, free=500))
+    h = Harness(tmp_path / "assets", reserve=100, headers={"Content-Length": "10000"}, retries=1)
+    with pytest.raises(ScratchFull, match="needs 10000 bytes.*has 500 free") as err:
+        h.store.open(URL)
+    assert err.value.transient and len(h.calls) == 2, "transient, so it is retried"
+    assert not [p for p in (tmp_path / "assets").rglob("*") if p.is_file()], "nothing written"
+
+
 # ----------------------------------------------------------------------------- range reads
 SIGNED = "https://d1nklfio7vscoe.cloudfront.net/s3-abc/X_001_gran.nc?Signature=sig"
 

@@ -23,6 +23,7 @@ import contextlib
 import hashlib
 import io
 import os
+import shutil
 import stat
 import threading
 import time
@@ -187,6 +188,21 @@ class AssetFetchError(AssetStoreError):
     def transient(self) -> bool:
         """Worth another attempt: no response at all, or a `RETRY_STATUSES` code."""
         return self.status is None or self.status in RETRY_STATUSES
+
+
+class ScratchFull(AssetFetchError):
+    """The asset is larger than the free space left on the cache's volume after eviction has
+    done what it can. Raised before the first byte is written, in place of an `ENOSPC` part-way
+    through - which reads as a broken disk, leaves the failure to whichever write happens to hit
+    it, and may be some other thread's. Transient: what holds the space is other downloads in
+    flight or files inside their grace window, and both pass."""
+
+    def __init__(self, uri: str, size: int, free: int) -> None:
+        self.uri, self.status, self.size, self.free = uri, None, size, free
+        AssetStoreError.__init__(
+            self, f"staging {uri!r} needs {size} bytes and the asset cache's volume has {free} "
+                  "free with nothing left to evict; retry once other downloads finish, or give "
+                  "the worker more scratch (12 section 4)")
 
 
 class UntrustedScheme(AssetStoreError):
@@ -825,6 +841,15 @@ class AssetStore:
             size = _content_length(resp)
             if size > self.reserve:
                 self.evicted_bytes += ensure_free(size)
+            # Eviction is allowed to free nothing - everything left is hot or in flight. Then
+            # the honest outcome is to say so now, not to write into ENOSPC.
+            if size:
+                try:
+                    free = shutil.disk_usage(tmp.parent).free
+                except OSError:
+                    free = size
+                if free < size:
+                    raise ScratchFull(uri, size, free)
             hasher = hashlib.new(expected[0]) if expected is not None else None
             try:
                 with open(tmp, "wb") as fh:
