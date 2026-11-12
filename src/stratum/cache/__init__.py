@@ -16,6 +16,9 @@ of truth for what enters each key (06 section 2); CLAUDE.md says a change to the
 """
 from __future__ import annotations
 
+import functools
+import hashlib
+import importlib
 import json
 import os
 import secrets
@@ -352,6 +355,42 @@ def ortho_inputs(granule_id: str, role: str, asset_checksum: str | None, var: st
     return inputs
 
 
+# ------------------------------------------------------------- 06 section 3 rule 3: code identity
+def source_hash(*roots: Path) -> str:
+    """sha256 over the Python source under `roots`: every `*.py` below a directory, or the file
+    itself, each under its path relative to the root's parent, in sorted order. Bytes and names
+    only - no mtimes, no absolute paths - so the same source hashes the same in a checkout, an
+    editable install and a container image."""
+    h = hashlib.sha256()
+    for root in roots:
+        root = Path(root)
+        files = sorted(root.rglob("*.py")) if root.is_dir() else [root]
+        for f in files:
+            name = f.relative_to(root.parent).as_posix()
+            h.update(name.encode() + b"\0" + f.read_bytes() + b"\0")
+    return "sha256:" + h.hexdigest()
+
+
+@functools.cache
+def package_hash(name: str) -> str | None:
+    """`source_hash` of an importable package (its whole tree) or module (its file), once per
+    process; None when it has no source file to read (a class built in a REPL).
+
+    This is the code identity of 06 section 3 rule 3, and the ONE definition of it: a science
+    plugin's `version` ends in the hash of its top-level package (`stratum.resolve.plugin_version`),
+    and the snapshot and product keys carry the hash of `stratum.resolve` and `stratum.reduce`.
+    The planner computes it, `plan.json` records it, and a worker whose own differs refuses the
+    plan. Nothing is recorded by hand, so there is nothing to forget to bump."""
+    try:
+        module = importlib.import_module(name)
+    except ImportError:
+        return None
+    roots = [Path(p) for p in getattr(module, "__path__", ())]
+    if not roots and getattr(module, "__file__", None):
+        roots = [Path(module.__file__)]
+    return source_hash(*roots) if roots else None
+
+
 #: What a snapshot directory holds. 2 added `observed.tif` (cells any observation reached, before
 #: masks) beside `score.tif` and `valid.tif`. Bump it whenever that file set changes: a snapshot
 #: written under another format would otherwise be a cache hit that `stack_snapshots` cannot read.
@@ -360,13 +399,18 @@ SNAPSHOT_FORMAT = 2
 
 def snapshot_inputs(obs_keys: Sequence[CacheKey | str], aux_keys: Sequence[CacheKey | str],
                     scorer_ref: str, scorer_version: str, scorer_params: Mapping[str, Any],
-                    layers_hash: str, epoch_bounds: Sequence[str]) -> dict[str, Any]:
+                    layers_hash: str, epoch_bounds: Sequence[str], *,
+                    resolve_code: str | None = None) -> dict[str, Any]:
     """Epoch snapshot key (06 section 2). `obs_keys` are stored in the order given, and the
     caller is expected to pass them SORTED: resolve derives its candidate order from
     (datetime, granule_id) of the observations themselves, so the order is a function of the set
     and the sorted list is the set's canonical form - two blocks reached by the same
-    observations get the same key however they were enumerated (06 section 3, rule 1)."""
-    return {
+    observations get the same key however they were enumerated (06 section 3, rule 1).
+
+    `resolve_code` is `package_hash("stratum.resolve")` as the planner recorded it: the read
+    path, the gather and the argmax are framework code that determines every snapshot, and no
+    plugin version covers them (06 section 3 rule 3). `resolve_block` always passes it."""
+    inputs = {
         "artifact_type": "snapshot",
         "snapshot_format": SNAPSHOT_FORMAT,
         "obs_keys": [_key_str(k) for k in obs_keys],
@@ -377,23 +421,33 @@ def snapshot_inputs(obs_keys: Sequence[CacheKey | str], aux_keys: Sequence[Cache
         "layers_hash": layers_hash,
         "epoch_bounds": list(epoch_bounds),
     }
+    if resolve_code is not None:
+        inputs["resolve_code"] = resolve_code
+    return inputs
 
 
 def product_inputs(snapshot_keys: Sequence[CacheKey | str], aux_keys: Sequence[CacheKey | str],
-                   aggregate_hash: str, reducer: Mapping[str, Any] | None = None) -> dict[str, Any]:
+                   aggregate_hash: str, reducer: Mapping[str, Any] | None = None, *,
+                   reduce_code: str | None = None) -> dict[str, Any]:
     """Product block key (06 section 2). `reducer` is `{ref, version, params}` when a plugin is
-    named, else None - the built-in reducer is fully described by `aggregate_hash`."""
-    return {
+    named, else None - the built-in reducer's SETTINGS are fully described by `aggregate_hash`.
+    Its code is not: `reduce_code` is `package_hash("stratum.reduce")` as the planner recorded
+    it, and the reduce worker always passes it (06 section 3 rule 3)."""
+    inputs = {
         "artifact_type": "product",
         "snapshot_keys": [_key_str(k) for k in snapshot_keys],
         "aux_keys": [_key_str(k) for k in aux_keys],
         "aggregate_hash": aggregate_hash,
         "reducer": dict(reducer) if reducer is not None else None,
     }
+    if reduce_code is not None:
+        inputs["reduce_code"] = reduce_code
+    return inputs
 
 
 __all__ = [
     "ARTIFACT_KINDS", "INPUTS_NAME", "MEMBERS_NAME", "SNAPSHOT_FORMAT", "CacheKey", "CacheRoot",
     "aux_inputs",
-    "glt_inputs", "grid_def_fields", "ortho_inputs", "product_inputs", "snapshot_inputs",
+    "glt_inputs", "grid_def_fields", "ortho_inputs", "package_hash", "product_inputs",
+    "snapshot_inputs", "source_hash",
 ]

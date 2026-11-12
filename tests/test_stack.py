@@ -49,8 +49,17 @@ pytestmark = pytest.mark.filterwarnings("ignore::rasterio.errors.NotGeoreference
 
 #: The snapshot key of `test_resolve.py::test_resolve_block_writes_the_snapshot`'s block, recorded
 #: before the stack path existed. A run without a stack scorer must keep producing it.
-#: Re-recorded when the observation key gained `band_aliases` (06 section 2).
-STREAMING_KEY = "sha256:7d5b8453391e5f5a26e5e66866921e531d9fb5c003a39e3b5da6775285842ba0"
+#: Re-recorded when the observation key gained `band_aliases` (06 section 2), and again when
+#: the snapshot key gained `resolve_code`.
+STREAMING_KEY = "sha256:855599ab8bd0eb7f432377b52003659bb86026fdc2b26551c242cfe532240f81"
+
+
+def _pinned(plan: PlanContext) -> PlanContext:
+    """`plan` with its code identity held still. The scorer's version and `resolve_code` are
+    content hashes (06 section 3 rule 3) and move with every edit to this suite or to
+    `stratum.resolve`, by design; a recorded key can only pin what is left - every other term."""
+    return replace(plan, scorer=replace(plan.scorer, version="unversioned"),
+                   resolve_code="sha256:pinned")
 
 
 # --------------------------------------------------------------------------------- scorers
@@ -502,7 +511,7 @@ def test_validate_capabilities(tmp_path: Path) -> None:
 
 
 def test_streaming_keys_unchanged(tmp_path: Path) -> None:
-    plan = build_plan(tmp_path, two_overlapping(), scorer=NadirScorer())
+    plan = _pinned(build_plan(tmp_path, two_overlapping(), scorer=NadirScorer()))
     assert resolve_block(item(TILE, EPOCH, 0, 0), plan).hash == STREAMING_KEY
 
 
@@ -798,7 +807,7 @@ def test_planner_types_a_scorer_layer_from_its_bandspec(tmp_path: Path) -> None:
 
 def test_no_emit_keys_unchanged(tmp_path: Path) -> None:
     """Re-asserted after the emit framework: a run without scorer layers keeps its keys."""
-    plan = build_plan(tmp_path, two_overlapping(), scorer=NadirScorer())
+    plan = _pinned(build_plan(tmp_path, two_overlapping(), scorer=NadirScorer()))
     assert plan.scorer_layers() == []
     assert resolve_block(item(TILE, EPOCH, 0, 0), plan).hash == STREAMING_KEY
     # and a scorer that declares outputs nobody asked for changes nothing but its own identity

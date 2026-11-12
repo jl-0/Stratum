@@ -195,7 +195,9 @@ def plugin_to_doc(binding: PluginBinding) -> dict[str, Any]:
 
 def plugin_from_doc(kind: str, doc: Mapping[str, Any]) -> PluginBinding:
     """Instantiate `{ref, params}` and carry the recorded `version`: the planner's identity is
-    what enters the keys, not whatever this process would compute (06 section 3 rule 3)."""
+    what enters the keys, not whatever this process would compute (06 section 3 rule 3). The
+    installed class is not compared here - a plan must stay loadable for `stratum status` after
+    the code moves on - but by the worker, before it writes (`executors.worker.check_code`)."""
     cls = resolve(kind, doc["ref"])
     return PluginBinding(ref=doc["ref"], version=doc["version"], params=dict(doc["params"]),
                          instance=cls(**dict(doc["params"])))
@@ -233,6 +235,9 @@ def context_to_doc(ctx: PlanContext) -> dict[str, Any]:
         "regrid_method": ctx.regrid_method,
         "regrid_algo_version": int(ctx.regrid_algo_version),
         "reader_overrides": dict(ctx.reader_overrides),
+        # 06 section 3 rule 3: the framework code the snapshot and product keys were built under.
+        # The plugins' is in each `version`. A worker compares both with its own before it writes.
+        "code": {"resolve": ctx.resolve_code, "reduce": ctx.reduce_code},
         # 05 section 5: the sources the planner staged and digested. A worker never re-stages and
         # never re-hashes - it reads the digest the key was built from, which is also what makes
         # the key the SAME key in every process.
@@ -272,6 +277,10 @@ def context_from_doc(doc: Mapping[str, Any], root: Path | Workspace) -> PlanCont
         regrid_method=doc["regrid_method"],
         regrid_algo_version=int(doc["regrid_algo_version"]),
         reader_overrides=dict(doc.get("reader_overrides", {})),
+        # `.get`: a plan written before code identity existed reads back with none recorded, so
+        # it still loads for `stratum status`, and a worker refuses to execute it
+        resolve_code=dict(doc.get("code", {})).get("resolve"),
+        reduce_code=dict(doc.get("code", {})).get("reduce"),
         # `.get`, and PLAN_SCHEMA_VERSION deliberately NOT bumped: `load_run` compares it with
         # strict equality, so a bump would make every plan.json written before this change
         # unloadable. A plan with no aux block reads back as a run with no aux, which is exactly

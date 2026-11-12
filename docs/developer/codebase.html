@@ -203,7 +203,7 @@ months and days only &mdash; no time components.</td><td><a class="src" data-sym
 granule's raw class table: the lumping from raw keys to product ids.</td><td><a class="src" data-sym="class Enumeration" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/classes.py#L74">Enumeration</a></td></tr>
 <tr><td><code>cache/</code></td><td>Content addressing: key construction, the
 <code>.inputs.json</code> sidecar, atomic file and directory writes,
-<code>explain</code>/<code>diff</code>.</td><td><a class="src" data-sym="def key(self, artifact: str, grid_id: str, tile: TileRef" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/cache/__init__.py#L91">CacheRoot.key</a></td></tr>
+<code>explain</code>/<code>diff</code>.</td><td><a class="src" data-sym="def key(self, artifact: str, grid_id: str, tile: TileRef" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/cache/__init__.py#L94">CacheRoot.key</a></td></tr>
 <tr><td><code>storage.py</code></td><td>The storage root, as one object: a local directory, or an
 <code>s3://</code> prefix with a node-local mirror. Everything above it is handed a real
 <code>pathlib.Path</code>, so no stage handles a URI.</td><td><a class="src" data-sym="class Workspace" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/storage.py#L418">Workspace</a></td></tr>
@@ -279,10 +279,10 @@ largest module in the tree.</td><td><a class="src" data-sym="def plan_run" href=
 <tr><td><code>plan/estimate.py</code></td><td>The run's rough order of magnitude: per-item seconds from pixels and bytes per cell, constants fitted to one recorded run, Lambda dollars, downloads and bytes written. Pure arithmetic over the work lists; reads no granule.</td><td><a class="src" data-sym="def estimate(" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/plan/estimate.py#L96">estimate</a></td></tr>
 <tr><td><code>plan/document.py</code></td><td>The serialisation seam: <code>plan.json</code>, the
 work lists, and the paired <code>*_to_doc</code> / <code>*_from_doc</code> functions that let a
-worker rebuild a planner's context from plain JSON.</td><td><a class="src" data-sym="class RunPlan" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/plan/document.py#L291">RunPlan</a></td></tr>
+worker rebuild a planner's context from plain JSON.</td><td><a class="src" data-sym="class RunPlan" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/plan/document.py#L300">RunPlan</a></td></tr>
 <tr><td><code>executors/worker.py</code></td><td>The portability seam: one handler per stage, and
 the single <code>exec_item</code> entry point every executor
-reduces to.</td><td><a class="src" data-sym="def exec_item" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/executors/worker.py#L236">exec_item</a></td></tr>
+reduces to.</td><td><a class="src" data-sym="def exec_item" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/executors/worker.py#L237">exec_item</a></td></tr>
 <tr><td><code>executors/local.py</code></td><td>A spawn-context process pool over the work lists,
 the budget gate, and Finalize. <code>run_all</code> lives here and takes the stage runner as a
 parameter, so the stage order and Finalize are shared with every other

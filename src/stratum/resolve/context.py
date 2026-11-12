@@ -7,6 +7,7 @@ same files. Nothing here reads a granule.
 """
 from __future__ import annotations
 
+import functools
 import json
 import sys
 from collections.abc import Callable, Mapping, Sequence
@@ -27,7 +28,7 @@ import numpy as np
 from shapely.geometry.base import BaseGeometry
 
 from stratum.ancillary import AuxSource
-from stratum.cache import CacheRoot
+from stratum.cache import CacheRoot, package_hash
 from stratum.classes import Remap
 from stratum.hooks import PixelMask, Scorer
 from stratum.types import (
@@ -146,14 +147,33 @@ class PluginBinding:
 
 
 def plugin_version(obj: Any) -> str:
-    """The version of the distribution that owns `obj`'s module, else "unversioned".
+    """What identifies a plugin's code in a cache key (06 section 3 rule 3):
+    `"{distribution version}+{content hash}"`.
+
+    The distribution version alone is a hand-bumped number, and every install here is editable:
+    plugin source changed in ten commits under one version, each a run of cache hits on the old
+    code's snapshots. The suffix is `package_hash` of the plugin's TOP-LEVEL package - all of it,
+    not the one module, because a scorer's helpers, the masks and the readers live beside it and
+    a per-class hash would need bookkeeping every time code moved. The cost is that any edit to
+    the package, even to a plugin this run does not name, is a miss; that is the safe direction.
+    A module with no source file keeps the bare version."""
+    module = obj.__module__ if isinstance(obj, type) else type(obj).__module__
+    return _module_version(module)
+
+
+@functools.cache
+def _module_version(module: str) -> str:
+    base = _distribution_version(module)
+    digest = package_hash(module.split(".")[0])
+    return f"{base}+{digest.removeprefix('sha256:')[:16]}" if digest else base
+
+
+def _distribution_version(module: str) -> str:
+    """The version of the distribution that owns `module`, else "unversioned".
 
     Looks the top-level package up in the installed distributions' metadata, then tries a
     distribution of the same name, then - for an editable install, which records no top-level
-    list - the distribution whose `direct_url.json` source directory contains the module file.
-    A wheel that installs no metadata is "unversioned", which is why 06 section 3 rule 3 also
-    wants a content hash once plugin wheels exist; not in this slice."""
-    module = obj.__module__ if isinstance(obj, type) else type(obj).__module__
+    list - the distribution whose `direct_url.json` source directory contains the module file."""
     top = module.split(".")[0]
     for dist in packages_distributions().get(top, []):
         try:
@@ -240,6 +260,11 @@ class PlanContext:
     table_probes    role name -> ClassTableProbe for every categorical role: resolve reads the
                     granule's own table and refuses it unless its fingerprint is the one its remap
                     was resolved from. Empty (a hand-built context) checks nothing.
+    resolve_code, reduce_code
+                    `package_hash` of `stratum.resolve` and `stratum.reduce` at plan time: the
+                    framework code that determines a snapshot and a product block, in their keys
+                    (06 section 3 rule 3). Defaulted from the running code, so a planner never
+                    passes them; a worker's come from plan.json and are compared with its own.
     aux_sources     alias -> AuxSource for every source the manifest declared (05 section 5),
                     already staged and digested by the planner. Empty for a run with no aux,
                     which is what keeps such a run's keys bit-identical to a run before aux
@@ -265,6 +290,8 @@ class PlanContext:
     aux_sources: Mapping[str, AuxSource] = field(default_factory=dict)
     reducer: PluginBinding | None = None
     table_probes: Mapping[str, ClassTableProbe] = field(default_factory=dict)
+    resolve_code: str | None = field(default_factory=lambda: package_hash("stratum.resolve"))
+    reduce_code: str | None = field(default_factory=lambda: package_hash("stratum.reduce"))
 
     def __post_init__(self) -> None:
         for name in self.aliases:

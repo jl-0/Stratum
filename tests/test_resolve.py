@@ -383,9 +383,72 @@ def test_non_streaming_scorer_is_refused(tmp_path: Path) -> None:
 def test_plugin_version_comes_from_the_distribution() -> None:
     from stratum_emit.scorers import MinViewZenith
 
-    assert plugin_version(MinViewZenith()) == version("stratum-emit")
-    assert plugin_version(NadirScorer()) == "unversioned"          # tests are not a distribution
+    base, _, digest = plugin_version(MinViewZenith()).partition("+")
+    assert base == version("stratum-emit")
+    # tests are not a distribution, and still have source to hash
+    assert plugin_version(NadirScorer()).partition("+")[0] == "unversioned"
     assert binding(NadirScorer()).ref.endswith(":NadirScorer")
+    # 06 section 3 rule 3: the suffix is the content of the WHOLE plugin package, so every
+    # plugin of one package shares it and an edit anywhere in the package moves them all
+    import stratum_emit
+    from stratum_emit.masks import EdgeTrim
+
+    from stratum.cache import package_hash, source_hash
+    whole = source_hash(Path(stratum_emit.__file__).parent)
+    assert package_hash("stratum_emit") == whole and digest == whole.removeprefix("sha256:")[:16]
+    assert plugin_version(EdgeTrim()) == plugin_version(MinViewZenith)
+
+
+def test_a_plugin_edit_moves_its_version_without_a_bump(tmp_path: Path, monkeypatch) -> None:
+    """The defect: the distribution version is bumped by hand and every install is editable, so
+    plugin source changed under one version and every snapshot was a hit on the old code. The
+    version now ends in the package's content hash - including a module the plugin class is not
+    defined in, because a scorer's helpers live beside it."""
+    import importlib
+
+    from stratum.cache import package_hash
+    from stratum.resolve.context import _module_version
+    pkg = tmp_path / "c3plug"
+    pkg.mkdir()
+    (pkg / "__init__.py").write_text("")
+    (pkg / "scorers.py").write_text(
+        "from c3plug.helpers import K\nclass S:\n    def score(self, obs, aux): return K\n")
+    (pkg / "helpers.py").write_text("K = 1\n")
+    monkeypatch.syspath_prepend(str(tmp_path))
+    cls = importlib.import_module("c3plug.scorers").S
+    before = plugin_version(cls)
+    (pkg / "helpers.py").write_text("K = 2\n")          # no version bump anywhere
+    package_hash.cache_clear()                            # what a new process would see
+    _module_version.cache_clear()
+    after = plugin_version(cls)
+    assert before != after and before.partition("+")[0] == after.partition("+")[0]
+    package_hash.cache_clear()
+    _module_version.cache_clear()
+
+
+def test_the_snapshot_key_carries_the_resolve_code(pair_plan: PlanContext, tmp_path: Path) -> None:
+    """06 section 3 rule 3: the read path, the gather and the argmax are framework code no plugin
+    version covers. Their content hash is a snapshot-key term, so a fix to them is a miss rather
+    than a hit on the pre-fix pixels - and it is not a GLT term."""
+    import shutil
+
+    import stratum.resolve
+    from stratum.cache import package_hash, source_hash
+    from stratum.resolve import snapshot_key
+    it = item(TILE, EPOCH, 0, 0)
+    key = snapshot_key(it, pair_plan)
+    assert key.inputs["resolve_code"] == package_hash("stratum.resolve") == pair_plan.resolve_code
+    # the hash is of content: a copy hashes the same, an edited copy does not
+    copy = tmp_path / "resolve"
+    shutil.copytree(Path(stratum.resolve.__file__).parent, copy,
+                    ignore=shutil.ignore_patterns("__pycache__"))
+    assert source_hash(copy) == pair_plan.resolve_code
+    with (copy / "block.py").open("a") as f:
+        f.write("# a fix\n")
+    edited = replace(pair_plan, resolve_code=source_hash(copy))
+    assert edited.resolve_code != pair_plan.resolve_code
+    assert snapshot_key(it, edited).hash != key.hash
+    assert glt_key_for(edited, TILE, "A").hash == glt_key_for(pair_plan, TILE, "A").hash
 
 
 # ------------------------------------------------------------------------------ snapshot IO

@@ -129,7 +129,8 @@ def product_key(item: Mapping[str, Any], run: RunPlan
     # CONTAIN, so both it and the plugin determine the product. None for the built-in reducer,
     # which keeps a run without one byte-identical to before reducers existed (06 section 2).
     inputs = product_inputs([k.hash for k in snaps], [], ctx.schema.aggregate_hash,
-                            ctx.reducer.identity() if ctx.reducer is not None else None)
+                            ctx.reducer.identity() if ctx.reducer is not None else None,
+                            reduce_code=ctx.reduce_code)
     return ctx.cache.key("product", ctx.grid.id, tile, inputs), snaps, epochs
 
 

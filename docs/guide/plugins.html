@@ -919,8 +919,9 @@ packages = [<span class="k">"src/my_lab"</span>]           <span class="c"># the
   and <code>pip list</code> show. The package under <code>packages</code> is what Python imports —
   <code>my_lab</code>, underscores, and what the entry-point value starts with. They are related by
   convention only. <code>version</code> is the distribution's, and it is the version Stratum records
-  in provenance and folds into the cache key, which is why a plugin installed from a source tree
-  with no metadata reports <code>"unversioned"</code> and leaves a hole there.</p>
+  in provenance and folds into the cache key, followed by a hash of the package's source: a plugin
+  installed from a source tree with no metadata reports <code>"unversioned+&lt;hash&gt;"</code>,
+  and an edit to the package is a cache miss either way.</p>
 </div>
 
 <p>The entry-point groups, in full:</p>

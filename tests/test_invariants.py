@@ -152,3 +152,34 @@ def test_lumping_change_invalidates_snapshots_not_glts(granules: Path) -> None:
     first = snapshot_key(read_work(two.run_dir, "resolve")[0], ctx)
     raw_fps = list(two.document["class_tables"]["mineral_1"])
     assert ctx.cache.explain(first)["class_tables"] == {"mineral_1": raw_fps}
+
+
+def test_the_plan_records_the_code_its_keys_were_built_under(granules: Path) -> None:
+    """06 section 3 rule 3: plugin and framework code enter the keys as content hashes the
+    PLANNER computed, and plan.json records them, so a worker reproduces the planner's keys and
+    can tell when its own code is not the code that was planned."""
+    from importlib.metadata import version
+
+    from stratum.cache import package_hash
+    plan = plan_run(write_manifest(granules / "code.yaml", run_label="code",
+                                   scorer={"ref": "min_view_zenith"}))
+    ctx_doc = plan.document["context"]
+    assert ctx_doc["code"] == {"resolve": package_hash("stratum.resolve"),
+                               "reduce": package_hash("stratum.reduce")}
+    emit = package_hash("stratum_emit").removeprefix("sha256:")[:16]
+    assert ctx_doc["scorer"]["version"] == f"{version('stratum-emit')}+{emit}"
+    run = load_run(plan.run_dir)
+    assert run.context.resolve_code == ctx_doc["code"]["resolve"]
+    snap = snapshot_key(read_work(plan.run_dir, "resolve")[0], run.context)
+    assert snap.inputs["resolve_code"] == ctx_doc["code"]["resolve"]
+    assert snap.inputs["scorer_version"] == ctx_doc["scorer"]["version"]
+    prod = product_key(read_work(plan.run_dir, "reduce")[0], run)[0]
+    assert prod.inputs["reduce_code"] == ctx_doc["code"]["reduce"]
+    # a reduce-only change re-runs reduce and keeps the snapshots; a resolve change moves both
+    import dataclasses
+    reduced = dataclasses.replace(run, context=dataclasses.replace(run.context,
+                                                                   reduce_code="sha256:other"))
+    item = read_work(plan.run_dir, "reduce")[0]
+    key, snaps, _ = product_key(item, reduced)
+    assert key.hash != prod.hash
+    assert [k.hash for k in snaps] == [k.hash for k in product_key(item, run)[1]]

@@ -57,7 +57,7 @@ sequenceDiagram
 <thead><tr><th></th><th>The planner</th><th>A worker</th></tr></thead>
 <tbody>
 <tr><td><strong>Runs</strong></td><td>Once per run</td><td>Once per work item &mdash; thousands of times</td></tr>
-<tr><td><strong>Entry</strong></td><td><a class="src" data-sym="def plan_run" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/plan/run.py#L914">plan_run</a></td><td><a class="src" data-sym="def exec_item" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/executors/worker.py#L236">exec_item</a></td></tr>
+<tr><td><strong>Entry</strong></td><td><a class="src" data-sym="def plan_run" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/plan/run.py#L914">plan_run</a></td><td><a class="src" data-sym="def exec_item" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/executors/worker.py#L237">exec_item</a></td></tr>
 <tr><td><strong>Reads</strong></td><td>The manifest, the index, and a handful of real granules</td><td><code>plan.json</code>, one work list line, and the assets that line names</td></tr>
 <tr><td><strong>Decides</strong></td><td>Everything: tiles, epochs, granules, plugins, schema, class lumping, fan-out</td><td>Nothing. It executes a decision already recorded</td></tr>
 <tr><td><strong>Writes</strong></td><td>The run directory</td><td>One cache artifact, and one outcome line</td></tr>
@@ -209,8 +209,8 @@ traceback &mdash; so a crashed item is queryable rather than lost.</p>
 <tbody>
 <tr><td><code>regrid_item</code></td><td>The geolocation asset, only on a miss</td><td>One GLT GeoTIFF</td><td><a class="src" data-sym="def regrid_item" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/executors/worker.py#L57">worker.py:52</a></td></tr>
 <tr><td><code>resolve_item</code></td><td>GLT windows, then every contributing granule</td><td>One snapshot directory</td><td><a class="src" data-sym="def resolve_item" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/executors/worker.py#L110">worker.py:105</a></td></tr>
-<tr><td><code>reduce_item</code></td><td>The listed epochs' snapshots</td><td>One product-block directory</td><td><a class="src" data-sym="def reduce_item" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/executors/worker.py#L158">worker.py:153</a></td></tr>
-<tr><td><code>publish_item</code></td><td>Every product block of the tile &times; period</td><td>COGs, RGBA images, legends, a STAC item</td><td><a class="src" data-sym="def publish_item" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/executors/worker.py#L191">worker.py:184</a></td></tr>
+<tr><td><code>reduce_item</code></td><td>The listed epochs' snapshots</td><td>One product-block directory</td><td><a class="src" data-sym="def reduce_item" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/executors/worker.py#L159">worker.py:153</a></td></tr>
+<tr><td><code>publish_item</code></td><td>Every product block of the tile &times; period</td><td>COGs, RGBA images, legends, a STAC item</td><td><a class="src" data-sym="def publish_item" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/executors/worker.py#L192">worker.py:184</a></td></tr>
 </tbody>
 </table>
 </div>
@@ -274,7 +274,7 @@ flowchart TB
 
 <h3 id="cache-writes">Why a partial write can never read as a hit</h3>
 
-<p><a class="src" data-sym="def hit(self, key: CacheKey)" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/cache/__init__.py#L102">CacheRoot.hit</a>
+<p><a class="src" data-sym="def hit(self, key: CacheKey)" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/cache/__init__.py#L105">CacheRoot.hit</a>
 requires both the artifact and its <code>.inputs.json</code> sidecar. Both write paths commit the
 artifact first and the sidecar last &mdash; a file via <code>os.replace</code> onto the key path,
 a directory by filling a sibling temp directory and renaming it whole. A worker killed mid-write

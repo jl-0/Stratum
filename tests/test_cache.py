@@ -98,6 +98,10 @@ def test_input_builders_carry_exactly_the_spec_fields() -> None:
     p = product_inputs(["sha256:s"], [], "sha256:agg", {"ref": "r", "version": "1", "params": {}})
     assert set(p) == {"artifact_type", "snapshot_keys", "aux_keys", "aggregate_hash", "reducer"}
     assert product_inputs([], [], "sha256:agg")["reducer"] is None
+    # 06 section 3 rule 3: the framework code terms, which the stages always pass
+    s = snapshot_inputs([], [], "r", "v", {}, "sha256:l", ("a", "b"), resolve_code="sha256:r")
+    p = product_inputs([], [], "sha256:agg", reduce_code="sha256:d")
+    assert s["resolve_code"] == "sha256:r" and p["reduce_code"] == "sha256:d"
     for doc in (g, s, p):
         json.dumps(doc)  # plain, JSON-able
 

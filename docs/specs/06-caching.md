@@ -29,8 +29,8 @@ a full rebuild into a re-read.
 | **Masked observation**<br>granule × tile × block | `glt_key`, `asset_roles` (per role read: the collection/asset/variable binding **and** the asset's catalogue checksum, `null` when the source has none), `band_aliases` (the `(role, band)` of every alias of a role read), `pixel_mask_spec`, `mask_plugin_version`, `remaps` (per categorical layer: the raw table's fingerprint and a hash of the resolved lookup) | No |
 | **Aux warp**<br>source × tile | `alias`, `source_digest`, `grid_def`, `resampling`, `warp_algo_version`, `pad` when non-zero | No, unless it changes the halo |
 | **Ortho role warp**<br>granule × role × tile | `granule_id`, `role`, `asset_checksum`, `var`, `grid_def`, `resampling`, `warp_algo_version`, `pad` when non-zero | No, unless it changes the halo |
-| **Epoch snapshot**<br>tile × epoch × block | `snapshot_format`, `obs_keys[]` (sorted), `aux_keys[]`, `scorer_ref`, `scorer_version`, `scorer_params`, `schema.layers_hash`, `epoch_bounds`, `window` | **Yes** |
-| **Product block**<br>tile × block | `snapshot_keys[]`, `aux_keys[]`, `schema.aggregate_hash`; plus `reducer` — `{ref, version, params}`, one nested key rather than three flat ones — when a plugin is named, else `null` | Yes |
+| **Epoch snapshot**<br>tile × epoch × block | `snapshot_format`, `obs_keys[]` (sorted), `aux_keys[]`, `scorer_ref`, `scorer_version`, `scorer_params`, `schema.layers_hash`, `epoch_bounds`, `window`, `resolve_code` | **Yes** |
+| **Product block**<br>tile × block | `snapshot_keys[]`, `aux_keys[]`, `schema.aggregate_hash`, `reduce_code`; plus `reducer` — `{ref, version, params}`, one nested key rather than three flat ones — when a plugin is named, else `null` | Yes |
 | **Rendered image**<br>tile | `product_keys[]`, `aux_keys[]`, `mapper_ref`, `mapper_version`, `mapper_params` | No — see [07](07-output-mapping.md) |
 
 `pad` is the run's tile pad, the scorer's halo ([01 §4](01-grid-tiling.md)): a GLT or warp that
@@ -88,8 +88,8 @@ They enter through `schema.layers_hash`: the planner fills each such layer's `dt
 scorer's declared `BandSpec`, and a layer's identity already carries its `name`, `source` and
 `dtype`, so adding, renaming, re-sourcing or re-typing one moves every snapshot key and `stratum
 cache diff` names `layers_hash`. The code of `emit()` is covered by `scorer_version` exactly as
-`score()`'s is — including the existing gap of rule 3 for an editable install whose code changed
-while its version did not. A run without scorer layers has the keys it had before they existed.
+`score()`'s is: the version ends in the plugin package's content hash (rule 3), so an edit to
+either is a miss. A scorer that emits nothing adds nothing to a key.
 
 The listed fields are the key's **determinants**; the sidecar may carry explanatory extras. A
 snapshot's `.inputs.json` also lists `class_tables` — layer → the raw fingerprints its
@@ -142,8 +142,37 @@ else may be written into a snapshot directory: `read_snapshot` discovers layers 
    "missing", "changed without a bump" and "bumped without re-record". A cosmetic edit only needs
    `--record`, and that re-record is the human sign-off that output did not change. A plan made
    under one version is refused by a worker built at another.
-3. **Plugin versions are part of the key.** Wheel path *and* content hash — a mutable S3 object at
-   a stable URI must not masquerade as the same plugin.
+3. **Code identity is part of the key, by content.** A hand-bumped version is forgotten: the
+   plugin's moved once while its source changed in ten commits, and every install is editable.
+   So nothing is bumped by hand above regrid and the warp. One function defines the identity -
+   `stratum.cache.package_hash`, sha256 over every `*.py` of a package by relative path - and it
+   enters the keys in two places:
+
+   - **Plugins.** A scorer's, mask's or reducer's `version` (`scorer_version`,
+     `mask_plugin_version`, `reducer.version`) is `"{distribution version}+{hash16}"`, the hash
+     being of the plugin's **whole top-level package**. Not of the one class or module: a scorer's
+     helpers, the masks and the readers live beside it, and per-plugin hashing would need
+     bookkeeping whenever code moved or was pruned. The price is that an edit anywhere in the
+     package - to a plugin the run does not name, or to a comment - is a miss for every run using
+     that package. A spurious miss is the safe direction (rule 1).
+   - **Framework.** `resolve_code` in the snapshot key and `reduce_code` in the product key are
+     the hashes of `stratum.resolve` and `stratum.reduce`: the read path, gather and argmax, and
+     the built-in aggregation, which no plugin version covers. A reduce-only edit keeps snapshots.
+
+   The **planner** computes these and `plan.json` records them (`context.code`, and each
+   plugin's `version`), so a worker reproduces the planner's keys rather than its own. A worker
+   whose installed code hashes differently **refuses the item before writing** - the stale-image
+   case, where old code would otherwise write artifacts under the new code's keys into the shared
+   cache ([08 §1](08-execution.md)). The fix is to re-plan, or rebuild the image, whichever is
+   behind.
+
+   Regrid and the aux/ortho warp deliberately stay on rule 2's hand-bumped integer: a GLT is
+   expensive and shared across every experiment, and a comment edit must not rebuild geometry.
+   What this does **not** cover: framework code outside those two packages that resolve or reduce
+   call into (`stratum.types`, `stratum.classes`, `stratum.publish.write_product_block`), a
+   **reader** plugin from a different package than the run's scorer and masks, a plugin's
+   third-party dependencies, and a wheel fetched from a mutable URI - not built; when it is, the
+   wheel's content hash joins this identity.
 4. **Aux sources are keyed by content**, via ETag or an explicit version. A DEM swapped in place
    under a stable URI is the classic silent-staleness bug.
 5. **Undeclared reads are refused.** A plugin that opens an undeclared aux URI produces a key that

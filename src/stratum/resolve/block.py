@@ -556,7 +556,7 @@ def _snapshot_key(plan: PlanContext, parsed: ResolveItem,
     inputs = snapshot_inputs(obs_keys, [aux_keys[a].hash for a in sorted(aux_keys)],
                              plan.scorer.ref, plan.scorer.version,
                              plan.scorer.params, plan.schema.layers_hash,
-                             list(parsed.epoch.bounds))
+                             list(parsed.epoch.bounds), resolve_code=plan.resolve_code)
     # 13 section 6: every contributing raw table's fingerprint is in the snapshot's
     # .inputs.json. It is already inside each obs_key; listing it here is what lets
     # `stratum cache diff` name a vintage change rather than an opaque obs_key.
