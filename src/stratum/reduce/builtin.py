@@ -174,7 +174,9 @@ def vote(layer: LayerSpec, vals: np.ndarray, valid: np.ndarray, score: np.ndarra
     """Mode through time, in the decision order of 04 section 5.
 
     1. Invalid epochs are discarded; the remainder is `n_epochs` (computed by the caller).
-    2. Ignored classes (by name, `none` = 0) leave the tally but stay in `n_epochs`.
+    2. Ignored classes (by name, `none` = 0) leave the tally but stay in `n_epochs`. So does
+       the categorical nodata, 65535, on a valid epoch (a scorer output that emitted NaN on a
+       cell it won): it is no class and is never tallied.
     3. The class with the largest tally is taken. Under `weight: count` an epoch adds 1 to its
        class; under `weight: score` it adds its winning score, so one epoch the scorer rated
        highly can outvote several it rated poorly. A plain count cannot say that, which is the
@@ -210,7 +212,7 @@ def vote(layer: LayerSpec, vals: np.ndarray, valid: np.ndarray, score: np.ndarra
                 f"{float(np.nanmin(np.where(bad, score, np.nan))):.4g}). Use weight: count with "
                 "a scorer that only orders observations (04 section 5)")
     ignore_ids = resolve_class_names(layer.classes, params.ignore)
-    counted = valid & ~np.isin(vals, ignore_ids)
+    counted = valid & ~np.isin(vals, ignore_ids) & (vals != _NODATA)
     class_ids = np.unique(vals[counted])
     c = class_ids.shape[0]
 

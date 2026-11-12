@@ -642,3 +642,107 @@ def test_mode_gated_tie_break_combine() -> None:
     # under key: independent each group's tie is broken the same way
     s = ModeGatedSelect(weights=THREE, combine="hybrid", tie_break="combine", key="independent")
     assert winner(s, obs) == 0
+
+
+# ------------------------------------------------- per-group drop and ignore (independent key)
+def _pattern_stack() -> ObsWindow:
+    """Twelve looks of a 4 x 5 block from fixed arithmetic patterns (no RNG): a mix of
+    non-detects, agreeing and disagreeing classes and invalid looks in every cell."""
+    n, h, w = 12, 4, 5
+    i, r, c = np.meshgrid(np.arange(n), np.arange(h), np.arange(w), indexing="ij")
+    ids = np.array([0, HEM, GOE, 0, KAO, ALU, HEM])
+    g1 = ids[(i * i + 3 * r + c) % 7].astype(np.int32)
+    g2 = ids[(i * 5 + r * c + 2 * c + i // 3) % 7].astype(np.int32)
+    vz = ((i * 37 + r * 11 + c * 23) % 29).astype(np.float32)
+    valid = (i + 2 * r + 3 * c) % 5 != 0
+    return ObsWindow(space="block", bands={"view_zenith": vz}, valid=valid,
+                     granules=[granule(k) for k in range(n)], epoch=EPOCH,
+                     layers={"mineral_1": g1, "mineral_2": g2}, stacked=True,
+                     layer_classes={"mineral_1": TABLE, "mineral_2": TABLE})
+
+
+#: recorded at the commit before the per-group changes, from `_pattern_stack`
+PINNED = {
+    "winner": [[11, 8, 10, 3, 4], [10, 3, 8, 3, 9], [3, 9, 8, 4, 8], [11, 4, 5, 8, 3]],
+    "mode_1": [[47.0, 47.0, 119.0, 200.0, 45.0], [200.0, 45.0, 45.0, 45.0, 119.0],
+               [45.0, 119.0, 47.0, 119.0, 119.0], [119.0, 200.0, 45.0, 45.0, 45.0]],
+    "mode_2": [[47.0, 47.0, 45.0, 45.0, 45.0], [119.0, 200.0, 45.0, 119.0, 200.0],
+               [47.0, 45.0, 45.0, 200.0, 119.0], [47.0, 200.0, 45.0, 45.0, 45.0]],
+    "mode_count": [[2.0, 1.0, 3.0, 2.0, 2.0], [1.0, 2.0, 1.0, 3.0, 0.0],
+                   [2.0, 0.0, 2.0, 1.0, 0.0], [2.0, 1.0, 2.0, 2.0, 4.0]],
+    "n_voters": [[9.0, 10.0, 10.0, 9.0, 10.0], [8.0, 9.0, 9.0, 8.0, 8.0],
+                 [7.0, 10.0, 7.0, 9.0, 9.0], [9.0, 7.0, 10.0, 7.0, 9.0]],
+    "soft_nan": (159, 48),
+}
+
+
+def test_mode_gated_independent_soft_rank_selection_is_pinned() -> None:
+    """The path the yearly one-scene product runs - key: independent, soft gate, rank
+    normalisation, min_count 1, weighted tie-break, nothing ignored - pinned against values
+    recorded before the per-group drop and per-group ignore changes: those change nothing here."""
+    obs = _pattern_stack()
+    s = ModeGatedSelect(weights=VZ_ONLY, key="independent", gate="soft", normalize="rank")
+    score = np.asarray(s.score(obs, None))
+    idx, won, _ = stack_argmax(score, obs.valid)
+    out = s.emit(obs, None)
+    assert np.where(won, idx, -1).tolist() == PINNED["winner"]
+    assert out["mode_1"].tolist() == PINNED["mode_1"]
+    assert out["mode_2"].tolist() == PINNED["mode_2"]
+    assert out["mode_count"].tolist() == PINNED["mode_count"]
+    assert out["n_voters"].tolist() == PINNED["n_voters"]
+    assert (int((score < -5).sum()), int(np.isnan(score).sum())) == PINNED["soft_nan"]
+    # an explicit empty ignore and the default min_count are the same run, bit for bit
+    same = ModeGatedSelect(weights=VZ_ONLY, key="independent", gate="soft", normalize="rank",
+                           min_count=1, tie_break="weighted", ignore={"g1": [], "g2": []})
+    assert np.array_equal(np.asarray(same.score(obs, None)), score, equal_nan=True)
+
+
+def test_mode_gated_independent_thin_group_does_not_blank_the_other() -> None:
+    """Ten looks of (none, KAO) and one of (HEM, KAO) under min_count 3: group 1's one hematite
+    is unconfirmed, group 2's kaolinite is held by all eleven. Only group 1 loses its answer."""
+    pairs = [(0, KAO)] * 10 + [(HEM, KAO)]
+    obs = stack(pairs, bands={"view_zenith": [5.0 + k for k in range(10)] + [20.0]})
+    s = ModeGatedSelect(weights=VZ_ONLY, key="independent", min_count=3)
+    assert winner(s, obs) == 0                        # the cell is occupied, by the best look
+    out = s.emit(obs, None)
+    assert np.isnan(out["mode_1"][0, 0]) and out["mode_2"][0, 0] == KAO
+    assert out["mode_count"][0, 0] == 11              # the dropped group gates nothing
+    # the same with a refused tie in one group
+    obs = stack([(HEM, KAO), (GOE, KAO)], bands={"view_zenith": [2.0, 1.0]})
+    s = ModeGatedSelect(weights=VZ_ONLY, key="independent", tie_break="nodata")
+    assert winner(s, obs) == 1
+    out = s.emit(obs, None)
+    assert np.isnan(out["mode_1"][0, 0]) and out["mode_2"][0, 0] == KAO
+    # both groups unconfirmed: the cell stays empty, as before
+    obs = stack([(HEM, KAO), (GOE, ALU), (0, 0)], bands={"view_zenith": [1.0, 2.0, 3.0]})
+    s = ModeGatedSelect(weights=VZ_ONLY, key="independent", min_count=2)
+    assert winner(s, obs) is None
+    out = s.emit(obs, None)
+    assert np.isnan(out["mode_1"][0, 0]) and np.isnan(out["mode_2"][0, 0])
+
+
+def test_mode_gated_independent_ignore_is_per_group() -> None:
+    """Three (HEM, VEG) looks and two (GOE, KAO), ignoring dry vegetation in group 2. The
+    vegetation looks abstain in group 2 only: their hematite still votes, so group 1's mode is
+    HEM (3 of 5), not GOE. They still never pass the gate - the gathered group-2 class would
+    be the ignored one."""
+    pairs = [(HEM, VEG), (HEM, VEG), (HEM, VEG), (GOE, KAO), (GOE, KAO)]
+    obs = stack(pairs, bands={"view_zenith": [1.0, 2.0, 3.0, 9.0, 8.0]})
+    s = ModeGatedSelect(weights=VZ_ONLY, key="independent", gate="soft",
+                        ignore={"g2": ["Dry vegetation"]})
+    score = s.score(obs, None)
+    out = s.emit(obs, None)
+    assert (out["mode_1"][0, 0], out["mode_2"][0, 0]) == (HEM, KAO)
+    assert out["n_voters"][0, 0] == 5 and out["mode_count"][0, 0] == 0
+    assert (score[:, 0, 0] < -5).all()                # no look carries both modes un-ignored
+    # where group 1 agrees, the look that is clean in both groups is the one selected
+    obs = stack([(HEM, VEG), (HEM, VEG), (HEM, KAO)], bands={"view_zenith": [1.0, 2.0, 9.0]})
+    hard = ModeGatedSelect(weights=VZ_ONLY, key="independent", ignore={"g2": ["Dry vegetation"]})
+    assert winner(hard, obs) == 2
+    out = hard.emit(obs, None)
+    assert (out["mode_1"][0, 0], out["mode_2"][0, 0]) == (HEM, KAO)
+    assert out["n_voters"][0, 0] == 3
+    # the joint key is unchanged: an ignored look leaves the whole vote
+    joint = ModeGatedSelect(weights=VZ_ONLY, ignore={"g2": ["Dry vegetation"]})
+    joint.score(obs, None)
+    assert joint.emit(obs, None)["n_voters"][0, 0] == 1
