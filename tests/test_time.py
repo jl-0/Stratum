@@ -13,7 +13,6 @@ from stratum.time import (
     check_delivery,
     delivery_periods,
     epochs_between,
-    is_partial,
     parse_duration,
 )
 
@@ -115,7 +114,7 @@ def test_delivery_rules():  # 09 section 5
 def test_annual_delivery_is_shorthand_for_exact():
     """This window ends 2026-07-31, one day shy of a clean 48 months, so the final July is a
     30-day epoch. It is DROPPED rather than allowed to vote on less evidence than the other 47
-    (`is_partial`), which is why the last period carries 11. The fix is `time.end`, and
+    (`drop_partial`), which is why the last period carries 11. The fix is `time.end`, and
     `stratum plan` says so - see test_a_partial_epoch_is_dropped_and_reported."""
     m1, y1 = Duration(months=1), Duration(years=1)
     periods = delivery_periods(d(2022, 8, 1), d(2026, 7, 31), m1, y1, y1, "exact")
@@ -133,7 +132,7 @@ def test_a_weekly_epoch_delivers_annually_by_dropping_the_straggler():
     all_weeks = epochs_between(d(2025, 1, 1), d(2026, 1, 1), w1)
     whole = epochs_between(d(2025, 1, 1), d(2026, 1, 1), w1, drop_partial=True)
     assert len(all_weeks) == 53 and len(whole) == 52
-    assert is_partial(w1, all_weeks[-1]) and not any(is_partial(w1, e) for e in whole)
+    assert whole == all_weeks[:-1]
 
     periods = delivery_periods(d(2025, 1, 1), d(2026, 1, 1), w1, y1, y1, "exact")
     assert len(periods) == 1
@@ -189,3 +188,21 @@ def test_partial_last_period_when_every_does_not_divide_range():
     )
     assert [len(p.epochs) for p in periods] == [3, 1]
     assert periods[1].bounds == ("2022-04-01T00:00:00+00:00", "2022-05-01T00:00:00+00:00")
+
+
+def test_a_month_end_anchor_drops_no_whole_epoch():
+    """Epochs are generated from the anchor in one step, so 31 Jan + k x P1M lands on each
+    month's last day. Whether one is PARTIAL is decided on that same lattice: re-adding the
+    duration to an epoch's own start clamps (28 Feb + P1M is 28 Mar, not 31 Mar) and used to
+    call whole epochs partial, silently dropping them."""
+    m1 = Duration(months=1)
+    for day in (29, 30, 31):
+        every = epochs_between(d(2026, 1, day), d(2026, 8, day), m1)
+        whole = epochs_between(d(2026, 1, day), d(2026, 8, day), m1, drop_partial=True)
+        assert len(every) == 7 and whole == every
+    # a truncated tail is still dropped
+    whole = epochs_between(d(2026, 1, 31), d(2026, 8, 15), m1, drop_partial=True)
+    assert len(whole) == 6 and whole[-1].end == d(2026, 7, 31)
+    periods = delivery_periods(d(2026, 1, 31), d(2026, 7, 31), m1, Duration(months=6),
+                               Duration(months=6), "exact")
+    assert [len(p.epochs) for p in periods] == [6]
