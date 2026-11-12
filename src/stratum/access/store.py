@@ -811,6 +811,13 @@ class AssetStore:
                         if _is_request_exception(e):
                             raise AssetFetchError(uri, None, type(e).__name__) from None
                         raise
+                    # A body shorter than the range the header describes is a cut connection
+                    # the transport did not report. Kept, it becomes a short block that `read`
+                    # can never get past; it is a failed fetch like any other.
+                    want = min(stop, int(total)) - start
+                    if len(data) < want:
+                        raise AssetFetchError(uri, None, f"short range body: {len(data)} of "
+                                                         f"{want} bytes")
                     final = getattr(resp, "url", None)
                     nxt = (signed if signed is not None
                            else final if final and final != uri

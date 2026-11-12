@@ -310,7 +310,9 @@ end. The first request goes through the trusted Earthdata session and follows th
 redirect; every later one goes straight to the signed URL it ended at on an **anonymous**
 session, since a signed URL needs no credential and must not be sent one. A refused signed URL is
 re-resolved once; a server answering `200` to a Range request raises `RangeUnsupported` and the
-caller stages instead. The EMIT NetCDF readers open a `RangedAsset` with h5py (netCDF4 cannot
+caller stages instead. A `206` whose body is shorter than its `Content-Range` describes is a
+transient `AssetFetchError`, retried like a dropped connection — kept, the short block made
+`read` loop forever. The EMIT NetCDF readers open a `RangedAsset` with h5py (netCDF4 cannot
 read a file object) and serve `class_table` only; anything else on that context raises
 `NotImplementedError`. h5py links the same conda-forge libhdf5 as netCDF4, and
 `tests/test_readers.py` holds the two to the same fingerprint on a synthetic and a delivered
@@ -433,7 +435,7 @@ The guard is **free space on the volume**, not a budget per directory:
   granule's GLT by every epoch that granule appears in, so both keep being refreshed and stay
   resident; a snapshot, written once and never re-read by the stage that wrote it, ages out. A
   FIFO evicts exactly the wrong ones.
-- **Never candidates.** `runs/` (the work lists and `plan.json` an item is reading — losing
+- **Never candidates.** `runs/` inside an evictable root (the work lists and `plan.json` an item is reading — losing
   those fails the item rather than costing a re-fetch), in-flight writes (`.part-*`,
   `.{hash}-{token}.tmp`), and anything accessed within 60 s. Eviction stops rather than
   thrashing a scratch volume genuinely full of hot files: the caller is allowed to fail on

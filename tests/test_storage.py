@@ -312,6 +312,22 @@ def test_a_run_directory_is_never_evicted(monkeypatch, tmp_path):
     assert not art.exists()
 
 
+def test_a_scratch_path_that_contains_a_directory_named_runs_is_still_evictable(
+        monkeypatch, tmp_path):
+    """`runs/` is protected as a directory INSIDE an evictable root. Matching the name anywhere
+    in the absolute path meant a scratch volume mounted at, say, `/data/runs/tmp` protected
+    everything under it, and eviction silently did nothing until the volume filled."""
+    from stratum.storage import ensure_free
+
+    mirror = tmp_path / "runs" / "scratch" / "mirror"
+    art = _aged(mirror / "cache" / "glt" / "t" / "a.tif", 100, age=99_999)
+    work = _aged(mirror / "runs" / "r1" / "work" / "resolve.jsonl", 100, age=99_999)
+    _free(monkeypatch, 0)
+    assert ensure_free(0, roots=[mirror], reserve=10_000, grace=0.0) == 100
+    assert not art.exists()
+    assert work.exists(), "the run directory inside the root is still protected"
+
+
 def test_an_in_flight_write_is_never_evicted(monkeypatch, tmp_path):
     """`.part-*` is a download in progress and `.{hash}-{token}.tmp` an uncommitted cache
     write. Deleting either corrupts a write instead of reclaiming a cached byte."""

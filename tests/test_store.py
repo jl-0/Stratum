@@ -768,6 +768,44 @@ def test_ranged_read_refused_by_the_server_raises_range_unsupported(tmp_path):
         store.open_ranged(URL).warm()
 
 
+def test_a_short_206_body_is_an_error_not_an_endless_read(tmp_path):
+    """A `206` whose body is shorter than its `Content-Range` promises - a connection cut that
+    the transport did not report - left a short block in the handle, and `read` then looped
+    forever asking that block for bytes it does not have. The planner range-reads every class
+    table, so one such response stalled the plan. It is a transient fetch failure: retried, and
+    then raised."""
+    class ShortSession(RangeSession):
+        def get(self, url, *, stream, timeout, headers=None):
+            resp = super().get(url, stream=stream, timeout=timeout, headers=headers)
+            if resp.status_code == 206:
+                resp._body = resp._body[:1000]          # the header still claims the full range
+            return resp
+
+    sessions: list[ShortSession] = []
+
+    def factory(auth_obj):
+        sessions.append(ShortSession(BODY, auth_obj))
+        return sessions[-1]
+
+    store = AssetStore(tmp_path, auth=lambda: {"login": 1}, session_factory=factory,
+                       backoff=0.0, retries=2)
+    outcome: list[object] = []
+
+    def read() -> None:
+        try:
+            outcome.append(store.open_ranged(URL).warm().read(0, 5000))
+        except Exception as e:  # noqa: BLE001 - the test inspects whatever it was
+            outcome.append(e)
+
+    worker = threading.Thread(target=read, daemon=True)
+    worker.start()
+    worker.join(timeout=10)
+    assert not worker.is_alive(), "the ranged read never returned"
+    assert isinstance(outcome[0], AssetFetchError) and outcome[0].transient
+    assert "short" in str(outcome[0])
+    assert sum(len(s.calls) for s in sessions) == 3, "one attempt and two retries"
+
+
 def test_open_ranged_prefers_a_local_or_cached_copy(tmp_path):
     """A cached or local asset costs nothing to read, so it is never range-read."""
     local = tmp_path / "g.nc"

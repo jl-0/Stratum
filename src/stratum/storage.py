@@ -239,7 +239,9 @@ def _evict_candidates(roots: Iterable[Path]) -> list[tuple[float, int, Path]]:
         if not root.is_dir():
             continue
         for path in root.rglob("*"):
-            if _is_in_flight(path) or EVICT_KEEP_DIRS & set(path.parts):
+            # Parts BELOW the root only: a kept directory is one inside a mirror, and a scratch
+            # volume that merely lives under a directory called `runs` protects nothing.
+            if _is_in_flight(path) or EVICT_KEEP_DIRS & set(path.relative_to(root).parts):
                 continue
             if is_pinned(path):
                 continue
