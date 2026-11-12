@@ -285,7 +285,10 @@ Everything below fails in the plan stage, loudly, while it is cheap:
   An epoch is the voting unit, so a short one would cast a vote backed by less evidence than
   every other vote in the product; dropping it costs at most one epoch at a ragged window edge.
   `stratum plan` **warns** and names what it dropped, in the log and in `report.md`, because a
-  ragged window is nearly always an off-by-one in `time.end` rather than an intention;
+  ragged window is nearly always an off-by-one in `time.end` rather than an intention.
+  Granules acquired in a dropped partial epoch are dropped with it, as a reported selection
+  row (`falls in a whole epoch`); a granule outside *every* epoch, whole or partial, is still
+  a refusal;
 - the snapshot schema resolves: every layer `source` names a role or alias (or `acquired`, or a
   `scorer.<output>` the scorer declares, typed from its `BandSpec`), every categorical
   layer's enumeration resolves to **exactly one** row per member in each contributing granule's
