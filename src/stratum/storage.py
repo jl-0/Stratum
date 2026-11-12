@@ -609,9 +609,8 @@ def local_workspace(root: Path | str) -> Workspace:
 
 __all__ = [
     "DEFAULT_EVICT_RESERVE", "DEFAULT_EVICT_SLAB", "EVICT_GRACE_SECONDS", "EVICT_RESERVE_ENV",
-    "EXPIRED_CREDENTIAL_CODES", "MIRROR_DIR", "SCRATCH_ENV", "STALE_CREDENTIAL_CODES",
-    "PARTIAL_MARK", "STALE_PARTIAL_SECONDS",
-    "ObjectStore", "StorageError", "Workspace", "clear_pins", "ensure_free", "evict_reserve",
+    "EXPIRED_CREDENTIAL_CODES", "MIRROR_DIR", "PARTIAL_MARK", "SCRATCH_ENV",
+    "STALE_CREDENTIAL_CODES", "STALE_PARTIAL_SECONDS", "ObjectStore", "StorageError", "Workspace", "clear_pins", "ensure_free", "evict_reserve",
     "evictable_roots", "is_live_partial", "is_pinned", "local_workspace", "parse_s3",
     "partial_path", "pin", "register_evictable", "scratch_dir", "touch",
 ]

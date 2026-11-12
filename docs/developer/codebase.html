@@ -206,7 +206,7 @@ granule's raw class table: the lumping from raw keys to product ids.</td><td><a 
 <code>explain</code>/<code>diff</code>.</td><td><a class="src" data-sym="def key(self, artifact: str, grid_id: str, tile: TileRef" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/cache/__init__.py#L91">CacheRoot.key</a></td></tr>
 <tr><td><code>storage.py</code></td><td>The storage root, as one object: a local directory, or an
 <code>s3://</code> prefix with a node-local mirror. Everything above it is handed a real
-<code>pathlib.Path</code>, so no stage handles a URI.</td><td><a class="src" data-sym="class Workspace" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/storage.py#L418">Workspace</a></td></tr>
+<code>pathlib.Path</code>, so no stage handles a URI.</td><td><a class="src" data-sym="class Workspace" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/storage.py#L455">Workspace</a></td></tr>
 <tr><td><code>filters.py</code></td><td>The built-in <code>GranuleFilter</code> predicates and the
 <code>on_missing</code> policy machinery. Runs against the index at plan time, never against
 pixels.</td><td><a class="src" data-sym="def apply_filters" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/filters.py#L220">apply_filters</a></td></tr>
@@ -225,7 +225,7 @@ pixels.</td><td><a class="src" data-sym="def apply_filters" href="https://github
 silent default.</td><td><a class="src" data-sym="class Manifest(Strict)" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/manifest/models.py#L609">Manifest</a></td></tr>
 <tr><td><code>manifest/validate.py</code></td><td>Every static check that needs no data:
 instantiating each named plugin, resolving each role, confirming the reducer can deliver the
-band names promised.</td><td><a class="src" data-sym="def validate_static" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/manifest/validate.py#L229">validate_static</a></td></tr>
+band names promised.</td><td><a class="src" data-sym="def validate_static" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/manifest/validate.py#L235">validate_static</a></td></tr>
 <tr><td><code>index/</code></td><td>The GeoParquet granule index: schema, build, merge, query,
 freeze, and the resolution from an index row to the <code>GranuleRef</code> a worker
 carries.</td><td><a class="src" data-sym="def build_index" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/index/build.py#L112">build_index</a></td></tr>
@@ -235,7 +235,7 @@ implementations. <code>LocalSource</code> walks a directory and reads each heade
 rows.</td><td><a class="src" data-sym="class CMRSource" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/access/sources.py#L351">CMRSource</a></td></tr>
 <tr><td><code>access/store.py</code></td><td>Every worker's door to bytes: URI schemes, the
 node-local asset cache, checksum verification, retry, and the refusal to send an Earthdata
-session to an untrusted host.</td><td><a class="src" data-sym="class AssetStore" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/access/store.py#L508">AssetStore</a></td></tr>
+session to an untrusted host.</td><td><a class="src" data-sym="class AssetStore" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/access/store.py#L525">AssetStore</a></td></tr>
 <tr><td><code>access/readers.py</code></td><td>The reader registry, keyed on collection, with one
 instance per <code>(collection, ref)</code> per process.</td><td><a class="src" data-sym="def reader_for" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/access/readers.py#L33">reader_for</a></td></tr>
 <tr><td><code>access/auth.py</code></td><td>Earthdata Login, in one place, cached for the
@@ -262,7 +262,7 @@ continuous aggregations, plus the derivation of which bands a schema
 delivers.</td><td><a class="src" data-sym="def reduce_stack" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/reduce/builtin.py#L39">reduce_stack</a></td></tr>
 <tr><td><code>publish/</code></td><td>Stitching blocks into a tile, data COGs, colour resolution,
 RGBA rendering, legends, STAC items and collections, and the run
-record.</td><td><a class="src" data-sym="def publish_period" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/publish/period.py#L233">publish_period</a></td></tr>
+record.</td><td><a class="src" data-sym="def publish_period" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/publish/period.py#L249">publish_period</a></td></tr>
 </tbody>
 </table>
 </div>
@@ -286,11 +286,11 @@ reduces to.</td><td><a class="src" data-sym="def exec_item" href="https://github
 <tr><td><code>executors/local.py</code></td><td>A spawn-context process pool over the work lists,
 the budget gate, and Finalize. <code>run_all</code> lives here and takes the stage runner as a
 parameter, so the stage order and Finalize are shared with every other
-executor.</td><td><a class="src" data-sym="def run_all" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/executors/local.py#L111">run_all</a></td></tr>
+executor.</td><td><a class="src" data-sym="def run_all" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/executors/local.py#L112">run_all</a></td></tr>
 <tr><td><code>executors/aws.py</code></td><td>The dispatch half of the cloud executor: a thread pool
 over <code>lambda:InvokeFunction</code>, writing the same outcome records. Imported only when
 <code>--executor aws</code> is asked for, so a local run never imports
-boto3.</td><td><a class="src" data-sym="def run_stage(run_dir: Path | str, stage: str" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/executors/aws.py#L94">run_stage</a></td></tr>
+boto3.</td><td><a class="src" data-sym="def run_stage(run_dir: Path | str, stage: str" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/executors/aws.py#L128">run_stage</a></td></tr>
 <tr><td><code>executors/preflight.py</code></td><td>The executor's half of validation, run after the plan and before dispatch: disk for <code>local</code>; credentials, the worker function, its timeout and concurrency for <code>aws</code>. Returns findings; the CLI refuses on a failure.</td><td><a class="src" data-sym="def preflight(" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/executors/preflight.py#L44">preflight</a></td></tr>
 <tr><td><code>executors/awslambda.py</code></td><td>The worker half: the Lambda entrypoint. Credential
 from Secrets Manager, run directory mirrored from the bucket, then the same

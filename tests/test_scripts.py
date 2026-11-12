@@ -69,7 +69,7 @@ def test_viewer_down_stops_only_viewer_tasks(stubbed: dict[str, str]) -> None:
     """The mosaic task borrows the viewer's cluster, so "every RUNNING task in the cluster" is
     not "every viewer task": `make viewer-down` during a long mosaic build stopped the build."""
     done = subprocess.run(["bash", str(SCRIPTS / "viewer-task.sh"), "down"], env=stubbed,
-                          capture_output=True, text=True, timeout=60)
+                          capture_output=True, text=True, timeout=60, check=False)
     assert done.returncode == 0, done.stderr
     stopped = [c for c in _calls(stubbed) if "ecs stop-task" in c]
     assert len(stopped) == 1 and VIEWER_TASK in stopped[0]
@@ -78,6 +78,6 @@ def test_viewer_down_stops_only_viewer_tasks(stubbed: dict[str, str]) -> None:
 
 def test_viewer_url_lists_only_viewer_tasks(stubbed: dict[str, str]) -> None:
     done = subprocess.run(["bash", str(SCRIPTS / "viewer-task.sh"), "url"], env=stubbed,
-                          capture_output=True, text=True, timeout=60)
+                          capture_output=True, text=True, timeout=60, check=False)
     assert done.returncode == 0, done.stderr
     assert VIEWER_TASK in done.stdout and MOSAIC_TASK not in done.stdout
