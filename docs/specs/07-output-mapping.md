@@ -93,6 +93,13 @@ outputs:
 colormap is a real error — silently rendering it grey is how a mineral goes missing from a map
 without anyone noticing.
 
+The setting governs all three places a class gets a colour: the image, the legend and the data
+COG's embedded colour table are resolved under the same `on_unmapped`, so `grey` is grey in each.
+In the colour table `transparent` and an uncoloured class under `fail` are black, because a TIFF
+colour table carries no alpha. A categorical band no render covers resolves as `grey`, as its
+default legend does (below). The STAC `classification:classes` entry is the exception: it gives a
+`color_hint` only to a class the colours name.
+
 **A render names a delivered band.** The target (`layer`, else the entry's name) must be a band
 the product delivers and a snapshot layer of the matching kind, which is where a categorical band
 gets its class table. The band may come from the built-in reducer or from a `Reducer` plugin that

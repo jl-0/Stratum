@@ -492,6 +492,33 @@ def test_shared_colors_reach_the_data_cog_the_render_and_the_default_legends(tmp
     assert entries["goethite"] == [7, 7, 7] and entries["pyrite"] == [128, 128, 128]
 
 
+def test_an_unmapped_class_is_one_colour_in_the_image_the_legend_and_the_data_cog(
+        tmp_path, product_dirs):
+    """`on_unmapped: grey` drew an unnamed class grey in the image and the legend while the
+    data COG's colour table - resolved as `transparent` whatever the render said - had it
+    black. A viewer styling the data COG directly showed a third of the map as holes."""
+    outputs = {"stac": False,
+               "render": {"m": {"mapper": "categorical", "on_unmapped": "grey",
+                                "colors": {"goethite": [7, 7, 7]}}}}
+    pub = publish_period(tmp_path / "g", product_dirs, TILE, PERIOD, schema(), outputs,
+                         run_id=RUN_ID, manifest_hash="sha256:x")
+    legend = {e["name"]: (e["id"], e["color"])
+              for e in json.loads(pub.legends["m"].read_text())["entries"]}
+    with rasterio.open(pub.data["m"]) as src:
+        cmap = src.colormap(1)
+    for name in ("goethite", "hematite", "pyrite"):
+        cid, colour = legend[name]
+        assert list(cmap[cid][:3]) == colour, f"{name}: data COG {cmap[cid]} vs legend {colour}"
+    assert legend["hematite"][1] == [128, 128, 128]
+
+    # `transparent` is still black in the table: a TIFF colour table carries no alpha
+    clear = {**outputs, "render": {"m": {**outputs["render"]["m"], "on_unmapped": "transparent"}}}
+    pub = publish_period(tmp_path / "t", product_dirs, TILE, PERIOD, schema(), clear,
+                         run_id=RUN_ID, manifest_hash="sha256:x")
+    with rasterio.open(pub.data["m"]) as src:
+        assert src.colormap(1)[legend["hematite"][0]][:3] == (0, 0, 0)
+
+
 def test_a_render_named_differently_from_its_layer_still_legends_the_layer(tmp_path,
                                                                            product_dirs):
     """07 section 3's own example, `mineral_id: {layer: mineral_1}`. The legend was written as

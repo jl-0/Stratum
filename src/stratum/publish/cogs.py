@@ -197,6 +197,8 @@ def write_data_cogs(out_dir: Path, stack: BandStack, tile: TileRef, *,
                     colors: Mapping[str, Sequence[int]] | None = None,
                     class_tables: Mapping[str, ClassTable] | None = None,
                     colors_by_band: Mapping[str, Mapping[str, Sequence[int]]] | None = None,
+                    on_unmapped: str = "transparent",
+                    on_unmapped_by_band: Mapping[str, str] | None = None,
                     fmt: str = "cog") -> list[Path]:
     """Write every band of `stack` as `{band}.tif` under `out_dir` on the tile's grid.
 
@@ -204,11 +206,13 @@ def write_data_cogs(out_dir: Path, stack: BandStack, tile: TileRef, *,
     Categorical bands (`is_categorical`) embed a colour table derived from `class_table` and the
     render `colors` (by class name; the deterministic palette when None), so a viewer that styles
     single-band rasters can use the data COG directly (07 section 7, resolution 2). Classes
-    `colors` leaves out are black in the table - the image, not the data COG, is where
-    `on_unmapped` is enforced - and so is `none`: a TIFF colour table carries no alpha (GDAL
-    reads every entry back opaque), so the data COG's only transparency is its nodata value.
-    `class_tables` and `colors_by_band` override `class_table`/`colors` FOR ONE BAND, keyed by
-    band name. A product whose categorical layers lump the same raw table differently has no
+    `colors` leaves out follow `on_unmapped`, the same setting the image and the legend were
+    resolved under, so all three give a class one colour: `grey` is grey, and `transparent` or
+    `fail` are black - `fail` is ENFORCED by the image, not here. `none` is black too: a TIFF
+    colour table carries no alpha (GDAL reads every entry back opaque), so the data COG's only
+    transparency is its nodata value.
+    `class_tables`, `colors_by_band` and `on_unmapped_by_band` override
+    `class_table`/`colors`/`on_unmapped` FOR ONE BAND, keyed by band name. A product whose categorical layers lump the same raw table differently has no
     single product table, so each categorical band gets its own colour table; a band neither
     names falls back to the product-wide pair, which is the single-table case unchanged.
 
@@ -217,17 +221,17 @@ def write_data_cogs(out_dir: Path, stack: BandStack, tile: TileRef, *,
     _require_tags(tags)
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
-    cache: dict[tuple[int, int], Mapping[int, Any]] = {}
+    cache: dict[tuple[int, int, str], Mapping[int, Any]] = {}
 
     def colormap_for(name: str) -> Mapping[int, Any] | None:
         table = (class_tables or {}).get(name, class_table)
         if table is None:
             return None
         cols = (colors_by_band or {}).get(name, colors)
-        key = (id(table), id(cols))
+        unmapped = (on_unmapped_by_band or {}).get(name, on_unmapped)
+        key = (id(table), id(cols), unmapped)
         if key not in cache:
-            cache[key] = gdal_colormap(resolve_class_colors(table, cols,
-                                                            on_unmapped="transparent"))
+            cache[key] = gdal_colormap(resolve_class_colors(table, cols, on_unmapped=unmapped))
         return cache[key]
 
     full_tags = {**tags, "grid_id": tile.grid.id, "tile": f"{tile.tx}_{tile.ty}"}
