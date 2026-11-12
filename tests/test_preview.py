@@ -184,6 +184,43 @@ def test_a_bucket_root_lists_runs_without_walking_them(tmp_path: Path, monkeypat
     assert [k.rsplit("/", 1)[-1] for k in fake.gets] == ["collection.json"]
 
 
+def test_a_bucket_mirror_is_evicted_under_disk_pressure(tmp_path: Path, monkeypatch) -> None:
+    """A viewer task mirrors a whole COG for every tile anyone pans over, and nothing on the
+    preview path ever made room: one US West run is ~19 GB against 21 GiB of task storage. The
+    pull now evicts the least recently served files first, and never the one being served."""
+    import os
+    import shutil
+    import time
+
+    from stratum import storage
+
+    monkeypatch.setenv("STRATUM_SCRATCH", str(tmp_path / "scratch"))
+    monkeypatch.setattr(storage, "_EVICTABLE", set())
+    fake = install(monkeypatch, tmp_path / "s3")
+    staged = write_products(tmp_path / "staged").parent.parent
+    for path in sorted(staged.rglob("*")):
+        if path.is_file():
+            fake.upload_file(str(path), "bkt", path.relative_to(staged).as_posix())
+    remote = Products.open("s3://bkt/", client=fake)
+    first, second = (item["assets"]["mineral_1"]["href"] for item in remote.items("run-a"))
+
+    cold = remote.materialise(first)
+    long_ago = time.time() - 3600
+    os.utime(cold, (long_ago, long_ago))                 # served an hour ago, not since
+
+    real = shutil.disk_usage
+    monkeypatch.setattr(storage.shutil, "disk_usage",
+                        lambda p: type(real("/"))(total=10**9, used=10**9, free=0))
+    hot = remote.materialise(second)
+    assert hot.is_file(), "the raster being served must survive its own pull"
+    assert not cold.exists(), "a full volume must evict the least recently served raster"
+
+    # a HIT counts as use too: reading a mirrored file does not reliably advance its atime
+    os.utime(hot, (long_ago, long_ago))
+    assert remote.materialise(second) == hot
+    assert time.time() - hot.stat().st_atime < 60
+
+
 def test_a_bucket_collection_is_never_served_stale(tmp_path: Path, monkeypatch) -> None:
     """The regression: a local viewer over a bucket mirrored `collection.json` on first read and
     kept it, so a run mosaicked afterwards showed no mosaics until the mirror was deleted."""

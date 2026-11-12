@@ -46,6 +46,9 @@ takes a bucket:</p>
 
 <p>Over a bucket it reads with your own credentials and copies each raster into a local mirror the
 first time a tile needs it, so the first look at a tile is slow and every later one is not. The
+mirror is a cache: when its volume has less than <code>$STRATUM_SCRATCH_RESERVE_BYTES</code> free
+(1.5&nbsp;GB by default), the least recently served files are evicted before the next one is
+fetched, and are fetched again if someone returns to them. The
 catalogue itself is read without fetching a single raster. A run's <code>collection.json</code> is
 the one file read fresh every time. <code>stratum mosaic</code> rewrites it after publishing, so a
 run mosaicked while the viewer is up shows its mosaics on the next load.</p>

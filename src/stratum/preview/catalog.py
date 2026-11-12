@@ -18,7 +18,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from stratum.storage import Workspace
+from stratum.storage import Workspace, ensure_free, touch
 
 #: Where published runs live under the storage root (06 section 4). A `--root` that already
 #: points at the products directory is accepted as-is; see `Products.open`.
@@ -117,12 +117,24 @@ class Products:
         A mirrored copy of that one hides every mosaic built after it was fetched, so it is
         fetched again on every read. This is the only place a preview session touches the
         network for data.
+
+        A bucket's mirror is bounded like every other scratch cache: before a pull the least
+        recently served files are evicted when the volume is short (`storage.ensure_free`), and
+        the file handed back is marked as used, which is what keeps it - the one about to be
+        read - out of the next request's eviction. Without the first a viewer task mirrors
+        every COG anyone pans over until its disk is full; without the second it would evict
+        the tile it is drawing.
         """
         target = self.resolve(rel)
         if self.is_collection(rel):
             self.workspace.drop_mirror(target)
-        if not target.is_file() and not self.workspace.pull_file(target):
-            raise CatalogError(f"{rel!r} is not in the products tree")
+        if not target.is_file():
+            if self.workspace.remote:
+                ensure_free(0)
+            if not self.workspace.pull_file(target):
+                raise CatalogError(f"{rel!r} is not in the products tree")
+        if self.workspace.remote:
+            touch(target)
         return target
 
     def gdal_path(self, rel: str) -> str:
