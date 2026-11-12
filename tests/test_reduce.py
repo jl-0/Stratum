@@ -222,6 +222,20 @@ def test_vote_ignored_class_never_wins_and_stays_in_n_epochs():
     assert out["m_agreement"][0, 0] == pytest.approx(0.25)
 
 
+def test_vote_never_tallies_categorical_nodata():
+    """A scorer's categorical output holds 65535 where it emitted NaN on a cell it won, so the
+    epoch is valid and the value is not a class. It stays in n_epochs and out of the tally."""
+    m = column(CATEGORICAL_NODATA, CATEGORICAL_NODATA, 2)
+    out = reduce_stack(stack({"m": m}, valid=np.ones((3, 1, 1), bool), specs=[cat("m")]))
+    assert out["m"][0, 0] == 2 and out["n_epochs"][0, 0] == 3
+    assert out["m_agreement"][0, 0] == pytest.approx(1 / 3)
+    assert out["m_runner_up"][0, 0] == CATEGORICAL_NODATA
+    # nothing but nodata: nodata, agreement 0, as where every valid epoch was ignored
+    m = column(CATEGORICAL_NODATA, CATEGORICAL_NODATA)
+    out = reduce_stack(stack({"m": m}, valid=np.ones((2, 1, 1), bool), specs=[cat("m")]))
+    assert out["m"][0, 0] == CATEGORICAL_NODATA and out["m_agreement"][0, 0] == 0.0
+
+
 def test_vote_ignore_by_name_through_class_table():
     m = column(1, 1, 3)
     out = reduce_stack(stack({"m": m}, valid=np.ones((3, 1, 1), bool),

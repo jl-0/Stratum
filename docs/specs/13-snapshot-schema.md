@@ -240,6 +240,7 @@ silent:
 | Rule | Contract |
 |---|---|
 | Delivered categorical nodata | `65535`; `none` stays `0`. Categorical bands are `uint16`, continuous `float32` with `NaN` (an `acquired` layer, and its `_spread`, `float64` with `NaN` — §2), counts (`n_epochs`, `<layer>_n`) `uint16` with no nodata, whatever `LayerSpec.dtype` says about the snapshot ([11 §2](11-types.md)) |
+| Categorical nodata in a `vote` | `65535` on a valid epoch (a `scorer.<output>` layer whose scorer emitted NaN on a cell it won) is no class: never tallied, never the winner or runner-up by count, and the epoch stays in `n_epochs` — the same treatment as an ignored class |
 | `min_count` | `1` when omitted — the value under which a single epoch reduces to itself with no special case |
 | `tie_break` | `nodata` when omitted: refuse to choose unless the schema says how. Among tied classes with equal tie keys the lowest product id wins, so the result is deterministic |
 | `weight` | `count` when omitted: one epoch, one vote. `score` sums each epoch's winning score per class instead, and refuses a negative or NaN score on a valid epoch rather than rescaling it: unlike `score_weighted`, the absolute score is the point, since a graded-down epoch must stay graded down |

@@ -691,7 +691,10 @@ given the per-epoch value, `valid` and `score`:
    denominator for `agreement`.
 2. **Exclude** classes named in `ignore` from the tally. They stay counted in `n_epochs` —
    "observed, nothing identified" is evidence of observation, and conflating it with "never
-   observed" fabricates agreement ([11 §2](11-types.md)).
+   observed" fabricates agreement ([11 §2](11-types.md)). The categorical nodata (`65535`) on
+   a valid epoch — a `scorer.<output>` layer whose scorer emitted NaN on a cell it won — is
+   treated the same way: it is no class, so it is never tallied, and the epoch stays in
+   `n_epochs`.
 3. **Tally** the remaining values; take the class with the largest tally. Under `weight: count`
    each epoch adds 1; under `weight: score` it adds its winning `score`, which must be
    non-negative on every valid epoch or the reduction is refused.
