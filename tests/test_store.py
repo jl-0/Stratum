@@ -596,6 +596,17 @@ def test_eviction_never_touches_an_in_flight_download_or_a_fresh_entry(tmp_path)
     assert fresh.exists(), "an entry younger than the grace period may still be open"
 
 
+def test_the_budget_counts_and_reclaims_an_orphaned_partial(tmp_path):
+    """The same rule as `stratum.storage.ensure_free`: a partial whose writer is gone is cached
+    bytes like any other - counted against the budget, and evicted to meet it."""
+    from stratum.storage import STALE_PARTIAL_SECONDS
+
+    cache = tmp_path / "assets"
+    orphan = _asset(cache, "dddd_x.nc.part-123-456", 500, age=STALE_PARTIAL_SECONDS + 60)
+    assert ensure_room(cache, need=0, budget=100, grace=60.0) == 500
+    assert not orphan.exists()
+
+
 def test_eviction_stops_rather_than_thrashing_a_cache_of_hot_files(tmp_path):
     """If nothing is older than the grace period the caller is allowed to fail on ENOSPC.
     Evicting a file another worker is mid-read would turn a capacity problem into a corrupt

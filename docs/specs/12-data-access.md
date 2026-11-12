@@ -432,6 +432,18 @@ The guard is **free space on the volume**, not a budget per directory:
   `.{hash}-{token}.tmp`), and anything accessed within 60 s. Eviction stops rather than
   thrashing a scratch volume genuinely full of hot files: the caller is allowed to fail on
   `ENOSPC`, because pulling a file out from under a reader is worse than the error.
+- **An orphaned partial is not in flight.** A download killed mid-write — a Lambda timeout, an
+  out-of-memory kill — never unlinks its `.part-*`, and exempting it forever strands up to a
+  whole asset per killed item with nothing left that could free it. A partial that has not been
+  **written to** for an hour (`STALE_PARTIAL_SECONDS`) has no writer and is evicted like any
+  other cold file. Modification time is the test because only a writer advances it: a live
+  download touches it with every 1 MiB chunk and gives up after a 300 s read timeout, and a
+  Lambda invocation lasts at most 900 s, so a partial another process or thread is still
+  writing is never taken. Every download names its partial through one rule,
+  `stratum.storage.partial_path` (`{target}.part-{pid}-{thread}`), so the eviction test and
+  the writers cannot drift apart. **[design]** — whether Lambda preserves `/tmp` across a
+  timed-out invocation has not been observed; if it does not, this rule simply never fires
+  there.
 
 `$STRATUM_ASSET_CACHE_BUDGET_BYTES` still caps the asset cache alone, but it is **off by
 default** and is policy, not safety — worth setting on a shared workstation, where free space is

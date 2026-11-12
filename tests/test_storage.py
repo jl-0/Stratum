@@ -318,13 +318,30 @@ def test_an_in_flight_write_is_never_evicted(monkeypatch, tmp_path):
     from stratum.storage import ensure_free
 
     d = tmp_path / "mirror"
-    part = _aged(d / "assets" / "x.nc.part-123-456", 5_000, age=99_999)
+    part = _aged(d / "assets" / "x.nc.part-123-456", 5_000, age=900)
     tmp = _aged(d / "cache" / "glt" / "t" / ".abc123-dead.tmp", 5_000, age=99_999)
     done = _aged(d / "cache" / "glt" / "t" / "done.tif", 100, age=99_999)
     _free(monkeypatch, 0)
     ensure_free(0, roots=[d], reserve=10_000, grace=0.0)
     assert part.exists() and tmp.exists()
     assert not done.exists()
+
+
+def test_an_orphaned_partial_download_is_reclaimed(monkeypatch, tmp_path):
+    """A download killed mid-write - a Lambda timeout, an OOM - never unlinks its `.part-*`.
+    Exempting that file as "in flight" forever strands up to a whole asset on a 10 GB /tmp per
+    killed item, with nothing left that could ever free it. A partial nobody has written to for
+    `STALE_PARTIAL_SECONDS` has no writer, so it is evicted like any other cold byte; one
+    written to recently is somebody's download and is left alone."""
+    from stratum.storage import STALE_PARTIAL_SECONDS, ensure_free
+
+    d = tmp_path / "assets"
+    orphan = _aged(d / "ab" / "x_RFL.nc.part-123-456", 5_000, age=STALE_PARTIAL_SECONDS + 60)
+    live = _aged(d / "ab" / "y_RFL.nc.part-789-12", 5_000, age=STALE_PARTIAL_SECONDS - 60)
+    _free(monkeypatch, 0)
+    assert ensure_free(0, roots=[d], reserve=10_000, grace=0.0) == 5_000
+    assert not orphan.exists(), "an orphaned partial must be reclaimable"
+    assert live.exists(), "a partial still being written must never be deleted"
 
 
 def test_eviction_stops_rather_than_thrashing_a_hot_scratch(monkeypatch, tmp_path):

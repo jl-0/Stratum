@@ -30,6 +30,7 @@ import os
 import shutil
 import stat
 import tempfile
+import threading
 import time
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
@@ -60,6 +61,14 @@ DEFAULT_EVICT_SLAB: int | None = None
 #: Never evicted: a run directory holds `plan.json` and the work lists every item is reading, it
 #: is kilobytes per item, and losing it fails the item rather than costing a re-fetch.
 EVICT_KEEP_DIRS = frozenset({"runs"})
+#: The one marker of a partial download. Every temp file a download writes carries it
+#: (`partial_path`), and it is how eviction tells bytes in flight from cached ones.
+PARTIAL_MARK = ".part-"
+#: A partial download not WRITTEN to for this long has no writer left: its process was killed
+#: (a Lambda timeout, an OOM, a Ctrl-C) before it could unlink it. A live download advances the
+#: modification time with every 1 MiB chunk and gives up after a 300 s read timeout, and a
+#: Lambda invocation is at most 900 s, so an hour of silence cannot be a download in progress.
+STALE_PARTIAL_SECONDS = 3600.0
 
 _EVICTABLE: set[Path] = set()
 #: Artifacts the CURRENT work item has claimed and is about to read. A reduce item stacks 52
@@ -187,10 +196,33 @@ def evict_reserve() -> int:
     return DEFAULT_EVICT_RESERVE
 
 
+def partial_path(target: Path) -> Path:
+    """Where a download of `target` writes until it is complete: beside it, so the rename is
+    atomic, and named for the process AND the thread, so two downloads of one file never share
+    a partial - the planner's `prefetch` and the viewer both download from several threads."""
+    return target.with_name(f"{target.name}{PARTIAL_MARK}{os.getpid()}-{threading.get_ident()}")
+
+
+def is_live_partial(path: Path, *, now: float | None = None) -> bool:
+    """A partial download that may still have a writer. One whose writer is gone - no byte
+    written for `STALE_PARTIAL_SECONDS` - is NOT live: it is an orphan, up to a whole asset in
+    size, and treating it as in flight forever is how a killed download leaks scratch space
+    until the volume is full. Judged by modification time, which only a writer advances, so a
+    partial another process is still writing is never mistaken for one."""
+    if PARTIAL_MARK not in path.name:
+        return False
+    try:
+        mtime = path.stat().st_mtime
+    except OSError:
+        return False
+    return (time.time() if now is None else now) - mtime < STALE_PARTIAL_SECONDS
+
+
 def _is_in_flight(path: Path) -> bool:
-    """A partial download (`.part-*`) or an uncommitted cache write (`.{hash}-{token}.tmp`).
-    Deleting either corrupts a write in progress rather than reclaiming a cached byte."""
-    return ".part-" in path.name or ".tmp" in path.name
+    """A partial download still being written (`.part-*`, see `is_live_partial`) or an
+    uncommitted cache write (`.{hash}-{token}.tmp`). Deleting either corrupts a write in
+    progress rather than reclaiming a cached byte."""
+    return is_live_partial(path) or ".tmp" in path.name
 
 
 def _evict_candidates(roots: Iterable[Path]) -> list[tuple[float, int, Path]]:
@@ -573,7 +605,8 @@ def local_workspace(root: Path | str) -> Workspace:
 __all__ = [
     "DEFAULT_EVICT_RESERVE", "DEFAULT_EVICT_SLAB", "EVICT_GRACE_SECONDS", "EVICT_RESERVE_ENV",
     "EXPIRED_CREDENTIAL_CODES", "MIRROR_DIR", "SCRATCH_ENV", "STALE_CREDENTIAL_CODES",
+    "PARTIAL_MARK", "STALE_PARTIAL_SECONDS",
     "ObjectStore", "StorageError", "Workspace", "clear_pins", "ensure_free", "evict_reserve",
-    "evictable_roots", "is_pinned", "local_workspace", "parse_s3", "pin", "register_evictable",
-    "scratch_dir", "touch",
+    "evictable_roots", "is_live_partial", "is_pinned", "local_workspace", "parse_s3",
+    "partial_path", "pin", "register_evictable", "scratch_dir", "touch",
 ]

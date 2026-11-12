@@ -34,7 +34,7 @@ from typing import Any
 from urllib.parse import unquote, urlparse
 from urllib.request import url2pathname
 
-from stratum.storage import ensure_free, register_evictable
+from stratum.storage import ensure_free, is_live_partial, partial_path, register_evictable
 from stratum.types import AssetHandle, Credentials
 
 REMOTE_SCHEMES = ("s3", "https")
@@ -104,14 +104,15 @@ def cache_budget(cache: Path) -> int:
 def _entries(cache: Path) -> list[tuple[float, int, Path]]:
     """`(atime, size, path)` for every complete file in the cache, oldest access first.
 
-    `.part-*` files are in-flight downloads and are never candidates. Access time is what makes
-    this an LRU rather than a FIFO: a granule read by four regrid items - one per tile it
-    touches - keeps being refreshed and stays resident, while one the run has moved past ages
-    out. `open()` touches a hit for exactly this reason.
+    A `.part-*` file still being written is an in-flight download and never a candidate; one
+    whose writer is gone is an orphan and is one (`stratum.storage.is_live_partial`). Access
+    time is what makes this an LRU rather than a FIFO: a granule read by four regrid items - one
+    per tile it touches - keeps being refreshed and stays resident, while one the run has moved
+    past ages out. `open()` touches a hit for exactly this reason.
     """
     out: list[tuple[float, int, Path]] = []
     for path in cache.rglob("*"):
-        if ".part-" in path.name:
+        if is_live_partial(path):
             continue
         try:
             st = path.stat()
@@ -697,7 +698,7 @@ class AssetStore:
             self.evicted_bytes += freed
         # the temp name carries the pid AND the thread id: `prefetch` runs several downloads
         # in one process, and two must never share a partial file
-        tmp = target.with_name(f"{target.name}.part-{os.getpid()}-{threading.get_ident()}")
+        tmp = partial_path(target)
         try:
             for attempt in range(self.retries + 1):
                 try:
