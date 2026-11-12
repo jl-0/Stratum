@@ -49,7 +49,8 @@ pytestmark = pytest.mark.filterwarnings("ignore::rasterio.errors.NotGeoreference
 
 #: The snapshot key of `test_resolve.py::test_resolve_block_writes_the_snapshot`'s block, recorded
 #: before the stack path existed. A run without a stack scorer must keep producing it.
-STREAMING_KEY = "sha256:d007cc58ea88bebd80af62a7e561324866f8d50955aeac422f3db5a22b20296a"
+#: Re-recorded when the observation key gained `band_aliases` (06 section 2).
+STREAMING_KEY = "sha256:7d5b8453391e5f5a26e5e66866921e531d9fb5c003a39e3b5da6775285842ba0"
 
 
 # --------------------------------------------------------------------------------- scorers

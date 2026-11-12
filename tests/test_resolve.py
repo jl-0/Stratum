@@ -616,6 +616,33 @@ def test_observation_key_carries_the_remap_and_the_asset_identity(pair_plan: Pla
     assert k1.path != k2.path and set(plan.cache.diff(k1, k2)) == {"obs_keys"}
 
 
+def test_the_band_an_alias_points_at_is_in_the_observation_key(pair_plan: PlanContext) -> None:
+    """06 section 2: a scorer reads `obs["view_zenith"]`, and which band of `geometry` that is
+    comes from `inputs.band_aliases`. Re-pointing the alias changes every score, so it must move
+    the observation key - and through it the snapshot - while the GLT stays a hit. An alias of a
+    role nothing reads cannot reach a plugin and must not move anything (rule 1)."""
+    from stratum.resolve import AliasBinding, snapshot_key
+    plan = pair_plan
+    a = plan.granules["A"]
+    glt = glt_key_for(plan, TILE, "A")
+    inputs = observation_inputs(plan, glt, a)
+    assert inputs["band_aliases"] == {"view_zenith": {"role": "geometry", "band": 0}}
+    moved = replace(plan, aliases={"view_zenith": AliasBinding("geometry", 1)})
+    assert glt_key_for(moved, TILE, "A").hash == glt.hash
+    assert canonical_hash(observation_inputs(moved, glt, a)) != canonical_hash(inputs)
+    it = item(TILE, EPOCH, 0, 0)
+    assert snapshot_key(it, plan).hash != snapshot_key(it, moved).hash
+    k1, k2 = resolve_block(it, plan), resolve_block(it, moved)
+    assert k1.path != k2.path and set(plan.cache.diff(k1, k2)) == {"obs_keys"}
+    # the pixels really do differ: band 1 is solar zenith, the same for both looks
+    first, second = read_snapshot(k1.path), read_snapshot(k2.path)
+    assert not np.array_equal(first["score"], second["score"], equal_nan=True)
+    # an alias on a role no layer, scorer or mask names is never on the ObsWindow
+    unread = replace(plan, roles={**plan.roles, "spare": plan.roles["geometry"]},
+                     aliases={**plan.aliases, "spare_band": AliasBinding("spare", 1)})
+    assert observation_inputs(unread, glt, a) == inputs
+
+
 # ------------------------------------------ a multi-band layer no observation won in some epoch
 def _band_axis_schema() -> tuple[Any, Any]:
     from stratum.types import Aggregation, LayerSpec, SnapshotSchema

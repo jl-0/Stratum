@@ -26,7 +26,7 @@ a full rebuild into a re-read.
 |---|---|---|
 | **Prepared asset**<br>asset | `asset_checksum`, `prepare_version` | No |
 | **GLT**<br>granule × tile | `granule_id`, `grid_def`, `max_distance`, `regrid_method`, `regrid_algo_version`, under `adopt` only `source_checksum`, and when the scorer has a halo `pad` | **No**, unless it changes the halo |
-| **Masked observation**<br>granule × tile × block | `glt_key`, `asset_roles` (per role read: the collection/asset/variable binding **and** the asset's catalogue checksum, `null` when the source has none), `pixel_mask_spec`, `mask_plugin_version`, `remaps` (per categorical layer: the raw table's fingerprint and a hash of the resolved lookup) | No |
+| **Masked observation**<br>granule × tile × block | `glt_key`, `asset_roles` (per role read: the collection/asset/variable binding **and** the asset's catalogue checksum, `null` when the source has none), `band_aliases` (the `(role, band)` of every alias of a role read), `pixel_mask_spec`, `mask_plugin_version`, `remaps` (per categorical layer: the raw table's fingerprint and a hash of the resolved lookup) | No |
 | **Aux warp**<br>source × tile | `alias`, `source_digest`, `grid_def`, `resampling`, `warp_algo_version`, `pad` when non-zero | No, unless it changes the halo |
 | **Ortho role warp**<br>granule × role × tile | `granule_id`, `role`, `asset_checksum`, `var`, `grid_def`, `resampling`, `warp_algo_version`, `pad` when non-zero | No, unless it changes the halo |
 | **Epoch snapshot**<br>tile × epoch × block | `snapshot_format`, `obs_keys[]` (sorted), `aux_keys[]`, `scorer_ref`, `scorer_version`, `scorer_params`, `schema.layers_hash`, `epoch_bounds`, `window` | **Yes** |
@@ -52,6 +52,15 @@ the snapshot key is the masked observation's hash, not the bare GLT hash: that i
 mask change, a re-lumping or a re-delivered class table invalidate snapshots (rule 1) while a
 GLT stays a hit. The `remaps` term is there for the same reason — the remap is applied at the
 gather ([13 §3](13-snapshot-schema.md)), so it determines the observation as much as a mask does.
+
+`band_aliases` is there because everything else names an alias only by **name**: a scorer's or a
+mask's params say `view_zenith`, a layer's identity says `source: view_zenith`, and which band of
+which role that is lives in `inputs.band_aliases` alone. Without the binding in the key, correcting
+a band index is a run of cache hits that publishes the old band's pixels. The term lists every
+alias whose role is read, not only the ones a plugin names: those are exactly the aliases placed on
+the `ObsWindow`, so an alias added later is covered without anyone declaring it, and an alias of a
+role nothing reads cannot reach a plugin and stays out (rule 1). It is in the observation key and
+not the GLT key - geometry does not depend on it.
 
 Two terms in the snapshot key are determined by the build (`stratum/resolve/block.py`):
 

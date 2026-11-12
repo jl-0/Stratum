@@ -151,7 +151,11 @@ def observation_inputs(plan: PlanContext, glt_key: CacheKey, granule: GranuleRef
     of 12 section 4; None when the source has none), `pixel_mask_spec` and
     `mask_plugin_version`, and `remaps`: for every categorical layer the raw class table's
     fingerprint and a hash of the resolved lookup, because the remap is applied at the gather
-    (13 section 3 rule 3) and so determines the observation as much as a mask does. Nothing is
+    (13 section 3 rule 3) and so determines the observation as much as a mask does; and
+    `band_aliases`, the (role, band) every alias on the ObsWindow points at - a plugin's params
+    and a layer's `source` carry only the alias NAME, so without the binding a re-pointed alias
+    would be a cache hit on the old band's pixels. Only aliases of a role that is read: no
+    other alias reaches a plugin (`read_observation`). Nothing is
     written under this key in this slice, but its hash is what enters the snapshot key as an
     `obs_key`, so a mask, a lumping or a re-delivered table invalidates snapshots and not
     GLTs (06 section 3 rule 1).
@@ -181,6 +185,8 @@ def observation_inputs(plan: PlanContext, glt_key: CacheKey, granule: GranuleRef
         "artifact_type": "observation",
         "glt_key": glt_key.hash,
         "asset_roles": asset_roles,
+        "band_aliases": {name: {"role": a.role, "band": int(a.band)}
+                         for name, a in sorted(plan.aliases.items()) if a.role in read},
         "pixel_mask_spec": [{"ref": m.ref, "params": dict(m.params)} for m in plan.masks],
         "mask_plugin_version": [m.version for m in plan.masks],
         "remaps": remaps,
