@@ -12,7 +12,7 @@ from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
-from stratum.cache import CacheKey, glt_inputs, product_inputs
+from stratum.cache import CacheKey, glt_inputs, package_hash, product_inputs
 from stratum.plan.document import (
     STAGES,
     PlanError,
@@ -24,7 +24,14 @@ from stratum.plan.document import (
 from stratum.publish import product_dir, publish_period, write_product_block
 from stratum.reduce import band_counts, n_observed, product_bands, reduce_stack
 from stratum.regrid import REGRID_ALGO_VERSION, regrid_granule_tile
-from stratum.resolve import NullAux, resolve_block, snapshot_key, stack_snapshots
+from stratum.resolve import (
+    NullAux,
+    PlanContext,
+    plugin_version,
+    resolve_block,
+    snapshot_key,
+    stack_snapshots,
+)
 from stratum.storage import clear_pins, ensure_free
 from stratum.types import BandSpec, BlockRef, EmbeddedGLT, Epoch, LocArray, TileRef
 
@@ -107,9 +114,38 @@ def regrid_item(item: Mapping[str, Any], run: RunPlan) -> tuple[CacheKey, bool]:
     return key, hit
 
 
+def check_code(ctx: PlanContext) -> None:
+    """Refuse a plan made under other code than this process runs (06 section 3 rule 3).
+
+    The keys carry the PLANNER's code identity - each plugin's `version` and the hashes of
+    `stratum.resolve` and `stratum.reduce` - so that a worker reproduces the planner's keys. That
+    is only honest while the worker runs the same code. One that does not (a Lambda image built
+    before the plugin was edited) would write the old code's output under the new code's keys
+    into the shared cache, where every later run hits it. Checked before the hit test, so a
+    stale worker fails loudly on its first item instead of on its first miss. The twin of
+    `regrid_item`'s REGRID_ALGO_VERSION guard, and cheap: every term is memoised per process."""
+    wrong = [f"{name} is {mine} here but {planned} in the plan"
+             for name, planned, mine in (
+                 ("stratum.resolve", ctx.resolve_code, package_hash("stratum.resolve")),
+                 ("stratum.reduce", ctx.reduce_code, package_hash("stratum.reduce")))
+             if planned != mine]
+    plugins = [("scorer", ctx.scorer), *(("mask", m) for m in ctx.masks)]
+    if ctx.reducer is not None:
+        plugins.append(("reducer", ctx.reducer))
+    for kind, b in plugins:
+        mine = plugin_version(b.instance)
+        if mine != b.version:
+            wrong.append(f"{kind} {b.ref!r} is version {mine} here but {b.version} in the plan")
+    if wrong:
+        raise PlanError("this worker's code is not the code the plan was made under: "
+                        + "; ".join(wrong) + ". Re-plan with this build, or rebuild the worker "
+                        "image from the planner's source (06 section 3 rule 3)")
+
+
 def resolve_item(item: Mapping[str, Any], run: RunPlan) -> tuple[CacheKey, bool]:
     """`{tile, epoch, block}` -> the snapshot key (12 section 2)."""
     ctx = run.context
+    check_code(ctx)
     key = snapshot_key(item, ctx)
     if ctx.cache.hit(key):
         return key, True
@@ -160,6 +196,7 @@ def reduce_item(item: Mapping[str, Any], run: RunPlan) -> tuple[CacheKey, bool]:
     """`{tile, block, period, epochs}` -> the product-block key (13 section 4). Every listed
     epoch's snapshot must exist - the plan listed exactly the epochs that had a resolve item."""
     ctx = run.context
+    check_code(ctx)
     key, snaps, epochs = product_key(item, run)
     if ctx.cache.hit(key):
         return key, True
@@ -254,6 +291,7 @@ def exec_item(run_dir: Path | str, stage: str, index: int) -> dict[str, Any]:
 
 
 __all__ = [
-    "HANDLERS", "clear_cache", "exec_item", "load_cached", "product_key", "publish_item",
+    "HANDLERS", "check_code", "clear_cache", "exec_item", "load_cached", "product_key",
+    "publish_item",
     "reduce_item", "regrid_item", "resolve_item",
 ]

@@ -282,7 +282,7 @@ work lists, and the paired <code>*_to_doc</code> / <code>*_from_doc</code> funct
 worker rebuild a planner's context from plain JSON.</td><td><a class="src" data-sym="class RunPlan" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/plan/document.py#L300">RunPlan</a></td></tr>
 <tr><td><code>executors/worker.py</code></td><td>The portability seam: one handler per stage, and
 the single <code>exec_item</code> entry point every executor
-reduces to.</td><td><a class="src" data-sym="def exec_item" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/executors/worker.py#L237">exec_item</a></td></tr>
+reduces to.</td><td><a class="src" data-sym="def exec_item" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/executors/worker.py#L274">exec_item</a></td></tr>
 <tr><td><code>executors/local.py</code></td><td>A spawn-context process pool over the work lists,
 the budget gate, and Finalize. <code>run_all</code> lives here and takes the stage runner as a
 parameter, so the stage order and Finalize are shared with every other

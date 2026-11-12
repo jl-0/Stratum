@@ -183,3 +183,51 @@ def test_the_plan_records_the_code_its_keys_were_built_under(granules: Path) -> 
     key, snaps, _ = product_key(item, reduced)
     assert key.hash != prod.hash
     assert [k.hash for k in snaps] == [k.hash for k in product_key(item, run)[1]]
+
+
+def test_a_worker_refuses_a_plan_made_under_other_code(granules: Path) -> None:
+    """06 section 3 rule 3: the plan's code identity is what enters the keys, so a worker running
+    OTHER code - a Lambda image built before the plugin was edited - would write old-code
+    snapshots under the new code's keys into the shared cache, and every later run would hit
+    them. As regrid already does for REGRID_ALGO_VERSION, resolve and reduce refuse first."""
+    import json
+
+    from stratum.executors.worker import clear_cache, exec_item
+    from stratum.plan import PlanError
+    plan = plan_run(write_manifest(granules / "stale.yaml", run_label="stale",
+                                   scorer={"ref": "min_view_zenith"}))
+    run_stage(plan.run_dir, "regrid", workers=1)
+    path = plan.run_dir / "plan.json"
+    planned = path.read_text()
+    ctx_doc = json.loads(planned)["context"]
+
+    def execute_under(change: dict[str, Any], stage: str = "resolve") -> None:
+        doc = json.loads(planned)
+        doc["context"].update(change)
+        path.write_text(json.dumps(doc))
+        clear_cache()
+        exec_item(plan.run_dir, stage, 0)
+
+    try:
+        # the planner's plugin package differs from the one installed here
+        newer = {**ctx_doc["scorer"], "version": ctx_doc["scorer"]["version"][:-1] + "!"}
+        with pytest.raises(PlanError, match=r"scorer 'min_view_zenith'.*Re-plan"):
+            execute_under({"scorer": newer})
+        mask = [{**m, "version": "9.9.9"} for m in ctx_doc["masks"]]
+        assert mask, "the synthetic manifest declares a mask"
+        with pytest.raises(PlanError, match="mask"):
+            execute_under({"masks": mask})
+        # the framework's resolve or reduce code differs
+        with pytest.raises(PlanError, match="stratum.resolve"):
+            execute_under({"code": {**ctx_doc["code"], "resolve": "sha256:planner"}})
+        with pytest.raises(PlanError, match="stratum.reduce"):
+            execute_under({"code": {**ctx_doc["code"], "reduce": "sha256:planner"}}, "reduce")
+        # a plan written before code identity was recorded names none: also refused
+        with pytest.raises(PlanError, match="stratum.resolve"):
+            execute_under({"code": {}})
+        run = load_run(plan.run_dir)                 # ... and still loads, for `stratum status`
+        assert run.context.resolve_code is None
+    finally:
+        path.write_text(planned)
+        clear_cache()
+    assert exec_item(plan.run_dir, "resolve", 0)["ok"]      # the matching plan runs

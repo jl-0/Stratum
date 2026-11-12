@@ -221,6 +221,12 @@ the one-hour Earthdata credential expiry never arises on this path.</p>
 you run locally. That is what keeps the executors honest — identical code, so a stage can be
 reproduced on a laptop from its <code>.inputs.json</code> with no AWS involvement.</p>
 
+<p><strong>Rebuild the image after you change a plugin or the framework.</strong> A plan records
+the code it was made under, and a worker whose installed code differs refuses its resolve and
+reduce items with a message naming what differs. That is deliberate: an image built before your
+edit would otherwise compute with the old code and file the results under the new code's cache
+keys, where every later run would find them. <code>make image</code>, then run again.</p>
+
 <p>Lambda <strong>container images</strong> are required, not zip layers: layers cap at 250 MB
 unzipped across all layers, which GDAL, netCDF4, scipy and numpy exceed before any project code.
 Container image Lambdas allow 10 GB.</p>

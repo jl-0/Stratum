@@ -41,6 +41,15 @@ Consequences worth stating:
   completed items are cache hits.
 - `stratum exec --plan … --stage … --index N` is the single worker entrypoint. A SLURM array task
   and a Lambda invocation both reduce to it, which is what keeps the three paths from diverging.
+- **A worker runs the code the plan was made under, or refuses.** The keys carry the planner's
+  code identity so every worker computes the planner's keys ([06 §3 rule 3](06-caching.md)).
+  Before a resolve or reduce item probes the cache, the worker compares its own plugin versions
+  and `stratum.resolve` / `stratum.reduce` hashes with `plan.json` and raises on any difference
+  (`executors.worker.check_code`), as a regrid item already does for `regrid_algo_version`. The
+  case this exists for is `--executor aws` against an image built before a plugin edit: without
+  the check the old code's output lands in the shared cache under the new code's keys, with no
+  error, and every later run hits it. The remedy is `make image` (or a re-plan, when it is the
+  planner that is behind).
 - Storage is a URI or a path. `{root}/cache/...` is a directory or an `s3://` prefix; layout and
   keys are identical. `{root}` is `outputs.bucket`; locally that is a path relative to the
   manifest, and `cache/`, `runs/{run_id}/` and `products/{run_id}/` hang off it exactly as they
