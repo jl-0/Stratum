@@ -45,8 +45,14 @@ print(json.dumps({"awsvpcConfiguration": {
 PY
 )"
 
+# The viewer's task definition FAMILY, from its ARN (.../task-definition/<family>:<revision>).
+# The mosaic task runs in this same cluster, so "every RUNNING task here" is not "every viewer
+# task": without the family filter 'down' stops a mosaic build and 'url' prints its address.
+FAMILY="${TASKDEF##*/}"
+FAMILY="${FAMILY%%:*}"
+
 running_tasks() {
-  "${AWS[@]}" ecs list-tasks --cluster "$CLUSTER" --desired-status RUNNING \
+  "${AWS[@]}" ecs list-tasks --cluster "$CLUSTER" --family "$FAMILY" --desired-status RUNNING \
     --query 'taskArns[]' --output text
 }
 
