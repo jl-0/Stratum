@@ -268,5 +268,9 @@ None of this is Tetracorder-specific: the framework matches attributes it was to
    internal block of one file. It is written to `products/{run}/mosaic/{start}_{end}/{asset}.tif`
    and recorded as a collection asset with the `overview` role beside the tile asset's own roles,
    class counts summed over the tiles. Categorical bands and RGBA renderings resample nearest,
-   continuous bands average - the same rule as the per-tile overviews. The per-tile files remain
+   continuous bands average - the same rule as the per-tile overviews. An `acquired` band
+   (units `s since 1970-01-01 UTC`) resamples nearest too, in both places: it is float64 with
+   NaN nodata, but its value is an identifier - the granule's acquisition second, the key into
+   `granules.json` ([10 §3](10-provenance.md)) - and the mean of two of them names no granule.
+   It is recognised by its units, not its dtype. The per-tile files remain
    the deliverable; the mosaic is derived from them and can be rebuilt at any time.

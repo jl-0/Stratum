@@ -32,7 +32,12 @@ from pathlib import Path
 from typing import Any
 
 from stratum.preview.catalog import MOSAIC_DIR, MOSAIC_ROLE, Products
-from stratum.publish.cogs import COG_MEDIA_TYPE, is_categorical_dtype, resampling_for
+from stratum.publish.cogs import (
+    COG_MEDIA_TYPE,
+    is_categorical_dtype,
+    is_identifier_units,
+    resampling_for,
+)
 from stratum.publish.stac import add_collection_assets
 
 log = logging.getLogger(__name__)
@@ -78,13 +83,16 @@ def _is_raster(asset: Mapping[str, Any]) -> bool:
 
 
 def _nearest(asset: Mapping[str, Any]) -> bool:
-    """Decimate rather than average: a rendering, or a band holding class ids. The same rule
-    publish applies to each tile's own overviews (`cogs.resampling_for`)."""
+    """Decimate rather than average: a rendering, a band holding class ids, or one holding an
+    identifier (an `acquired` timestamp, told by its unit). The same rule publish applies to
+    each tile's own overviews (`cogs.decimates`)."""
     if "visual" in (asset.get("roles") or ()):
         return True
     if asset.get("classification:classes"):
         return True
     bands = asset.get("raster:bands") or [{}]
+    if is_identifier_units(bands[0].get("unit")):
+        return True
     return is_categorical_dtype(bands[0].get("data_type"), bands[0].get("nodata"))
 
 

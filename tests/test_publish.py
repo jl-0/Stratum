@@ -574,6 +574,32 @@ def test_categorical_overviews_never_invent_a_class(tmp_path):
         assert coarse - full, "a continuous band's overview should average, not decimate"
 
 
+def test_acquired_overviews_never_invent_a_timestamp(tmp_path):
+    """`acquired` is a float64 timestamp that doubles as the granule id. Averaged along a scene
+    boundary it is a time at which no granule was acquired, matching no row of `granules.json`,
+    so it decimates like a class id although its dtype says "continuous"."""
+    from affine import Affine
+
+    from stratum.publish.cogs import write_geotiff
+    from stratum.types import ACQUIRED_UNITS, BandSpec
+
+    first, second = 1_750_000_000.0, 1_750_086_400.0
+    data = np.full((1024, 1024), first, dtype="float64")
+    data[:, 301:] = second                       # a scene boundary off every overview's grid
+    data[:8, :8] = np.nan
+    spec = BandSpec(name="acquired_1", dtype="float64", nodata=float("nan"), description="d",
+                    units=ACQUIRED_UNITS)
+    path = write_geotiff(tmp_path / "acquired_1.tif", data, spec,
+                         transform=Affine.scale(1 / 3600, -1 / 3600), crs="EPSG:4326",
+                         tags={"run_id": "r", "manifest_hash": "h"}, cog=True)
+    with rasterio.open(path) as s:
+        assert s.overviews(1)
+        for factor in s.overviews(1):
+            coarse = s.read(1, out_shape=(s.height // factor, s.width // factor))
+            found = set(np.unique(coarse[np.isfinite(coarse)]))
+            assert found <= {first, second}, f"overview x{factor} invented {found - {first, second}}"
+
+
 def test_media_type_follows_the_format_actually_written():
     from stratum.publish.cogs import media_type, raster_format
     assert "cloud-optimized" in media_type("cog")
