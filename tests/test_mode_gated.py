@@ -719,3 +719,30 @@ def test_mode_gated_independent_thin_group_does_not_blank_the_other() -> None:
     assert winner(s, obs) is None
     out = s.emit(obs, None)
     assert np.isnan(out["mode_1"][0, 0]) and np.isnan(out["mode_2"][0, 0])
+
+
+def test_mode_gated_independent_ignore_is_per_group() -> None:
+    """Three (HEM, VEG) looks and two (GOE, KAO), ignoring dry vegetation in group 2. The
+    vegetation looks abstain in group 2 only: their hematite still votes, so group 1's mode is
+    HEM (3 of 5), not GOE. They still never pass the gate - the gathered group-2 class would
+    be the ignored one."""
+    pairs = [(HEM, VEG), (HEM, VEG), (HEM, VEG), (GOE, KAO), (GOE, KAO)]
+    obs = stack(pairs, bands={"view_zenith": [1.0, 2.0, 3.0, 9.0, 8.0]})
+    s = ModeGatedSelect(weights=VZ_ONLY, key="independent", gate="soft",
+                        ignore={"g2": ["Dry vegetation"]})
+    score = s.score(obs, None)
+    out = s.emit(obs, None)
+    assert (out["mode_1"][0, 0], out["mode_2"][0, 0]) == (HEM, KAO)
+    assert out["n_voters"][0, 0] == 5 and out["mode_count"][0, 0] == 0
+    assert (score[:, 0, 0] < -5).all()                # no look carries both modes un-ignored
+    # where group 1 agrees, the look that is clean in both groups is the one selected
+    obs = stack([(HEM, VEG), (HEM, VEG), (HEM, KAO)], bands={"view_zenith": [1.0, 2.0, 9.0]})
+    hard = ModeGatedSelect(weights=VZ_ONLY, key="independent", ignore={"g2": ["Dry vegetation"]})
+    assert winner(hard, obs) == 2
+    out = hard.emit(obs, None)
+    assert (out["mode_1"][0, 0], out["mode_2"][0, 0]) == (HEM, KAO)
+    assert out["n_voters"][0, 0] == 3
+    # the joint key is unchanged: an ignored look leaves the whole vote
+    joint = ModeGatedSelect(weights=VZ_ONLY, ignore={"g2": ["Dry vegetation"]})
+    joint.score(obs, None)
+    assert joint.emit(obs, None)["n_voters"][0, 0] == 1

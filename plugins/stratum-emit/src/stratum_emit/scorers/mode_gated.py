@@ -222,7 +222,9 @@ class ModeGatedSelect:
     2. **Vote.** A valid look votes when it detects something in either group and neither group
        holds a class in its `ignore` list (an ignored look is still counted in `n_valid`, as
        `vote` counts it). Under `key: joint` a look that detects in one group only votes
-       `partial_vote_weight`; under `key: independent` each group is voted on its own.
+       `partial_vote_weight`; under `key: independent` each group is voted on its own, and a
+       class in a group's `ignore` list abstains in that group only - the look's other group
+       still votes.
        `vote_weight: score` scales every vote by the look's quality, 1 - its penalty (step 5),
        so fewer but better looks can outvote more poorer ones; `count` (default) gives each
        look one vote. `vote_power` raises that quality to a power: the penalty averages ten
@@ -561,10 +563,11 @@ class ModeGatedSelect:
         masked = self._class_ids(obs, lay2, self.g2_mask_classes)
         if masked.size:
             g2 = np.where(np.isin(g2, masked), 0, g2)
-        ignored = (np.isin(g1, self._class_ids(obs, lay1, [n for n in self.ignore["g1"]
+        ignored1 = np.isin(g1, self._class_ids(obs, lay1, [n for n in self.ignore["g1"]
                                                            if n != "none"]))
-                   | np.isin(g2, self._class_ids(obs, lay2, [n for n in self.ignore["g2"]
-                                                             if n != "none"])))
+        ignored2 = np.isin(g2, self._class_ids(obs, lay2, [n for n in self.ignore["g2"]
+                                                           if n != "none"]))
+        ignored = ignored1 | ignored2
         detect1, detect2 = g1 > 0, g2 > 0
         pens = self.penalties(obs, g1, g2)
         P = self._weighted(pens, valid.shape)
@@ -599,8 +602,9 @@ class ModeGatedSelect:
             has = np.zeros(valid.shape[1:], dtype=bool)
             voters_any = np.zeros(valid.shape, dtype=bool)
             modes = []
-            for g, det in ((g1, detect1), (g2, detect2)):
-                voters = valid & (det | votes_none) & ~ignored
+            for g, det, ign in ((g1, detect1, ignored1), (g2, detect2, ignored2)):
+                # an ignored class abstains in its own group; the look's other group still votes
+                voters = valid & (det | votes_none) & ~ign
                 voters_any |= voters
                 m = self._mode(g, quality, voters, P, tie_order(P))
                 # a suppressed mode (min_count, a refused tie) is no mode: it gates nothing
