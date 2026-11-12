@@ -587,3 +587,15 @@ def test_local_source_forms(tmp_path):
     assert m.inputs.source.patterns["EMITL2BMIN"]["assets"] == {"MIN": "EMIT_L2B_MIN_*.nc"}
     with pytest.raises(ValidationError, match="pattern or patterns"):
         loaded(tmp_path, lambda d: d["inputs"].update(source={"kind": "local", "root": "./g"}))
+
+
+def test_a_regrid_method_no_worker_implements_is_refused_at_validate(tmp_path):
+    """`warp_embedded` is in the schema because 03 section 3 specifies it, but no worker builds
+    it: it must be refused here, not by every regrid item after plan has passed."""
+    m = loaded(tmp_path)
+    for method in ("kdtree", "adopt"):
+        ok = m.model_copy(update={"grid": m.grid.model_copy(update={"regrid_method": method})})
+        assert not any("regrid_method" in p for p in validate_static(ok))
+    bad = m.model_copy(update={"grid": m.grid.model_copy(update={"regrid_method": "warp_embedded"})})
+    problems = [p for p in validate_static(bad) if "regrid_method" in p]
+    assert len(problems) == 1 and "warp_embedded" in problems[0] and "03 section 3" in problems[0]
