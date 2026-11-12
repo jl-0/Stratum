@@ -24,7 +24,7 @@ from typing import Any
 import numpy as np
 from rasterio.warp import transform_bounds
 
-from stratum.ancillary import BlockAux, aux_key_for
+from stratum.ancillary import WARP_ALGO_VERSION, BlockAux, aux_key_for
 from stratum.cache import CacheKey, glt_inputs, snapshot_inputs
 from stratum.classes import Remap
 from stratum.index import role_asset
@@ -148,7 +148,11 @@ def observation_inputs(plan: PlanContext, glt_key: CacheKey, granule: GranuleRef
     """The masked-observation identity of 06 section 2 for ONE granule: `glt_key`,
     `asset_roles` (which collection/asset/variable each role reads - the bindings, not URIs,
     which vary between environments - plus that asset's catalogue checksum, the asset identity
-    of 12 section 4; None when the source has none), `pixel_mask_spec` and
+    of 12 section 4; None when the source has none - plus the `inputs.readers` override that
+    reads the collection, None for the registered reader, and for an ORTHO role the two terms of
+    its warp key the others do not already supply, `resampling` and `warp_algo_version`: the
+    warp is its own artifact, and without them a re-warp reuses every snapshot computed from
+    the old one), `pixel_mask_spec` and
     `mask_plugin_version`, and `remaps`: for every categorical layer the raw class table's
     fingerprint and a hash of the resolved lookup, because the remap is applied at the gather
     (13 section 3 rule 3) and so determines the observation as much as a mask does; and
@@ -172,7 +176,11 @@ def observation_inputs(plan: PlanContext, glt_key: CacheKey, granule: GranuleRef
             continue
         key = role_asset(granule, b)
         asset_roles[role] = {"collection": b.collection, "asset": b.asset, "var": b.var,
-                             "checksum": granule.checksums.get(key) if key else None}
+                             "checksum": granule.checksums.get(key) if key else None,
+                             "reader": plan.reader_overrides.get(b.collection)}
+        if plan.role_space(role) == "ortho":
+            asset_roles[role]["resampling"] = plan.role_resampling(role)
+            asset_roles[role]["warp_algo_version"] = WARP_ALGO_VERSION
     remaps: dict[str, Any] = {}
     for layer in plan.schema.layers:
         if layer.kind != "categorical" or scorer_output(layer.source) is not None:

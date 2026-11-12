@@ -478,7 +478,8 @@ Every `store.open` in resolve, regrid and the planner passes `checksum=` from
 a remote asset is verified on the way in and a local one is opened as staged.
 
 Asset *identity* enters artifact cache keys — `asset_roles` in the masked-observation key
-([06 §2](06-caching.md)) — but the local copy never does. Identity is the catalogue's per-file
+([06 §2](06-caching.md)), beside how the role is read: its reader override and, for an ortho role,
+the warp's resampling and version — but the local copy never does. Identity is the catalogue's per-file
 checksum where one exists — CMR publishes a SHA-512 for every EMIT file — and the object's ETag
 otherwise. A staged file is a performance detail with
 no bearing on correctness, and it must stay that way: the moment a cache key depends on whether a

@@ -467,6 +467,64 @@ def test_an_ortho_role_is_warped_onto_the_block_beside_a_sensor_role(tmp_path):
     np.testing.assert_array_equal(again, got)
 
 
+def test_an_ortho_roles_warp_and_the_reader_are_in_the_observation_key(tmp_path, monkeypatch):
+    """06 section 2: the ortho warp has its own key carrying `resampling` and
+    `warp_algo_version`, but the snapshot key did not include it. Switching FRCOV from nearest to
+    average built new warps and then reused every snapshot computed from the old ones; a reader
+    override (`inputs.readers`) changed what was read with the same result."""
+    import dataclasses
+
+    from synthetic import TILE as SYN_TILE
+    from synthetic import NadirScorer, build_plan, two_overlapping
+
+    import stratum.resolve.block as block_mod
+    from stratum.ancillary import WARP_ALGO_VERSION
+    from stratum.resolve import glt_key_for, observation_inputs, snapshot_key
+    from stratum.resolve.context import RoleBinding
+    from stratum.types import canonical_hash
+
+    base = build_plan(tmp_path, two_overlapping(), scorer=NadirScorer())
+    granules = {gid: dataclasses.replace(ref, assets={**ref.assets, "FRCOV/BARE": "frcov.tif"})
+                for gid, ref in base.granules.items()}
+    schema = dataclasses.replace(base.schema, layers=(*base.schema.layers, dataclasses.replace(
+        base.schema.layers[1], name="bare", source="frcov")))
+
+    def plan_with(resampling: str, **changes):
+        frcov = RoleBinding(collection="FRCOV", var="EMIT_L2B_FRCOVBARE", asset="BARE",
+                            space="ortho", resampling=resampling)
+        return dataclasses.replace(base, granules=granules, schema=schema,
+                                   roles={**base.roles, "frcov": frcov}, **changes)
+
+    nearest, average = plan_with("nearest"), plan_with("average")
+    a = granules["A"]
+    glt = glt_key_for(nearest, SYN_TILE, "A")
+    roles = observation_inputs(nearest, glt, a)["asset_roles"]
+    assert roles["frcov"]["resampling"] == "nearest"
+    assert roles["frcov"]["warp_algo_version"] == WARP_ALGO_VERSION
+    # a sensor role is gathered through the GLT, never warped: it carries neither term
+    assert "resampling" not in roles["mineral"] and "warp_algo_version" not in roles["mineral"]
+    assert {r["reader"] for r in roles.values()} == {None}
+
+    def obs(plan):
+        return canonical_hash(observation_inputs(plan, glt, a))
+
+    item = {"tile": [0, 0], "epoch": ["2026-06-01T00:00:00+00:00", "2026-07-01T00:00:00+00:00"],
+            "block": [0, 0]}
+    assert obs(average) != obs(nearest)
+    assert snapshot_key(item, average).hash != snapshot_key(item, nearest).hash
+    assert glt_key_for(average, SYN_TILE, "A").hash == glt.hash          # geometry stays warm
+    # the reader that reads a role's collection
+    swapped = plan_with("nearest", reader_overrides={"FRCOV": "my_lab.readers:Frcov"})
+    assert observation_inputs(swapped, glt, a)["asset_roles"]["frcov"]["reader"] == \
+        "my_lab.readers:Frcov"
+    assert observation_inputs(swapped, glt, a)["asset_roles"]["mineral"]["reader"] is None
+    assert obs(swapped) != obs(nearest)
+    # and a warp fix, when one bumps WARP_ALGO_VERSION, reaches the snapshots too
+    before = obs(nearest)
+    monkeypatch.setattr(block_mod, "WARP_ALGO_VERSION", WARP_ALGO_VERSION + 1)
+    assert obs(nearest) != before
+
+
 # ----------------------------------------------------- the bucket path: a mirror is not the bucket
 def test_the_accessor_pulls_its_warp_from_a_bucket_before_reading(monkeypatch, tmp_path):
     """A worker's `key.path` is a node-local MIRROR, not the artifact.
