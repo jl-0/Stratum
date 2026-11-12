@@ -492,6 +492,25 @@ def test_shared_colors_reach_the_data_cog_the_render_and_the_default_legends(tmp
     assert entries["goethite"] == [7, 7, 7] and entries["pyrite"] == [128, 128, 128]
 
 
+def test_a_render_named_differently_from_its_layer_still_legends_the_layer(tmp_path,
+                                                                           product_dirs):
+    """07 section 3's own example, `mineral_id: {layer: mineral_1}`. The legend was written as
+    `mineral_id_legend.json` only, so the data band `mineral_1` had none, and a viewer - which
+    tells a categorical band by its legend - drew class ids through a continuous ramp."""
+    outputs = {"render": {"mineral_id": {"mapper": "categorical", "layer": "m",
+                                         "on_unmapped": "grey",
+                                         "colors": {"goethite": [7, 7, 7]}}}}
+    pub = publish_period(tmp_path / "p", product_dirs, TILE, PERIOD, schema(), outputs,
+                         run_id=RUN_ID, manifest_hash="sha256:x")
+    assert {"mineral_id", "m", "m_runner_up"} <= set(pub.legends)
+    layer = json.loads(pub.legends["m"].read_text())
+    assert layer == json.loads(pub.legends["mineral_id"].read_text()), "one legend, two names"
+    assert layer["kind"] == "categorical"
+    item = json.loads(pub.item.read_text())
+    assert "legend" in item["assets"]["m_legend"]["roles"]
+    assert set(pub.images) == {"mineral_id"}
+
+
 # ---------------------------------------------------------------------------------- provenance
 def test_provenance_build_write_read(tmp_path):
     rec = build_provenance(

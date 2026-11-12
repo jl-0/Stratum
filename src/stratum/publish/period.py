@@ -19,7 +19,12 @@ import pyarrow as pa
 from stratum.publish.cogs import check_formats, is_categorical, raster_format, write_data_cogs
 from stratum.publish.colors import shared_colors
 from stratum.publish.legend import write_classes, write_legend
-from stratum.publish.mappers import build_mappers, categorical_legend, write_images
+from stratum.publish.mappers import (
+    CategoricalMapper,
+    build_mappers,
+    categorical_legend,
+    write_images,
+)
 from stratum.publish.provenance import iso_utc
 from stratum.publish.stac import stamp, write_stac_item
 from stratum.publish.stitch import stitch
@@ -287,6 +292,13 @@ def publish_period(out_dir: Path, product_dirs: Sequence[tuple[BlockRef, Path]],
     images = write_images(out_dir, {n: m.render(stack) for n, m in mappers.items()}, tile,
                           tags=all_tags, fmt=fmt)
     legends = {n: write_legend(out_dir, n, m.legend()) for n, m in mappers.items()}
+    # A categorical render named differently from its layer (`mineral_id: {layer: mineral_1}`)
+    # leaves `mineral_1` - the DATA band a viewer draws - with no legend of its own name, and a
+    # band without a legend is drawn as a number: class ids through a colour ramp. The render's
+    # legend is the layer's, so it is written under both names.
+    for m in mappers.values():
+        if isinstance(m, CategoricalMapper) and m.layer not in legends:
+            legends[m.layer] = write_legend(out_dir, m.layer, m.legend())
     band_tables = {**{s.name: class_table for s in stack.specs if class_table is not None},
                    **per_band}
     legends.update(default_legends(out_dir, stack.specs, band_tables, outputs,

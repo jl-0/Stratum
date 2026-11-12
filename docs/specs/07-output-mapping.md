@@ -124,6 +124,11 @@ Every categorical delivered band with a class table that no render covers still 
 palette; a class the colours leave out is grey). No image is written for it. Without a legend a
 viewer has no way to know the band holds classes, and draws class ids as a ramp.
 
+A categorical render **named differently from its layer** — `mineral_id` over `mineral_1`, as in
+the example above — writes its legend under both names, `mineral_id_legend.json` and
+`mineral_1_legend.json`, with identical content. The data band is what a viewer draws, and it
+looks the legend up by the band's name.
+
 ### Continuous
 
 ```yaml
