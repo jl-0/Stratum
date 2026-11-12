@@ -117,7 +117,7 @@ executors; only the dispatch differs.
 | Pool | `--workers`, else `$STRATUM_LAMBDA_CONCURRENCY`, else 32. The ceiling that binds is the function's reserved concurrency, which is a deployment setting |
 | Outcomes | Identical records to `local`, including a handler exception, so `stratum status --failed` parses one format |
 | Failure | All-or-nothing, as `local`. §4's tolerated percentage is still a later slice |
-| Retry | None in the client (`max_attempts: 0`): an item is idempotent, so a retry is safe but never automatic, and the outcome record decides |
+| Retry | None in the client (`max_attempts: 0`): an item is idempotent, so a retry is safe but never automatic, and the outcome record decides. **One exception: a throttle.** `TooManyRequestsException` means the invocation never started — the pool is wider than the function's reserved concurrency — so the dispatcher re-sends it with backoff (1 s doubling to 30 s) for up to 900 s, one full Lambda timeout, and only then records a failure. Before this a single throttle failed the stage |
 | Refusal | A **local storage root** is refused by name before the first invocation. A Lambda cannot read a laptop's filesystem |
 | Finalize | Mirrors the products back before writing the STAC collection — the worker that published them was elsewhere |
 

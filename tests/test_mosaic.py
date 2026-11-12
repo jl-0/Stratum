@@ -51,6 +51,22 @@ def test_the_plan_is_one_job_per_layer_over_every_tile(products: Products) -> No
     assert jobs["mineral_1"].rel == f"{RUN}/mosaic/{PERIOD}/mineral_1.tif"
 
 
+def test_an_acquired_layer_decimates_in_the_mosaic() -> None:
+    """The mosaic reprojects and builds overviews with one resampling per layer. An `acquired`
+    band is float64 with NaN nodata, which reads as continuous, but its values are granule
+    identifiers: averaged along a seam they name no granule."""
+    from stratum.publish.mosaic import _nearest
+    from stratum.types import ACQUIRED_UNITS
+
+    acquired = {"roles": ["data"], "href": "./acquired_1.tif",
+                "raster:bands": [{"data_type": "float64", "unit": ACQUIRED_UNITS,
+                                  "nodata": "nan"}]}
+    depth = {"roles": ["data"], "href": "./depth_1.tif",
+             "raster:bands": [{"data_type": "float32", "unit": "", "nodata": "nan"}]}
+    assert _nearest(acquired), "an acquired timestamp must decimate, never average"
+    assert not _nearest(depth)
+
+
 def test_a_layer_the_run_does_not_have_is_an_error(products: Products) -> None:
     with pytest.raises(ValueError, match="no layer 'mineral_9'"):
         plan_mosaics(RUN, products.items(RUN), layers=["mineral_9"])

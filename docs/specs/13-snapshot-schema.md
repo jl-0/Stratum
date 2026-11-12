@@ -273,7 +273,11 @@ continuous multi-band layer is delivered as `(H, W, B)`.
 | `best` | — | The value from the highest-scoring epoch |
 | `none` | — | Carried, not delivered |
 
-Every method applies band-wise to a multi-band layer. Options any continuous method accepts:
+Every method applies band-wise to a multi-band layer. **A layer whose source is `acquired` takes
+only `best`, `min`, `max` or `none`** — the methods that deliver one epoch's value unchanged.
+Its value names a granule (§2), and every other method blends epochs (`median` too, over an even
+count) into a time at which nothing was acquired and that matches no row of `granules.json`.
+Manifest validation refuses the rest. Options any continuous method accepts:
 
 | Option | Effect |
 |---|---|

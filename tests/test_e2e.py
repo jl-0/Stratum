@@ -134,6 +134,40 @@ def test_stac_provenance_and_collection(e2e: tuple[Path, PlanResult]) -> None:
     assert "## Execution" in (result.run_dir / "report.md").read_text()
 
 
+def test_provenance_pins_the_code_that_ran(e2e: tuple[Path, PlanResult], monkeypatch,
+                                           tmp_path: Path) -> None:
+    """10 section 2: `code` "pins exactly what ran". Two algorithm version numbers do not - two
+    runs from different commits recorded identical provenance - so the record carries the
+    commit, and for a cloud run the image digest the deployment was pinned to."""
+    from types import SimpleNamespace
+
+    from stratum.executors.local import IMAGE_DIGEST_ENV, code_identity, stratum_commit
+
+    _, result = e2e
+    code = read_provenance(result.run_dir)["code"]
+    commit = stratum_commit()
+    if commit is None:
+        pytest.skip("not running from a git checkout")
+    assert code["stratum_commit"] == commit
+    assert len(commit.removesuffix("-dirty")) == 40
+    assert "image_digest" not in code, "a local run executes no image"
+
+    # outside a repository there is no commit to claim
+    stray = tmp_path / "pkg" / "module.py"
+    stray.parent.mkdir()
+    stray.write_text("")
+    assert stratum_commit(stray) is None
+
+    monkeypatch.setenv(IMAGE_DIGEST_ENV, "sha256:" + "ab" * 32)
+    ctx = SimpleNamespace(regrid_algo_version=3, resolve_code="sha256:r", reduce_code=None)
+    assert "image_digest" not in code_identity(ctx, "local")
+    aws = code_identity(ctx, "aws")
+    assert aws["image_digest"] == "sha256:" + "ab" * 32
+    # the content hashes the keys were built from are recorded as the plan carries them
+    assert aws["resolve_code"] == "sha256:r" and "reduce_code" not in aws
+    assert aws["regrid_algo_version"] == 3
+
+
 def test_results_files_and_rerun_hits(e2e: tuple[Path, PlanResult]) -> None:
     """Every stage recorded an outcome per item; a second run is all cache hits (08 section 1)."""
     _, result = e2e

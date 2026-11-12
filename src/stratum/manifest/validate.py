@@ -227,6 +227,12 @@ def _delivered_names(m: Manifest, problems: list[str], reducer: Any = None) -> s
         return set()
 
 
+#: Aggregations an `acquired` layer may take (13 section 4): those that deliver one epoch's value
+#: unchanged. Every other continuous method blends epochs - `median` too, over an even count -
+#: and a blended timestamp matches no row of `granules.json`.
+ACQUIRED_AGGREGATES = ("best", "min", "max", "none")
+
+
 def validate_static(m: Manifest) -> list[str]:
     """Problems that make a manifest unrunnable regardless of data; empty means ok."""
     problems: list[str] = []
@@ -308,6 +314,12 @@ def validate_static(m: Manifest) -> list[str]:
                 problems.append(f"{where}: source {layer.source!r} is provided by the framework "
                                 f"as one continuous {want} band; declare kind: continuous with "
                                 "no bands or dtype (13 section 2)")
+            elif layer.source == "acquired" \
+                    and layer.aggregate.method not in ACQUIRED_AGGREGATES:
+                problems.append(f"{where}: aggregate {layer.aggregate.method!r} would compute "
+                                "a time at which no granule was acquired. `acquired` names the "
+                                "winning look's granule, so it takes a method that SELECTS one "
+                                f"look's value: {', '.join(ACQUIRED_AGGREGATES)} (13 section 4)")
         elif layer.source not in inputs.names:
             problems.append(f"{where}: source {layer.source!r} is neither a role nor a band "
                             f"alias, nor one of the framework's {sorted(BUILTIN_SOURCES)}")

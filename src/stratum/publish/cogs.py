@@ -21,7 +21,7 @@ from rasterio.shutil import copy as rio_copy
 
 from stratum.publish.colors import RGBA, gdal_colormap, resolve_class_colors
 from stratum.reduce import CATEGORICAL_DTYPE, CATEGORICAL_NODATA
-from stratum.types import BandSpec, BandStack, ClassTable, TileRef
+from stratum.types import ACQUIRED_UNITS, BandSpec, BandStack, ClassTable, TileRef
 
 COG_MEDIA_TYPE = "image/tiff; application=geotiff; profile=cloud-optimized"
 REQUIRED_TAGS = ("run_id", "manifest_hash")     # 10 section 3
@@ -100,11 +100,26 @@ def is_categorical_dtype(dtype: Any, nodata: Any) -> bool:
         return False
 
 
+def is_identifier_units(units: Any) -> bool:
+    """A band whose values NAME something rather than measure it, told by its units: an
+    `acquired` band (`ACQUIRED_UNITS`) is a timestamp to the second that doubles as the granule
+    id (10 section 3). The mean of two of them is a time at which nothing was acquired and that
+    matches no row of `granules.json`, so such a band decimates exactly as class ids do even
+    though it is float64 with NaN nodata and nothing about its dtype says so."""
+    return units == ACQUIRED_UNITS
+
+
+def decimates(spec: BandSpec) -> bool:
+    """Whether a delivered band is made coarser by decimation rather than by averaging: class
+    ids, and identifiers (`is_identifier_units`)."""
+    return is_categorical(spec) or is_identifier_units(spec.units)
+
+
 def resampling_for(*, categorical: bool) -> str:
     """GDAL's name for how a band is resampled when it is made coarser. Averaging class ids would
     invent classes that do not exist, so a categorical band decimates; a continuous one averages,
     which is what makes a zoomed-out view honest. RGBA renderings count as categorical: their
-    colours are class colours."""
+    colours are class colours. So does an identifier band (`decimates`)."""
     return "NEAREST" if categorical else "AVERAGE"
 
 
@@ -159,7 +174,7 @@ def write_geotiff(path: Path, data: np.ndarray, spec: BandSpec, *, transform: Af
         with tempfile.TemporaryDirectory(dir=path.parent) as tmp:
             staged = write_geotiff(Path(tmp) / path.name, data, spec, transform=transform,
                                    crs=crs, tags=tags, colormap=colormap, cog=False)
-            resampling = resampling_for(categorical=is_categorical(spec))
+            resampling = resampling_for(categorical=decimates(spec))
             rio_copy(str(staged), str(path), driver="COG", COMPRESS="DEFLATE",
                      OVERVIEW_RESAMPLING=resampling, BLOCKSIZE=str(cog_block_size(
                          (int(data.shape[0]), int(data.shape[1])))))
@@ -182,6 +197,8 @@ def write_data_cogs(out_dir: Path, stack: BandStack, tile: TileRef, *,
                     colors: Mapping[str, Sequence[int]] | None = None,
                     class_tables: Mapping[str, ClassTable] | None = None,
                     colors_by_band: Mapping[str, Mapping[str, Sequence[int]]] | None = None,
+                    on_unmapped: str = "transparent",
+                    on_unmapped_by_band: Mapping[str, str] | None = None,
                     fmt: str = "cog") -> list[Path]:
     """Write every band of `stack` as `{band}.tif` under `out_dir` on the tile's grid.
 
@@ -189,11 +206,13 @@ def write_data_cogs(out_dir: Path, stack: BandStack, tile: TileRef, *,
     Categorical bands (`is_categorical`) embed a colour table derived from `class_table` and the
     render `colors` (by class name; the deterministic palette when None), so a viewer that styles
     single-band rasters can use the data COG directly (07 section 7, resolution 2). Classes
-    `colors` leaves out are black in the table - the image, not the data COG, is where
-    `on_unmapped` is enforced - and so is `none`: a TIFF colour table carries no alpha (GDAL
-    reads every entry back opaque), so the data COG's only transparency is its nodata value.
-    `class_tables` and `colors_by_band` override `class_table`/`colors` FOR ONE BAND, keyed by
-    band name. A product whose categorical layers lump the same raw table differently has no
+    `colors` leaves out follow `on_unmapped`, the same setting the image and the legend were
+    resolved under, so all three give a class one colour: `grey` is grey, and `transparent` or
+    `fail` are black - `fail` is ENFORCED by the image, not here. `none` is black too: a TIFF
+    colour table carries no alpha (GDAL reads every entry back opaque), so the data COG's only
+    transparency is its nodata value.
+    `class_tables`, `colors_by_band` and `on_unmapped_by_band` override
+    `class_table`/`colors`/`on_unmapped` FOR ONE BAND, keyed by band name. A product whose categorical layers lump the same raw table differently has no
     single product table, so each categorical band gets its own colour table; a band neither
     names falls back to the product-wide pair, which is the single-table case unchanged.
 
@@ -202,17 +221,17 @@ def write_data_cogs(out_dir: Path, stack: BandStack, tile: TileRef, *,
     _require_tags(tags)
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
-    cache: dict[tuple[int, int], Mapping[int, Any]] = {}
+    cache: dict[tuple[int, int, str], Mapping[int, Any]] = {}
 
     def colormap_for(name: str) -> Mapping[int, Any] | None:
         table = (class_tables or {}).get(name, class_table)
         if table is None:
             return None
         cols = (colors_by_band or {}).get(name, colors)
-        key = (id(table), id(cols))
+        unmapped = (on_unmapped_by_band or {}).get(name, on_unmapped)
+        key = (id(table), id(cols), unmapped)
         if key not in cache:
-            cache[key] = gdal_colormap(resolve_class_colors(table, cols,
-                                                            on_unmapped="transparent"))
+            cache[key] = gdal_colormap(resolve_class_colors(table, cols, on_unmapped=unmapped))
         return cache[key]
 
     full_tags = {**tags, "grid_id": tile.grid.id, "tile": f"{tile.tx}_{tile.ty}"}

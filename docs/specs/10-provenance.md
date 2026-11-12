@@ -83,6 +83,20 @@ Written by `Finalize`, immutable, kept indefinitely at
 }
 ```
 
+**`code` as built** (`executors.local.code_identity`). The block above is the target shape; what
+a run records today is:
+
+| Field | What it is | When present |
+|---|---|---|
+| `stratum_version` | The package version | always |
+| `regrid_algo_version`, `warp_algo_version` | The hand-bumped algorithm versions in the GLT and warp keys ([06 §3](06-caching.md)) | always |
+| `resolve_code`, `reduce_code` | The content hashes of the framework code the snapshot and product keys were built under, read off the plan context so the record and the keys cannot disagree | when the plan carries them |
+| `stratum_commit` | `git rev-parse HEAD` of the checkout Finalize ran from, with `-dirty` when tracked files differ from it | when the package is running from a git checkout — not from a wheel or inside the image |
+| `image_digest` | `$STRATUM_IMAGE_DIGEST`: the digest the deployment was pinned to ([ADR-0003](../decisions/ADR-0003-image-build-and-digest.md)) | `--executor aws` only, and only when set. It is what `.env` says is deployed, not a read-back of the function's configuration |
+
+Each plugin's code identity is in its own `plugins.*.version`. `plugin_wheel` and
+`plugin_wheel_hash` are not recorded: no run has loaded a plugin from a wheel yet.
+
 Three parts carry the weight. **`inputs`** pins exactly what was read. **`code`** pins exactly what
 ran, by digest rather than tag. **`filters`** records what was excluded and why — the counterpart
 to the silent-drop problem in [02 §4](02-granule-index.md); a run that quietly discarded 812

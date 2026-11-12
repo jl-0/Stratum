@@ -596,6 +596,17 @@ def test_eviction_never_touches_an_in_flight_download_or_a_fresh_entry(tmp_path)
     assert fresh.exists(), "an entry younger than the grace period may still be open"
 
 
+def test_the_budget_counts_and_reclaims_an_orphaned_partial(tmp_path):
+    """The same rule as `stratum.storage.ensure_free`: a partial whose writer is gone is cached
+    bytes like any other - counted against the budget, and evicted to meet it."""
+    from stratum.storage import STALE_PARTIAL_SECONDS
+
+    cache = tmp_path / "assets"
+    orphan = _asset(cache, "dddd_x.nc.part-123-456", 500, age=STALE_PARTIAL_SECONDS + 60)
+    assert ensure_room(cache, need=0, budget=100, grace=60.0) == 500
+    assert not orphan.exists()
+
+
 def test_eviction_stops_rather_than_thrashing_a_cache_of_hot_files(tmp_path):
     """If nothing is older than the grace period the caller is allowed to fail on ENOSPC.
     Evicting a file another worker is mid-read would turn a capacity problem into a corrupt
@@ -655,6 +666,26 @@ def test_an_asset_larger_than_the_reserve_makes_room_for_its_own_size(tmp_path, 
     small = Harness(tmp_path / "small", reserve=100, headers={"Content-Length": "50"})
     small.store.open(URL)
     assert asked == [100], "an asset inside the reserve needs no second pass"
+
+
+def test_an_asset_that_cannot_fit_fails_clearly_before_writing(tmp_path, monkeypatch):
+    """Eviction may free nothing: everything left is hot or in flight. The download used to
+    proceed anyway and die on ENOSPC part-way through. It now fails before the first byte, as a
+    transient error naming the size and the free space."""
+    import shutil
+
+    import stratum.access.store as store_mod
+    from stratum.access.store import ScratchFull
+
+    real = shutil.disk_usage
+    monkeypatch.setattr(store_mod, "ensure_free", lambda need, **kw: 0)
+    monkeypatch.setattr(store_mod.shutil, "disk_usage",
+                        lambda p: type(real("/"))(total=10**6, used=10**6 - 500, free=500))
+    h = Harness(tmp_path / "assets", reserve=100, headers={"Content-Length": "10000"}, retries=1)
+    with pytest.raises(ScratchFull, match="needs 10000 bytes.*has 500 free") as err:
+        h.store.open(URL)
+    assert err.value.transient and len(h.calls) == 2, "transient, so it is retried"
+    assert not [p for p in (tmp_path / "assets").rglob("*") if p.is_file()], "nothing written"
 
 
 # ----------------------------------------------------------------------------- range reads
@@ -735,6 +766,44 @@ def test_ranged_read_refused_by_the_server_raises_range_unsupported(tmp_path):
     store, _ = _ranged_store(tmp_path, ignore_range=True)
     with pytest.raises(RangeUnsupported, match="ignored the Range header"):
         store.open_ranged(URL).warm()
+
+
+def test_a_short_206_body_is_an_error_not_an_endless_read(tmp_path):
+    """A `206` whose body is shorter than its `Content-Range` promises - a connection cut that
+    the transport did not report - left a short block in the handle, and `read` then looped
+    forever asking that block for bytes it does not have. The planner range-reads every class
+    table, so one such response stalled the plan. It is a transient fetch failure: retried, and
+    then raised."""
+    class ShortSession(RangeSession):
+        def get(self, url, *, stream, timeout, headers=None):
+            resp = super().get(url, stream=stream, timeout=timeout, headers=headers)
+            if resp.status_code == 206:
+                resp._body = resp._body[:1000]          # the header still claims the full range
+            return resp
+
+    sessions: list[ShortSession] = []
+
+    def factory(auth_obj):
+        sessions.append(ShortSession(BODY, auth_obj))
+        return sessions[-1]
+
+    store = AssetStore(tmp_path, auth=lambda: {"login": 1}, session_factory=factory,
+                       backoff=0.0, retries=2)
+    outcome: list[object] = []
+
+    def read() -> None:
+        try:
+            outcome.append(store.open_ranged(URL).warm().read(0, 5000))
+        except Exception as e:  # noqa: BLE001 - the test inspects whatever it was
+            outcome.append(e)
+
+    worker = threading.Thread(target=read, daemon=True)
+    worker.start()
+    worker.join(timeout=10)
+    assert not worker.is_alive(), "the ranged read never returned"
+    assert isinstance(outcome[0], AssetFetchError) and outcome[0].transient
+    assert "short" in str(outcome[0])
+    assert sum(len(s.calls) for s in sessions) == 3, "one attempt and two retries"
 
 
 def test_open_ranged_prefers_a_local_or_cached_copy(tmp_path):

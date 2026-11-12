@@ -93,6 +93,13 @@ outputs:
 colormap is a real error — silently rendering it grey is how a mineral goes missing from a map
 without anyone noticing.
 
+The setting governs all three places a class gets a colour: the image, the legend and the data
+COG's embedded colour table are resolved under the same `on_unmapped`, so `grey` is grey in each.
+In the colour table `transparent` and an uncoloured class under `fail` are black, because a TIFF
+colour table carries no alpha. A categorical band no render covers resolves as `grey`, as its
+default legend does (below). The STAC `classification:classes` entry is the exception: it gives a
+`color_hint` only to a class the colours name.
+
 **A render names a delivered band.** The target (`layer`, else the entry's name) must be a band
 the product delivers and a snapshot layer of the matching kind, which is where a categorical band
 gets its class table. The band may come from the built-in reducer or from a `Reducer` plugin that
@@ -123,6 +130,11 @@ Every categorical delivered band with a class table that no render covers still 
 `{band}_legend.json`, coloured as its data COG is (`outputs.colors`, else the deterministic
 palette; a class the colours leave out is grey). No image is written for it. Without a legend a
 viewer has no way to know the band holds classes, and draws class ids as a ramp.
+
+A categorical render **named differently from its layer** — `mineral_id` over `mineral_1`, as in
+the example above — writes its legend under both names, `mineral_id_legend.json` and
+`mineral_1_legend.json`, with identical content. The data band is what a viewer draws, and it
+looks the legend up by the band's name.
 
 ### Continuous
 
@@ -268,5 +280,9 @@ None of this is Tetracorder-specific: the framework matches attributes it was to
    internal block of one file. It is written to `products/{run}/mosaic/{start}_{end}/{asset}.tif`
    and recorded as a collection asset with the `overview` role beside the tile asset's own roles,
    class counts summed over the tiles. Categorical bands and RGBA renderings resample nearest,
-   continuous bands average - the same rule as the per-tile overviews. The per-tile files remain
+   continuous bands average - the same rule as the per-tile overviews. An `acquired` band
+   (units `s since 1970-01-01 UTC`) resamples nearest too, in both places: it is float64 with
+   NaN nodata, but its value is an identifier - the granule's acquisition second, the key into
+   `granules.json` ([10 §3](10-provenance.md)) - and the mean of two of them names no granule.
+   It is recognised by its units, not its dtype. The per-tile files remain
    the deliverable; the mosaic is derived from them and can be rebuilt at any time.

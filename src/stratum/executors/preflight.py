@@ -176,7 +176,8 @@ def _aws(doc: Mapping[str, Any], rom: Mapping[str, Any], workers: int | None,
         checks.append(Check("concurrency", "ok" if inflight <= reserved else "warn",
                             f"{inflight} in flight against {reserved} reserved"
                             + ("" if inflight <= reserved else
-                               "; the excess is throttled and retried")))
+                               "; the excess is throttled and the dispatcher retries it "
+                               "with backoff, so it buys no speed")))
     h = rom["cpu_hours"]
     cost = lambda_cost(h, sum(rom["items"].values()), memory or 4096)
     usd = cost["usd"]

@@ -46,6 +46,9 @@ takes a bucket:</p>
 
 <p>Over a bucket it reads with your own credentials and copies each raster into a local mirror the
 first time a tile needs it, so the first look at a tile is slow and every later one is not. The
+mirror is a cache: when its volume has less than <code>$STRATUM_SCRATCH_RESERVE_BYTES</code> free
+(1.5&nbsp;GB by default), the least recently served files are evicted before the next one is
+fetched, and are fetched again if someone returns to them. The
 catalogue itself is read without fetching a single raster. A run's <code>collection.json</code> is
 the one file read fresh every time. <code>stratum mosaic</code> rewrites it after publishing, so a
 run mosaicked while the viewer is up shows its mosaics on the next load.</p>
@@ -179,8 +182,9 @@ rather than mirrored; a layer without one falls back to one overlay per product 
 <tr><td>Resolution</td><td>The web-mercator zoom closest to the product's cells: z12 (38&nbsp;m
 mercator, about 30&nbsp;m on the ground in the western US) for one-arcsecond products. A mosaic is
 about the size of the tiles it merges.</td></tr>
-<tr><td>Resampling</td><td>Nearest for categorical bands and RGBA renderings, average for
-continuous ones &mdash; the same rule as each tile's own overviews. No class id is ever
+<tr><td>Resampling</td><td>Nearest for categorical bands, RGBA renderings and
+<code>acquired</code> timestamps (which name a granule), average for continuous ones &mdash; the
+same rule as each tile's own overviews. No class id or granule timestamp is ever
 averaged.</td></tr>
 <tr><td>Bands with no nodata</td><td>(<code>n_epochs</code>, <code>n_observed</code>) gain an alpha
 band, so outside the run is transparent rather than zero.</td></tr>

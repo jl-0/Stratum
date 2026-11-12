@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import json
 import os
+import time
 from collections.abc import Sequence
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
@@ -36,6 +37,15 @@ DEFAULT_CONCURRENCY = 32
 # an invocation is never retried by botocore: a duplicate invocation is harmless but wasteful,
 # and the dispatcher's own outcome record is what decides success.
 READ_TIMEOUT = 960
+#: Lambda's answer to an invocation over the function's concurrency (HTTP 429). The invocation
+#: never STARTED, so sending it again is not a duplicate and is the one retry the dispatcher
+#: makes itself; botocore still retries nothing.
+THROTTLE_CODES = frozenset({"TooManyRequestsException"})
+#: Backoff between throttled attempts: doubling from 1 s, capped. And how long one item keeps
+#: trying - a full Lambda timeout, by which every invocation that was in flight has ended, so a
+#: throttle that outlasts it is not this run's own excess and is reported as a failure.
+THROTTLE_BACKOFF_CAP = 30.0
+THROTTLE_DEADLINE = 900.0
 
 
 class AwsExecutorError(RuntimeError):
@@ -72,12 +82,36 @@ def _client(client: Any | None = None) -> Any:
                                                 retries={"max_attempts": 0}))
 
 
+def _is_throttle(e: Exception) -> bool:
+    response = getattr(e, "response", None)
+    error = (response.get("Error") or {}) if isinstance(response, dict) else {}
+    return str(error.get("Code") or "") in THROTTLE_CODES
+
+
+def _invoke_unthrottled(client: Any, **kwargs: Any) -> dict[str, Any]:
+    """`client.invoke`, waiting out a throttle. Dispatching more invocations than the function's
+    reserved concurrency is ordinary - `--workers` and the reservation are set in different
+    places - and without this the excess failed the stage outright, because the client is built
+    with no retries. Any other error is raised at once, as before."""
+    waited, delay = 0.0, 1.0
+    while True:
+        try:
+            return client.invoke(**kwargs)
+        except Exception as e:
+            if not _is_throttle(e) or waited >= THROTTLE_DEADLINE:
+                raise
+        time.sleep(delay)
+        waited += delay
+        delay = min(delay * 2, THROTTLE_BACKOFF_CAP)
+
+
 def invoke(client: Any, function: str, payload: dict[str, Any]) -> dict[str, Any]:
     """One synchronous invocation. A handler exception comes back as `FunctionError` with the
     traceback in the payload, which becomes the outcome record's `error` - the same shape a
     local worker's failure takes, so `stratum status --failed` reads both."""
-    response = client.invoke(FunctionName=function, InvocationType="RequestResponse",
-                             Payload=json.dumps(payload).encode())
+    response = _invoke_unthrottled(client, FunctionName=function,
+                                   InvocationType="RequestResponse",
+                                   Payload=json.dumps(payload).encode())
     body = response["Payload"].read()
     try:
         doc = json.loads(body) if body else {}

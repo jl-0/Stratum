@@ -258,6 +258,66 @@ def test_invoke_survives_a_non_json_payload() -> None:
     assert out["ok"] is False and "504" in out["error"]
 
 
+class _Throttled(Exception):
+    """Shaped like botocore's ClientError for Lambda's 429."""
+
+    def __init__(self, code: str = "TooManyRequestsException") -> None:
+        super().__init__(code)
+        self.response = {"Error": {"Code": code, "Message": "Rate Exceeded."}}
+
+
+def test_a_throttled_invocation_is_retried_not_failed(monkeypatch) -> None:
+    """Dispatching past the function's reserved concurrency gets `TooManyRequestsException`.
+    The invocation never started, so re-sending it is not a duplicate; and the client retries
+    nothing, so without this one throttle failed the item and with it the stage - while
+    preflight said the excess "is throttled and retried"."""
+    from stratum.executors import aws
+
+    naps: list[float] = []
+    monkeypatch.setattr(aws.time, "sleep", naps.append)
+
+    class Busy:
+        calls = 0
+
+        def invoke(self, **kwargs: Any) -> dict[str, Any]:
+            Busy.calls += 1
+            if Busy.calls <= 3:
+                raise _Throttled()
+            return {"Payload": _Body(json.dumps({"index": 3, "stage": "regrid",
+                                                 "ok": True}).encode())}
+
+    out = invoke(Busy(), "fn", {"stage": "regrid", "index": 3})
+    assert out["ok"] is True and Busy.calls == 4
+    assert naps == [1.0, 2.0, 4.0], "backoff between throttled attempts"
+
+
+def test_only_a_throttle_is_retried_and_not_forever(monkeypatch) -> None:
+    from stratum.executors import aws
+
+    naps: list[float] = []
+    monkeypatch.setattr(aws.time, "sleep", naps.append)
+
+    class Denied:
+        calls = 0
+
+        def invoke(self, **kwargs: Any) -> dict[str, Any]:
+            Denied.calls += 1
+            raise _Throttled("AccessDeniedException")
+
+    with pytest.raises(_Throttled):
+        invoke(Denied(), "fn", {"stage": "regrid", "index": 0})
+    assert Denied.calls == 1 and naps == [], "any other error is raised at once"
+
+    class Saturated:
+        def invoke(self, **kwargs: Any) -> dict[str, Any]:
+            raise _Throttled()
+
+    with pytest.raises(_Throttled):
+        invoke(Saturated(), "fn", {"stage": "regrid", "index": 0})
+    assert aws.THROTTLE_DEADLINE <= sum(naps) < aws.THROTTLE_DEADLINE + aws.THROTTLE_BACKOFF_CAP
+    assert max(naps) == aws.THROTTLE_BACKOFF_CAP
+
+
 def test_the_image_cmd_names_a_real_handler() -> None:
     """The Dockerfile's CMD is the only place the handler is named as a string, so a rename here
     breaks the deployment and nothing else. One import is enough to catch it."""

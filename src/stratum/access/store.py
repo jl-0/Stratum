@@ -23,6 +23,7 @@ import contextlib
 import hashlib
 import io
 import os
+import shutil
 import stat
 import threading
 import time
@@ -34,7 +35,7 @@ from typing import Any
 from urllib.parse import unquote, urlparse
 from urllib.request import url2pathname
 
-from stratum.storage import ensure_free, register_evictable
+from stratum.storage import ensure_free, is_live_partial, partial_path, register_evictable
 from stratum.types import AssetHandle, Credentials
 
 REMOTE_SCHEMES = ("s3", "https")
@@ -104,14 +105,15 @@ def cache_budget(cache: Path) -> int:
 def _entries(cache: Path) -> list[tuple[float, int, Path]]:
     """`(atime, size, path)` for every complete file in the cache, oldest access first.
 
-    `.part-*` files are in-flight downloads and are never candidates. Access time is what makes
-    this an LRU rather than a FIFO: a granule read by four regrid items - one per tile it
-    touches - keeps being refreshed and stays resident, while one the run has moved past ages
-    out. `open()` touches a hit for exactly this reason.
+    A `.part-*` file still being written is an in-flight download and never a candidate; one
+    whose writer is gone is an orphan and is one (`stratum.storage.is_live_partial`). Access
+    time is what makes this an LRU rather than a FIFO: a granule read by four regrid items - one
+    per tile it touches - keeps being refreshed and stays resident, while one the run has moved
+    past ages out. `open()` touches a hit for exactly this reason.
     """
     out: list[tuple[float, int, Path]] = []
     for path in cache.rglob("*"):
-        if ".part-" in path.name:
+        if is_live_partial(path):
             continue
         try:
             st = path.stat()
@@ -186,6 +188,21 @@ class AssetFetchError(AssetStoreError):
     def transient(self) -> bool:
         """Worth another attempt: no response at all, or a `RETRY_STATUSES` code."""
         return self.status is None or self.status in RETRY_STATUSES
+
+
+class ScratchFull(AssetFetchError):
+    """The asset is larger than the free space left on the cache's volume after eviction has
+    done what it can. Raised before the first byte is written, in place of an `ENOSPC` part-way
+    through - which reads as a broken disk, leaves the failure to whichever write happens to hit
+    it, and may be some other thread's. Transient: what holds the space is other downloads in
+    flight or files inside their grace window, and both pass."""
+
+    def __init__(self, uri: str, size: int, free: int) -> None:
+        self.uri, self.status, self.size, self.free = uri, None, size, free
+        AssetStoreError.__init__(
+            self, f"staging {uri!r} needs {size} bytes and the asset cache's volume has {free} "
+                  "free with nothing left to evict; retry once other downloads finish, or give "
+                  "the worker more scratch (12 section 4)")
 
 
 class UntrustedScheme(AssetStoreError):
@@ -697,7 +714,7 @@ class AssetStore:
             self.evicted_bytes += freed
         # the temp name carries the pid AND the thread id: `prefetch` runs several downloads
         # in one process, and two must never share a partial file
-        tmp = target.with_name(f"{target.name}.part-{os.getpid()}-{threading.get_ident()}")
+        tmp = partial_path(target)
         try:
             for attempt in range(self.retries + 1):
                 try:
@@ -794,6 +811,13 @@ class AssetStore:
                         if _is_request_exception(e):
                             raise AssetFetchError(uri, None, type(e).__name__) from None
                         raise
+                    # A body shorter than the range the header describes is a cut connection
+                    # the transport did not report. Kept, it becomes a short block that `read`
+                    # can never get past; it is a failed fetch like any other.
+                    want = min(stop, int(total)) - start
+                    if len(data) < want:
+                        raise AssetFetchError(uri, None, f"short range body: {len(data)} of "
+                                                         f"{want} bytes")
                     final = getattr(resp, "url", None)
                     nxt = (signed if signed is not None
                            else final if final and final != uri
@@ -824,6 +848,15 @@ class AssetStore:
             size = _content_length(resp)
             if size > self.reserve:
                 self.evicted_bytes += ensure_free(size)
+            # Eviction is allowed to free nothing - everything left is hot or in flight. Then
+            # the honest outcome is to say so now, not to write into ENOSPC.
+            if size:
+                try:
+                    free = shutil.disk_usage(tmp.parent).free
+                except OSError:
+                    free = size
+                if free < size:
+                    raise ScratchFull(uri, size, free)
             hasher = hashlib.new(expected[0]) if expected is not None else None
             try:
                 with open(tmp, "wb") as fh:

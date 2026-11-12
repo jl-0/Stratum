@@ -310,7 +310,9 @@ end. The first request goes through the trusted Earthdata session and follows th
 redirect; every later one goes straight to the signed URL it ended at on an **anonymous**
 session, since a signed URL needs no credential and must not be sent one. A refused signed URL is
 re-resolved once; a server answering `200` to a Range request raises `RangeUnsupported` and the
-caller stages instead. The EMIT NetCDF readers open a `RangedAsset` with h5py (netCDF4 cannot
+caller stages instead. A `206` whose body is shorter than its `Content-Range` describes is a
+transient `AssetFetchError`, retried like a dropped connection — kept, the short block made
+`read` loop forever. The EMIT NetCDF readers open a `RangedAsset` with h5py (netCDF4 cannot
 read a file object) and serve `class_table` only; anything else on that context raises
 `NotImplementedError`. h5py links the same conda-forge libhdf5 as netCDF4, and
 `tests/test_readers.py` holds the two to the same fingerprint on a synthetic and a delivered
@@ -420,6 +422,12 @@ The guard is **free space on the volume**, not a budget per directory:
 - **A download makes room for itself.** Before the request the store makes room for a 512 MB
   reserve. When the response's `Content-Length` is larger, it makes room for that size as soon
   as the headers arrive. An L2A RFL granule is ~1.7 GB.
+  If the volume still has less free than that size — eviction is allowed to free nothing —
+  the download raises `ScratchFull` before writing a byte, in place of an `ENOSPC` part-way
+  through. It is transient and retried like a `503`. Two gaps remain, deliberately: a response
+  with no `Content-Length` is only covered by the 512 MB reserve, and the check is
+  check-then-act, so several local workers starting large downloads at once can each pass it.
+  One item per Lambda container means neither bites there.
   - **[observed] 2026-11-02:** before this, one Barstow topaz resolve item failed with `ENOSPC`
     halfway through writing an RFL granule. It ran on a warm Lambda whose `/tmp` still held the
     granule of an earlier item.
@@ -427,11 +435,23 @@ The guard is **free space on the volume**, not a budget per directory:
   granule's GLT by every epoch that granule appears in, so both keep being refreshed and stay
   resident; a snapshot, written once and never re-read by the stage that wrote it, ages out. A
   FIFO evicts exactly the wrong ones.
-- **Never candidates.** `runs/` (the work lists and `plan.json` an item is reading — losing
+- **Never candidates.** `runs/` inside an evictable root (the work lists and `plan.json` an item is reading — losing
   those fails the item rather than costing a re-fetch), in-flight writes (`.part-*`,
   `.{hash}-{token}.tmp`), and anything accessed within 60 s. Eviction stops rather than
   thrashing a scratch volume genuinely full of hot files: the caller is allowed to fail on
   `ENOSPC`, because pulling a file out from under a reader is worse than the error.
+- **An orphaned partial is not in flight.** A download killed mid-write — a Lambda timeout, an
+  out-of-memory kill — never unlinks its `.part-*`, and exempting it forever strands up to a
+  whole asset per killed item with nothing left that could free it. A partial that has not been
+  **written to** for an hour (`STALE_PARTIAL_SECONDS`) has no writer and is evicted like any
+  other cold file. Modification time is the test because only a writer advances it: a live
+  download touches it with every 1 MiB chunk and gives up after a 300 s read timeout, and a
+  Lambda invocation lasts at most 900 s, so a partial another process or thread is still
+  writing is never taken. Every download names its partial through one rule,
+  `stratum.storage.partial_path` (`{target}.part-{pid}-{thread}`), so the eviction test and
+  the writers cannot drift apart. **[design]** — whether Lambda preserves `/tmp` across a
+  timed-out invocation has not been observed; if it does not, this rule simply never fires
+  there.
 
 `$STRATUM_ASSET_CACHE_BUDGET_BYTES` still caps the asset cache alone, but it is **off by
 default** and is policy, not safety — worth setting on a shared workstation, where free space is
