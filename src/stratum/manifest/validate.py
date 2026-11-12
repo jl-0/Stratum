@@ -13,6 +13,7 @@ from stratum.manifest.models import CONFIG_MAPPERS, Manifest
 from stratum.plugins import resolve
 from stratum.publish.cogs import check_formats
 from stratum.reduce import SchemaError, product_bands
+from stratum.regrid import REGRID_METHODS
 from stratum.types import BUILTIN_SOURCES, SCORER_SOURCE_PREFIX, BandSpec, scorer_output
 
 
@@ -249,6 +250,12 @@ def validate_static(m: Manifest) -> list[str]:
             problems.append(f"inputs.band_aliases.{alias}: role {spec.role!r} is not declared")
     if inputs.geolocation is not None and inputs.geolocation not in inputs.roles:
         problems.append(f"inputs.geolocation {inputs.geolocation!r} is not a role")
+
+    # -- the regrid method is one a worker implements. The schema lists every method 03
+    #    section 3 specifies; refusing here beats every regrid item failing after plan passed.
+    if m.grid.regrid_method not in REGRID_METHODS:
+        problems.append(f"grid.regrid_method: {m.grid.regrid_method!r} is not implemented in "
+                        f"this slice; one of {list(REGRID_METHODS)} (03 section 3)")
 
     # -- plugins resolve; required roles and aux declared (04 section 8)
     scorer = _instantiate("scorer", m.scorer.ref, m.scorer.params, "scorer", problems)

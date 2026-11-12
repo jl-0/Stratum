@@ -29,11 +29,14 @@ from stratum.plan.document import (
     STAGES,
     BudgetExceeded,
     RunPlan,
+    epoch_from_doc,
     read_plan,
     read_work,
     results_path,
 )
 from stratum.publish import build_provenance, write_provenance, write_stac_collection
+from stratum.publish.period import product_dir
+from stratum.publish.stac import ITEM_NAME
 
 log = logging.getLogger(__name__)
 
@@ -143,7 +146,12 @@ def run_all(run_dir: Path | str, workers: int | None = None, *,
         pulled = run.workspace.pull_tree(run.products_dir, only="item.json")
         if pulled:
             log.info("mirrored %d item document(s) for the STAC collection", pulled)
-        items = sorted(run.products_dir.glob("*/*/item.json"))
+        # The collection lists what THIS plan publishes, not what the directory holds: a
+        # same-day re-plan reuses the products tree, and a tile or period the new plan no
+        # longer covers is still on disk from the run before it.
+        planned = {(product_dir(run.products_dir, run.tile(*it["tile"]), epoch_from_doc(it["period"]))
+                    / ITEM_NAME) for it in read_work(run_dir, "publish")}
+        items = sorted(p for p in planned if p.is_file())
         if items:
             collection = write_stac_collection(run.products_dir, items,
                                                description=run.document.get("description")

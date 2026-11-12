@@ -128,14 +128,14 @@ of metadata: URLs, footprints, times, cloud cover, checksums. It reads no pixel 
       <em>remap</em> — an integer lookup array from that granule's ids to the run's ids — and
       fails if two granules disagree irreconcilably. The remap is applied later, at the gather,
       where the granule is still known</td>
-  <td><a class="src" data-sym="granule_remap" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/resolve/block.py#L136">block.py:96</a></td>
+  <td><a class="src" data-sym="granule_remap" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/resolve/block.py#L148">block.py:96</a></td>
 </tr>
 <tr>
   <td>Freeze</td>
   <td>The surviving granule set is written to the run directory and hashed. Every later stage
       reads the frozen set, never the live catalogue, so a re-run cannot silently include a
       granule that appeared since</td>
-  <td><a class="src" data-sym="# -- freeze (02 section 6)" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/plan/run.py#L1047">plan/run.py:773</a></td>
+  <td><a class="src" data-sym="# -- freeze (02 section 6)" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/plan/run.py#L1057">plan/run.py:773</a></td>
 </tr>
 </tbody>
 </table>
@@ -376,7 +376,7 @@ falling back, since a silent fallback would mix two derivations under one cache 
   <td class="num">9</td>
   <td>Score and keep</td>
   <td>The scorer runs on the block; the running best is updated — see below</td>
-  <td><a class="src" data-sym="resolve_window" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/resolve/block.py#L224">block.py:154</a></td>
+  <td><a class="src" data-sym="resolve_window" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/resolve/block.py#L236">block.py:154</a></td>
 </tr>
 </tbody>
 </table>
@@ -582,7 +582,7 @@ then:</p>
 <tr>
   <td>Per-cell winner within an epoch</td>
   <td>Stratum — the point of the framework; the rule itself is a plugin</td>
-  <td><a class="src" data-sym="resolve_window" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/resolve/block.py#L224">resolve_window</a></td>
+  <td><a class="src" data-sym="resolve_window" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/resolve/block.py#L236">resolve_window</a></td>
 </tr>
 <tr>
   <td>Mode through time, agreement, runner-up, continuous statistics</td>

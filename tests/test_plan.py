@@ -344,3 +344,17 @@ def test_outputs_are_validated_at_plan_time(root: Path) -> None:
     with pytest.raises(PlanError, match="s3.* is not supported"):
         plan_run(write_manifest(root / "aux.yaml", aux={
             "slope": {"uri": "s3://x/slope.tif", "kind": "continuous", "resampling": "bilinear"}}))
+
+
+def test_granule_in_a_dropped_partial_epoch_is_dropped_and_reported(root: Path) -> None:
+    """09 section 5: a partial epoch is dropped and the plan carries on. C (3 July) falls in the
+    truncated July epoch, so it is removed as a reported row instead of refusing the plan."""
+    result = plan_run(write_manifest(root / "m.yaml", time={
+        "start": "2026-06-01", "end": "2026-07-10", "epoch": "P1M", "deliver": "P1M"}))
+    assert result.document["partial_epochs"] == ["2026-07-01..2026-07-10"]
+    assert result.counts["granules_queried"] == 3 and result.counts["granules"] == 2
+    rows = {f["describe"]: f["removed"] for f in result.document["filters"]}
+    assert rows["falls in a whole epoch (partial epochs are dropped)"] == 1
+    assert "20260703T100000_2618503_003" not in result.document["context"]["granules"]
+    assert result.document["index"]["granule_count"] == 2
+    assert "falls in a whole epoch" in (result.run_dir / "report.md").read_text()

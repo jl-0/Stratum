@@ -105,16 +105,6 @@ def _calendar_anchor(start: datetime, epoch: Duration) -> datetime:
     return start.replace(hour=0, minute=0, second=0, microsecond=0)
 
 
-def is_partial(epoch: Duration, e: Epoch) -> bool:
-    """True when `e` is shorter than one whole `epoch` - truncation left it at a window edge.
-
-    An epoch is the VOTING UNIT (13 section 4), so a short one casts a vote backed by less
-    evidence than every other vote in the same product. That is what `drop_partial` exists to
-    prevent; dropping costs at most one epoch of data at a ragged window edge.
-    """
-    return epoch.add(e.start) != e.end
-
-
 def epochs_between(start: datetime, end: datetime, epoch: Duration, *,
                    align: EpochAlign = "start", drop_partial: bool = False) -> list[Epoch]:
     """Half-open epochs covering [start, end), generated from `start` by `epoch` (11 section 4).
@@ -122,9 +112,15 @@ def epochs_between(start: datetime, end: datetime, epoch: Duration, *,
     The last epoch is truncated at `end`. With `align="calendar"` the lattice is anchored on the
     calendar unit instead, so the first epoch is truncated at `start` as well.
 
-    `drop_partial` discards any epoch truncation left shorter than one whole `epoch` - see
-    `is_partial`. It is what lets an epoch that does not divide the delivery window be used at
+    `drop_partial` discards any epoch truncation left shorter than one whole `epoch`. An epoch
+    is the VOTING UNIT (13 section 4), so a short one casts a vote backed by less evidence than
+    every other vote in the same product; dropping costs at most one epoch of data at a ragged
+    window edge, and is what lets an epoch that does not divide the delivery window be used at
     all (09 section 5).
+
+    Partial means TRUNCATED on the lattice the epochs were generated from (anchor + k x epoch).
+    It is never re-derived from an epoch's own start: that clamps at month ends (28 Feb + P1M
+    is 28 Mar, not 31 Mar), so a run anchored on day 29-31 would lose whole epochs.
     """
     start, end = as_utc(start), as_utc(end)
     if end <= start:
@@ -139,9 +135,9 @@ def epochs_between(start: datetime, end: datetime, epoch: Duration, *,
             continue
         if s >= end:
             break
+        if drop_partial and (s < start or e > end):
+            continue
         out.append(Epoch(max(s, start), min(e, end)))
-    if drop_partial:
-        out = [e for e in out if not is_partial(epoch, e)]
     return out
 
 
@@ -194,7 +190,7 @@ def delivery_periods(start: datetime, end: datetime, epoch: Duration, every: Dur
 
     A PARTIAL epoch - one truncation left shorter than `epoch` - is dropped on both paths, and
     `Manifest.epochs()` drops it too so resolve does no work reduce will not read. Keeping it
-    would let one vote rest on less evidence than the rest (`is_partial`); `stratum plan` names
+    would let one vote rest on less evidence than the rest (`epochs_between`); `stratum plan` names
     what it dropped.
     """
     check_delivery(epoch, every, window, align)

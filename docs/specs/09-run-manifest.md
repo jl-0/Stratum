@@ -38,7 +38,7 @@ grid:
   origin: [-180, -90]
   block_size: 720                  # divides the 3600-cell tile exactly
   max_distance: 0.00059       # regrid cutoff; default 1.5 x the grid diagonal - see 03 section 3
-  regrid_method: kdtree       # kdtree | warp_embedded - see 03 section 3
+  regrid_method: kdtree       # kdtree | adopt | warp_embedded (not built: refused) - 03 section 3
   # force_positive_y: true    # only to defeat the guard rail in 01 section 1
 
 aoi:
@@ -262,6 +262,8 @@ Everything below fails in the plan stage, loudly, while it is cheap:
 
 - schema validity (Pydantic v2) with precise error locations;
 - named scorer/reducer/mapper/mask plugins resolve, and versions are recordable;
+- `grid.regrid_method` is one a worker implements: `warp_embedded` is in the schema because
+  [03 §3](03-regrid-glt.md) specifies it, and is refused until it is built;
 - every plugin's `required_roles` present in `inputs.roles`;
 - every role's `collection` resolves to exactly one registered `GranuleReader`, and its `var`
   exists in that reader's variables ([12 §7](12-data-access.md)); a collection the index holds
@@ -285,7 +287,10 @@ Everything below fails in the plan stage, loudly, while it is cheap:
   An epoch is the voting unit, so a short one would cast a vote backed by less evidence than
   every other vote in the product; dropping it costs at most one epoch at a ragged window edge.
   `stratum plan` **warns** and names what it dropped, in the log and in `report.md`, because a
-  ragged window is nearly always an off-by-one in `time.end` rather than an intention;
+  ragged window is nearly always an off-by-one in `time.end` rather than an intention.
+  Granules acquired in a dropped partial epoch are dropped with it, as a reported selection
+  row (`falls in a whole epoch`); a granule outside *every* epoch, whole or partial, is still
+  a refusal;
 - the snapshot schema resolves: every layer `source` names a role or alias (or `acquired`, or a
   `scorer.<output>` the scorer declares, typed from its `BandSpec`), every categorical
   layer's enumeration resolves to **exactly one** row per member in each contributing granule's

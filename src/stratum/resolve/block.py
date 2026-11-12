@@ -110,9 +110,21 @@ def candidates(plan: PlanContext, block: BlockRef, epoch: Epoch) -> list[Granule
 
 
 def glt_key_for(plan: PlanContext, tile: TileRef, granule_id: str) -> CacheKey:
-    """The key regrid wrote the granule's GLT under: the same inputs, so the same hash."""
-    inputs = glt_inputs(granule_id, plan.grid, plan.max_distance, plan.regrid_method,
-                        plan.regrid_algo_version, pad=plan.tile_pad)
+    """The key regrid wrote the granule's GLT under: the same inputs, so the same hash.
+
+    Under `adopt` that is a null `max_distance` (nothing is searched for) and the geolocation
+    asset's catalogue checksum, exactly as the regrid worker derives them (06 section 2).
+    `kdtree` keys carry neither, and are what they always were."""
+    max_distance, source = plan.max_distance, None
+    if plan.regrid_method == "adopt":
+        max_distance = None
+        geo = plan.roles[plan.geolocation_role]
+        ref = plan.granules[granule_id]
+        asset = role_asset(ref, geo)
+        if asset is not None:
+            source = ref.checksums.get(f"{geo.collection}/{asset.split('/', 1)[-1]}")
+    inputs = glt_inputs(granule_id, plan.grid, max_distance, plan.regrid_method,
+                        plan.regrid_algo_version, source=source, pad=plan.tile_pad)
     return plan.cache.key("glt", plan.grid.id, tile, inputs)
 
 

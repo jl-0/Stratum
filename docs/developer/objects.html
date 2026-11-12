@@ -159,7 +159,7 @@ flowchart TB
 <tr><td><a class="src" data-sym="class ObsWindow" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/types.py#L283">ObsWindow</a></td><td>both</td><td>One class, two forms; the difference is one axis. <code>space</code> is explicit and checked, never inferred from shape</td></tr>
 <tr><td><a class="src" data-sym="class Gathered" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/resolve/gather.py#L17">Gathered</a></td><td>block</td><td>The output of the only function that touches both spaces</td></tr>
 <tr><td><a class="src" data-sym="class Observation" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/resolve/observation.py#L111">Observation</a></td><td>block</td><td>The block <code>ObsWindow</code> plus each schema layer's values, with categorical remapping already applied</td></tr>
-<tr><td><a class="src" data-sym="class Resolved" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/resolve/block.py#L214">Resolved</a></td><td>block, core</td><td>The streaming argmax over every observation, trimmed from the haloed window to the core</td></tr>
+<tr><td><a class="src" data-sym="class Resolved" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/resolve/block.py#L226">Resolved</a></td><td>block, core</td><td>The streaming argmax over every observation, trimmed from the haloed window to the core</td></tr>
 </tbody>
 </table>
 </div>

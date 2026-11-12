@@ -225,7 +225,7 @@ pixels.</td><td><a class="src" data-sym="def apply_filters" href="https://github
 silent default.</td><td><a class="src" data-sym="class Manifest(Strict)" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/manifest/models.py#L609">Manifest</a></td></tr>
 <tr><td><code>manifest/validate.py</code></td><td>Every static check that needs no data:
 instantiating each named plugin, resolving each role, confirming the reducer can deliver the
-band names promised.</td><td><a class="src" data-sym="def validate_static" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/manifest/validate.py#L229">validate_static</a></td></tr>
+band names promised.</td><td><a class="src" data-sym="def validate_static" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/manifest/validate.py#L230">validate_static</a></td></tr>
 <tr><td><code>index/</code></td><td>The GeoParquet granule index: schema, build, merge, query,
 freeze, and the resolution from an index row to the <code>GranuleRef</code> a worker
 carries.</td><td><a class="src" data-sym="def build_index" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/index/build.py#L112">build_index</a></td></tr>
@@ -256,7 +256,7 @@ KD-tree, or a product's own embedded lookup table adopted onto the run's lattice
 recorded module hash that guards the algorithm version.</td><td><a class="src" data-sym="def regrid_granule_tile" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/regrid/__init__.py#L287">regrid_granule_tile</a></td></tr>
 <tr><td><code>resolve/</code></td><td>The block read path, masks, the gather, scoring, and the
 streaming argmax that produces one epoch snapshot. The densest package in the
-tree.</td><td><a class="src" data-sym="def resolve_block" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/resolve/block.py#L508">resolve_block</a></td></tr>
+tree.</td><td><a class="src" data-sym="def resolve_block" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/resolve/block.py#L520">resolve_block</a></td></tr>
 <tr><td><code>reduce/</code></td><td>The schema-driven built-in reducer: vote, best, and the
 continuous aggregations, plus the derivation of which bands a schema
 delivers.</td><td><a class="src" data-sym="def reduce_stack" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/reduce/builtin.py#L39">reduce_stack</a></td></tr>
@@ -286,7 +286,7 @@ reduces to.</td><td><a class="src" data-sym="def exec_item" href="https://github
 <tr><td><code>executors/local.py</code></td><td>A spawn-context process pool over the work lists,
 the budget gate, and Finalize. <code>run_all</code> lives here and takes the stage runner as a
 parameter, so the stage order and Finalize are shared with every other
-executor.</td><td><a class="src" data-sym="def run_all" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/executors/local.py#L111">run_all</a></td></tr>
+executor.</td><td><a class="src" data-sym="def run_all" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/executors/local.py#L114">run_all</a></td></tr>
 <tr><td><code>executors/aws.py</code></td><td>The dispatch half of the cloud executor: a thread pool
 over <code>lambda:InvokeFunction</code>, writing the same outcome records. Imported only when
 <code>--executor aws</code> is asked for, so a local run never imports

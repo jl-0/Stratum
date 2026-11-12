@@ -33,7 +33,7 @@ from synthetic import (
 
 from stratum.cache import CacheRoot
 from stratum.classes import UNMAPPED, Remap
-from stratum.regrid import read_glt
+from stratum.regrid import read_glt, regrid_granule_tile
 from stratum.resolve import (
     CATEGORICAL_NODATA,
     NullAux,
@@ -54,6 +54,7 @@ from stratum.resolve import (
 )
 from stratum.types import (
     BlockRef,
+    EmbeddedGLT,
     Epoch,
     GridDef,
     ObsWindow,
@@ -781,3 +782,30 @@ def test_sensor_column_is_the_detector_column_the_glt_gathered(tmp_path: Path) -
     assert col.dtype == np.float32
     assert col[5, 3:11].tolist() == list(range(8))
     assert np.isnan(col[5, :3]).all() and np.isnan(col[0]).all()
+
+
+# ------------------------------------------------------------------- regrid_method: adopt
+def test_adopt_reaches_resolve_under_the_key_regrid_wrote(tmp_path: Path) -> None:
+    """Regrid keys an adopted GLT with max_distance null and the geolocation asset's checksum
+    (06 section 2); resolve must look it up under the same key or every item raises "regrid did
+    not run". The adopted table is the kdtree GLT itself, so the two runs resolve identically."""
+    obs = [replace(o, ref=replace(o.ref, checksums={"FAKE/DATA": f"sha512:{o.ref.granule_id}"}))
+           for o in two_overlapping()]
+    kd = build_plan(tmp_path / "kdtree", obs, scorer=NadirScorer())
+    assert "source_checksum" not in glt_key_for(kd, TILE, "A").inputs      # kdtree keys unmoved
+
+    cache = CacheRoot(tmp_path / "adopt")
+    plan = replace(kd, cache=cache, regrid_method="adopt")
+    for o in obs:
+        gid = o.ref.granule_id
+        table = read_glt(glt_key_for(kd, TILE, gid).path)
+        written = regrid_granule_tile(
+            cache, TILE, gid, lambda: pytest.fail("adopt reads no geolocation"),
+            max_distance=plan.max_distance, regrid_method="adopt", source_id=f"sha512:{gid}",
+            embedded=lambda table=table: EmbeddedGLT(table.astype(np.int32), TILE.transform,
+                                                     GRID.crs))
+        assert glt_key_for(plan, TILE, gid).hash == written.hash
+    adopted, built = resolve_tile(plan), resolve_tile(kd)
+    assert set(adopted) == set(built)
+    for name in built:
+        np.testing.assert_array_equal(adopted[name], built[name])

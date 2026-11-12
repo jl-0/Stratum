@@ -1032,6 +1032,16 @@ def plan_run(manifest_path: Path | str, out_dir: Path | str | None = None,
         del refs[gid]
     reports.append(FilterReport(f"provides an asset for every role read {needed}", len(lacking),
                                 None))
+    if partial:
+        # A dropped partial epoch takes its granules with it (09 section 5): the index query
+        # covers the whole time window, so they are selected, but no epoch will read them. A
+        # reported row, only when there is a partial epoch to explain it.
+        in_partial = [gid for gid, ref in refs.items()
+                      if any(e.contains(_utc(ref.datetime)) for e in partial)]
+        for gid in in_partial:
+            del refs[gid]
+        reports.append(FilterReport("falls in a whole epoch (partial epochs are dropped)",
+                                    len(in_partial), None))
     if not refs:
         raise PlanError("no granule survives selection: nothing to run (check aoi, time, "
                         "granule_filter and the roles' collections)")
