@@ -600,3 +600,65 @@ def test_an_ambiguous_403_still_means_absent_but_says_so_once(monkeypatch, caplo
         assert store.head("k1") is False
         assert store.head("k2") is False
     assert sum(1 for r in caplog.records if "403" in r.getMessage()) == 1
+
+
+# -------------------------------------------------------------------- mirror pulls in threads
+def test_two_threads_pulling_one_object_do_not_share_a_partial(monkeypatch, tmp_path):
+    """The viewer serves tiles from a thread pool, and two requests for one COG pull it at the
+    same moment. A temp name carrying only the pid is the SAME file for both, so the first
+    rename takes it away and the second fails - one of the two requests is a 500."""
+    import threading
+
+    ws = workspace(monkeypatch, tmp_path)
+    src = tmp_path / "bucket" / "stratum-test" / "products" / "r" / "a.tif"
+    src.parent.mkdir(parents=True)
+    src.write_bytes(b"cog" * 1000)
+    gate = threading.Barrier(2)
+    real = ws.store.client.download_file
+
+    def slow(bucket, key, dest):
+        real(bucket, key, dest)
+        gate.wait(timeout=10)          # both downloads are complete before either renames
+
+    monkeypatch.setattr(ws.store.client, "download_file", slow)
+    dest = ws.path / "products" / "r" / "a.tif"
+    errors: list[BaseException] = []
+
+    def pull():
+        try:
+            ws.store.get("products/r/a.tif", dest)
+        except BaseException as e:      # noqa: BLE001 - the test reports whatever it was
+            errors.append(e)
+
+    threads = [threading.Thread(target=pull) for _ in range(2)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert errors == []
+    assert dest.read_bytes() == b"cog" * 1000
+    assert [p.name for p in dest.parent.iterdir()] == ["a.tif"], "no partial may be left behind"
+
+
+def test_a_mirror_pull_in_progress_is_never_evicted(monkeypatch, tmp_path):
+    """The partial of a mirror pull must be recognised as in flight by the same test that
+    protects an asset download; under its old name (`.{name}.{pid}.part`) it was not, so a
+    concurrent `ensure_free` could delete a COG while it was still arriving."""
+    from stratum.storage import ensure_free
+
+    ws = workspace(monkeypatch, tmp_path)
+    src = tmp_path / "bucket" / "stratum-test" / "products" / "r" / "a.tif"
+    src.parent.mkdir(parents=True)
+    src.write_bytes(b"cog" * 1000)
+    real = ws.store.client.download_file
+    seen: list[bool] = []
+
+    def evicting(bucket, key, dest):
+        real(bucket, key, dest)
+        _free(monkeypatch, 0)
+        ensure_free(0, roots=[ws.path], reserve=10_000, grace=0.0)
+        seen.append(Path(dest).exists())
+
+    monkeypatch.setattr(ws.store.client, "download_file", evicting)
+    ws.store.get("products/r/a.tif", ws.path / "products" / "r" / "a.tif")
+    assert seen == [True], "the partial was evicted mid-download"

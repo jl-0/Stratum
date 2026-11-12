@@ -402,7 +402,10 @@ class ObjectStore:
         a complete mirror entry."""
         from botocore.exceptions import ClientError
         dest.parent.mkdir(parents=True, exist_ok=True)
-        tmp = dest.with_name(f".{dest.name}.{os.getpid()}.part")
+        # `partial_path`, like every other download: per thread, so two viewer requests for one
+        # COG do not write and rename the same file, and recognisably in flight, so eviction
+        # leaves it alone until it lands.
+        tmp = partial_path(dest)
         try:
             self.client.download_file(self.bucket, key, str(tmp))
             os.replace(tmp, dest)
