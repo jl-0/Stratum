@@ -151,6 +151,10 @@ def test_provenance_pins_the_code_that_ran(e2e: tuple[Path, PlanResult], monkeyp
     assert code["stratum_commit"] == commit
     assert len(commit.removesuffix("-dirty")) == 40
     assert "image_digest" not in code, "a local run executes no image"
+    # the content hashes are the plan's own (06 section 3 rule 3), not a second computation
+    planned = json.loads((result.run_dir / "plan.json").read_text())["context"]["code"]
+    assert planned["resolve"] and planned["reduce"]
+    assert (code["resolve_code"], code["reduce_code"]) == (planned["resolve"], planned["reduce"])
 
     # outside a repository there is no commit to claim
     stray = tmp_path / "pkg" / "module.py"
