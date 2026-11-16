@@ -10,6 +10,7 @@ import pandas as pd
 import pyarrow.parquet as pq
 import pytest
 import shapely
+from stratum_emit.readers import LOCAL_PATTERNS
 
 from stratum.access import LocalSource
 from stratum.access.sources import granule_id_from, split_pattern, version_token
@@ -31,7 +32,6 @@ from stratum.index import (
     write_index,
 )
 from stratum.types import GranuleRecord, GranuleRef
-from stratum_emit.readers import LOCAL_PATTERNS
 
 MIN = "EMITL2BMIN"
 PATTERNS = {MIN: LOCAL_PATTERNS[MIN]}
