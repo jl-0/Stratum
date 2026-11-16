@@ -125,6 +125,7 @@ def schema_to_doc(schema: SnapshotSchema) -> dict[str, Any]:
                           "params": dict(layer.aggregate.params)},
             "classes": class_table_to_doc(layer.classes) if layer.classes is not None else None,
             "lumping": layer.lumping,
+            **({"units": layer.units} if layer.units is not None else {}),
         } for layer in schema.layers],
     }
 
@@ -139,6 +140,7 @@ def schema_from_doc(doc: Mapping[str, Any]) -> SnapshotSchema:
         bands=tuple(d["bands"]) if d.get("bands") is not None else None,
         classes=class_table_from_doc(d["classes"]) if d.get("classes") is not None else None,
         lumping=d.get("lumping"),
+        units=d.get("units"),
     ) for d in doc["layers"]]
     schema = SnapshotSchema(name=doc["name"], layers=tuple(layers),
                             extends=tuple(doc.get("extends", ())))

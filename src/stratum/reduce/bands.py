@@ -290,7 +290,7 @@ def delivered_bands(schema: SnapshotSchema, *,
         out.append(BandSpec(layer.name, dtype, f"{layer.name}: {what}",
                             nodata=float("nan"), bands=nb,
                             units=ACQUIRED_UNITS if layer.source == "acquired"
-                            else "unitless"))
+                            else layer.units or "unitless"))
         out.append(BandSpec(f"{layer.name}_n", COUNT_DTYPE,
                             f"{layer.name}: epochs aggregated", units="count"))
         if params.spread:

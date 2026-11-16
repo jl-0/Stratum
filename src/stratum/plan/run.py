@@ -696,7 +696,8 @@ def inspect_granules(m: Manifest, refs: Mapping[str, GranuleRef], readers: Mappi
                 band_counts[layer.name] = 1
                 # categorical: product ids of another layer's enumeration, filled in below
                 layers.append(layer if layer.kind == "categorical"
-                              else dataclasses.replace(layer, dtype=spec_out.dtype))
+                              else dataclasses.replace(layer, dtype=spec_out.dtype,
+                                                       units=spec_out.units))
                 continue
             src_role = role_of(m, layer.source)
             spec = specs[src_role]

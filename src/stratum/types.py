@@ -585,6 +585,10 @@ class LayerSpec:
     # (`Enumeration.fingerprint()`), so a change to the LUMPING that leaves ids and names alone
     # still moves layers_hash (06 section 3 rule 1, 13 section 6). None for continuous layers.
     lumping: str | None = None
+    # What a `scorer.<output>` layer's values are, from the scorer's BandSpec. Carried to the
+    # delivered band so publish can tell an identifier ("class", "code") from a measurement and
+    # decimate it. Not in identity(): it changes no pixel, only how overviews are made.
+    units: str | None = None
 
     def identity(self) -> dict[str, Any]:
         """What enters layers_hash: everything except how it aggregates (13 section 5)."""

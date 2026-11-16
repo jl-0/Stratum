@@ -739,3 +739,24 @@ def test_product_class_table_still_collapses_when_every_layer_shares_one():
     assert product_class_table(schema) is one
     # ... and then publish writes the product-wide sidecar, not per-layer ones
     assert band_class_tables(schema)["a"] is one
+
+
+def test_a_scorer_class_output_keeps_its_units_and_decimates() -> None:
+    """A `scorer.<output>` layer delivered as a continuous layer keeps the scorer's units, so a
+    float band of class ids (`mode_1`, units "class") decimates in overviews instead of being
+    averaged into a class that was never there. Survives the plan.json round trip."""
+    from stratum.plan.document import schema_from_doc, schema_to_doc
+    from stratum.publish.cogs import decimates
+    from stratum.types import Aggregation, LayerSpec, SnapshotSchema
+
+    def one(units: str | None) -> SnapshotSchema:
+        return SnapshotSchema(name="s", layers=(LayerSpec(
+            name="mode_1", kind="continuous", source="scorer.mode_1",
+            aggregate=Aggregation("best"), dtype="float32", units=units),))
+
+    plain = next(b for b in delivered_bands(one(None)) if b.name == "mode_1")
+    assert plain.units == "unitless" and not decimates(plain)
+    again = schema_from_doc(schema_to_doc(one("class")))
+    band = next(b for b in delivered_bands(again) if b.name == "mode_1")
+    assert band.units == "class" and decimates(band)
+    assert one("class").layers_hash == one(None).layers_hash    # no snapshot key moves
