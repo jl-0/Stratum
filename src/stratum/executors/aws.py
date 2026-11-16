@@ -42,8 +42,10 @@ READ_TIMEOUT = 960
 #: makes itself; botocore still retries nothing.
 THROTTLE_CODES = frozenset({"TooManyRequestsException"})
 #: Backoff between throttled attempts: doubling from 1 s, capped. And how long one item keeps
-#: trying - a full Lambda timeout, by which every invocation that was in flight has ended, so a
-#: throttle that outlasts it is not this run's own excess and is reported as a failure.
+#: trying before it is reported as a failure. The retry rides out a brief throttle - a burst
+#: limit, another consumer of the account's concurrency - and NOT a pool wider than the
+#: reservation: there a thread whose invocation returns re-takes the slot with its next item and
+#: the excess threads starve to this deadline. `run_stage` caps the pool so that cannot happen.
 THROTTLE_BACKOFF_CAP = 30.0
 THROTTLE_DEADLINE = 900.0
 
@@ -72,6 +74,17 @@ def concurrency(workers: int | None = None) -> int:
     return max(1, int(os.environ.get(CONCURRENCY_ENV) or DEFAULT_CONCURRENCY))
 
 
+def reserved_concurrency(client: Any, function: str) -> int | None:
+    """The function's reserved concurrency, or None when it has none or it cannot be read
+    (permission to read it is not required to run)."""
+    try:
+        reserved = client.get_function_concurrency(FunctionName=function).get(
+            "ReservedConcurrentExecutions")
+    except Exception:  # noqa: BLE001
+        return None
+    return int(reserved) if reserved else None
+
+
 def _client(client: Any | None = None) -> Any:
     if client is not None:
         return client
@@ -89,10 +102,9 @@ def _is_throttle(e: Exception) -> bool:
 
 
 def _invoke_unthrottled(client: Any, **kwargs: Any) -> dict[str, Any]:
-    """`client.invoke`, waiting out a throttle. Dispatching more invocations than the function's
-    reserved concurrency is ordinary - `--workers` and the reservation are set in different
-    places - and without this the excess failed the stage outright, because the client is built
-    with no retries. Any other error is raised at once, as before."""
+    """`client.invoke`, waiting out a throttle: the invocation never started, and the client is
+    built with no retries, so without this one 429 failed the stage outright. Any other error
+    is raised at once, as before."""
     waited, delay = 0.0, 1.0
     while True:
         try:
@@ -148,7 +160,11 @@ def run_stage(run_dir: Path | str, stage: str, workers: int | None = None, *,
     base = {"root": ws.uri, "run_id": run.run_id, "stage": stage, "plan": plan_digest(run_dir)}
     results: list[dict[str, Any]] = []
     if items:
-        with (ThreadPoolExecutor(max_workers=min(concurrency(workers), len(items))) as pool,
+        # never wider than the function will run: the excess does not queue, it starves (see
+        # THROTTLE_DEADLINE) and its items fail
+        width = min(concurrency(workers), reserved_concurrency(cli, name) or len(items),
+                    len(items))
+        with (ThreadPoolExecutor(max_workers=width) as pool,
               console.progress(stage, len(items)) as advance):
             futures = {pool.submit(invoke, cli, name, {**base, "index": i}): i
                        for i in range(len(items))}
@@ -175,4 +191,4 @@ def run_stage(run_dir: Path | str, stage: str, workers: int | None = None, *,
 
 
 __all__ = ["CONCURRENCY_ENV", "DEFAULT_CONCURRENCY", "FUNCTION_ENV", "AwsExecutorError",
-           "concurrency", "function_name", "invoke", "run_stage"]
+           "concurrency", "function_name", "invoke", "reserved_concurrency", "run_stage"]

@@ -318,6 +318,44 @@ def test_only_a_throttle_is_retried_and_not_forever(monkeypatch) -> None:
     assert max(naps) == aws.THROTTLE_BACKOFF_CAP
 
 
+def test_the_pool_is_capped_at_the_reserved_concurrency(s3_run) -> None:
+    """A pool wider than the reservation does not merely waste calls: a thread whose invocation
+    returns re-takes the slot it freed with its next item, so the excess threads poll a full
+    function for the whole throttle deadline and their items FAIL, 15 minutes late. The
+    dispatcher therefore never offers more than the function will run."""
+    import threading
+    import time
+
+    class Reserved:
+        def __init__(self, reserved: int) -> None:
+            self.reserved, self.lock = reserved, threading.Lock()
+            self.inflight = self.peak = self.throttles = 0
+
+        def get_function_concurrency(self, FunctionName: str) -> dict[str, Any]:
+            return {"ReservedConcurrentExecutions": self.reserved}
+
+        def invoke(self, *, FunctionName: str, InvocationType: str,
+                   Payload: bytes) -> dict[str, Any]:
+            event = json.loads(Payload)
+            with self.lock:
+                if self.inflight >= self.reserved:
+                    self.throttles += 1
+                    raise _Throttled()
+                self.inflight += 1
+                self.peak = max(self.peak, self.inflight)
+            time.sleep(0.05)
+            with self.lock:
+                self.inflight -= 1
+            return {"Payload": _Body(json.dumps({"index": event["index"], "stage": event["stage"],
+                                                 "ok": True}).encode())}
+
+    fake = Reserved(1)
+    results = run_stage(s3_run.run_dir, "regrid", workers=8, function="fn", client=fake)
+    assert len(results) > 1 and all(r["ok"] for r in results)
+    assert fake.peak == 1 and fake.throttles == 0
+    clear_cache()
+
+
 def test_the_image_cmd_names_a_real_handler() -> None:
     """The Dockerfile's CMD is the only place the handler is named as a string, so a rename here
     breaks the deployment and nothing else. One import is enough to catch it."""

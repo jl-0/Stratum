@@ -43,8 +43,9 @@ Consequences worth stating:
   and a Lambda invocation both reduce to it, which is what keeps the three paths from diverging.
 - **A worker runs the code the plan was made under, or refuses.** The keys carry the planner's
   code identity so every worker computes the planner's keys ([06 §3 rule 3](06-caching.md)).
-  Before a resolve or reduce item probes the cache, the worker compares its own plugin versions
-  and `stratum.resolve` / `stratum.reduce` hashes with `plan.json` and raises on any difference
+  Before a resolve or reduce item probes the cache, and before a publish item writes, the worker
+  compares its own plugin versions and framework hashes (`resolve_code`, `reduce_code`) with
+  `plan.json` and raises on any difference
   (`executors.worker.check_code`), as a regrid item already does for `regrid_algo_version`. The
   case this exists for is `--executor aws` against an image built before a plugin edit: without
   the check the old code's output lands in the shared cache under the new code's keys, with no
@@ -114,10 +115,10 @@ executors; only the dispatch differs.
 | Unit of work | An invocation carrying `{root, run_id, stage, index, plan}` — five scalars, no geometry, well under the 256 KiB of §3 |
 | Worker | `stratum/executors/awslambda.py`: load the credential, mirror the run directory if this container has not seen it **or holds another plan for it**, `exec_item` |
 | Plan identity | `plan` is the sha256 of the dispatcher's `plan.json` (`plan_digest`). A `run_id` is label + date + manifest hash and the index is not in the hash ([09 §5](09-run-manifest.md)), so a same-day re-plan over a rebuilt index reuses the id for a different work list. A warm container whose copy has another digest drops its mirrored run directory and its loaded plan and pulls again; if the bucket's plan is still not the dispatcher's, the item is refused. Without it the container ran item *i* of the old list and reported `ok` |
-| Pool | `--workers`, else `$STRATUM_LAMBDA_CONCURRENCY`, else 32. The ceiling that binds is the function's reserved concurrency, which is a deployment setting |
+| Pool | `--workers`, else `$STRATUM_LAMBDA_CONCURRENCY`, else 32, **capped at the function's reserved concurrency** (`GetFunctionConcurrency`, read once per stage). A wider pool does not queue: a thread whose invocation returns re-takes the freed slot with its next item, so the excess threads are throttled until their deadline and their items fail |
 | Outcomes | Identical records to `local`, including a handler exception, so `stratum status --failed` parses one format |
 | Failure | All-or-nothing, as `local`. §4's tolerated percentage is still a later slice |
-| Retry | None in the client (`max_attempts: 0`): an item is idempotent, so a retry is safe but never automatic, and the outcome record decides. **One exception: a throttle.** `TooManyRequestsException` means the invocation never started — the pool is wider than the function's reserved concurrency — so the dispatcher re-sends it with backoff (1 s doubling to 30 s) for up to 900 s, one full Lambda timeout, and only then records a failure. Before this a single throttle failed the stage |
+| Retry | None in the client (`max_attempts: 0`): an item is idempotent, so a retry is safe but never automatic, and the outcome record decides. **One exception: a throttle.** `TooManyRequestsException` means the invocation never started, so the dispatcher re-sends it with backoff (1 s doubling to 30 s) for up to 900 s, one full Lambda timeout, and only then records a failure. This rides out a brief throttle (a burst limit, another consumer of account concurrency); it does not make an over-wide pool safe, which is why the pool is capped. A function with **no** reserved concurrency shares the account pool and is not capped |
 | Refusal | A **local storage root** is refused by name before the first invocation. A Lambda cannot read a laptop's filesystem |
 | Finalize | Mirrors the products back before writing the STAC collection — the worker that published them was elsewhere |
 
@@ -145,7 +146,7 @@ dispatched (`stratum/executors/preflight.py`). `stratum run` refuses on any `fai
 | `aws` | credentials | `sts:GetCallerIdentity` fails — an expired session token is the common case, and it used to surface as the first upload failing after a full plan |
 | `aws` | worker function | `$STRATUM_LAMBDA_FUNCTION` is unset or `GetFunctionConfiguration` fails |
 | `aws` | timeout | the longest estimated item × Lambda's slowdown exceeds the function's timeout; warns at ×2 |
-| `aws` | concurrency | never; warns when `--workers` exceeds reserved concurrency |
+| `aws` | concurrency | never; warns when `--workers` exceeds reserved concurrency, which the dispatcher then caps the pool at |
 | `aws` | cost | never; the estimate re-priced at the function's real memory, and wall time at the real width |
 
 What preflight cannot see: **which image the function runs.** It reports the function's

@@ -9,7 +9,7 @@ and run after the plan, against its estimate, before any work item is dispatched
             can hold a working set; the wall time at this machine's core count
     aws     the credentials are live now (an expired session token is the commonest failure);
             the worker function exists, and its timeout clears the longest estimated item; the
-            in-flight count fits its reserved concurrency; the dollar estimate at its real memory
+            in-flight count against its reserved concurrency (the dispatcher caps at it); the dollar estimate at its real memory
 
 A `fail` stops `stratum run` before dispatch; a `warn` is printed and the run proceeds.
 """
@@ -131,7 +131,12 @@ def _local(doc: Mapping[str, Any], rom: Mapping[str, Any], workers: int | None) 
 # -------------------------------------------------------------------------------------------- aws
 def _aws(doc: Mapping[str, Any], rom: Mapping[str, Any], workers: int | None,
          lambda_client: Any | None, sts_client: Any | None) -> list[Check]:
-    from stratum.executors.aws import AwsExecutorError, concurrency, function_name
+    from stratum.executors.aws import (
+        AwsExecutorError,
+        concurrency,
+        function_name,
+        reserved_concurrency,
+    )
 
     checks: list[Check] = []
     try:
@@ -166,18 +171,14 @@ def _aws(doc: Mapping[str, Any], rom: Mapping[str, Any], workers: int | None,
     checks.append(Check("timeout", level,
                         f"longest estimated item ~{longest:.0f} s on Lambda "
                         f"(x{ROM_HIGH:g}: {longest * ROM_HIGH:.0f} s) against {timeout} s"))
-    try:
-        reserved = lam.get_function_concurrency(FunctionName=fn).get(
-            "ReservedConcurrentExecutions")
-    except Exception:  # noqa: BLE001 - permission to read it is not required to run
-        reserved = None
+    reserved = reserved_concurrency(lam, fn)
     inflight = concurrency(workers)
     if reserved is not None:
         checks.append(Check("concurrency", "ok" if inflight <= reserved else "warn",
                             f"{inflight} in flight against {reserved} reserved"
                             + ("" if inflight <= reserved else
-                               "; the excess is throttled and the dispatcher retries it "
-                               "with backoff, so it buys no speed")))
+                               f"; the dispatcher caps its pool at {reserved}, because "
+                               "invocations past the reservation starve and fail")))
     h = rom["cpu_hours"]
     cost = lambda_cost(h, sum(rom["items"].values()), memory or 4096)
     usd = cost["usd"]
