@@ -296,6 +296,7 @@ def test_a_throttled_invocation_is_retried_not_failed(monkeypatch) -> None:
 
     naps: list[float] = []
     monkeypatch.setattr(aws.time, "sleep", naps.append)
+    monkeypatch.setattr(aws.random, "uniform", lambda lo, hi: hi)     # the un-jittered schedule
 
     class Busy:
         calls = 0
@@ -317,6 +318,7 @@ def test_only_a_throttle_is_retried_and_not_forever(monkeypatch) -> None:
 
     naps: list[float] = []
     monkeypatch.setattr(aws.time, "sleep", naps.append)
+    monkeypatch.setattr(aws.random, "uniform", lambda lo, hi: hi)     # the un-jittered schedule
 
     class Denied:
         calls = 0
@@ -337,6 +339,84 @@ def test_only_a_throttle_is_retried_and_not_forever(monkeypatch) -> None:
         invoke(Saturated(), "fn", {"stage": "regrid", "index": 0})
     assert aws.THROTTLE_DEADLINE <= sum(naps) < aws.THROTTLE_DEADLINE + aws.THROTTLE_BACKOFF_CAP
     assert max(naps) == aws.THROTTLE_BACKOFF_CAP
+
+
+def test_throttle_backoff_is_jittered(monkeypatch) -> None:
+    """Threads throttled together used to wake together - 1, 2, 4 ... 30 s after the same
+    instant - and collide again on every attempt. Each wait is now drawn from the upper half of
+    its step, so two threads on the same schedule do not share it."""
+    from stratum.executors import aws
+
+    class Saturated:
+        def invoke(self, **kwargs: Any) -> dict[str, Any]:
+            raise _Throttled()
+
+    def schedule() -> list[float]:
+        naps: list[float] = []
+        monkeypatch.setattr(aws.time, "sleep", naps.append)
+        with pytest.raises(_Throttled):
+            invoke(Saturated(), "fn", {"stage": "regrid", "index": 0})
+        return naps
+
+    first, second = schedule(), schedule()
+    assert first != second, "two throttled threads must not share a schedule"
+    steps = [min(2.0 ** i, aws.THROTTLE_BACKOFF_CAP) for i in range(len(first))]
+    assert all(step / 2 <= nap <= step for nap, step in zip(first, steps, strict=True))
+    assert aws.THROTTLE_DEADLINE <= sum(first) < aws.THROTTLE_DEADLINE + aws.THROTTLE_BACKOFF_CAP
+
+
+class _Unreserved:
+    """A function with no reserved concurrency, in an account whose unreserved pool is `pool`
+    (None: the account settings cannot be read either)."""
+
+    def __init__(self, pool: int | None) -> None:
+        import threading
+
+        self.pool, self.lock = pool, threading.Lock()
+        self.inflight = self.peak = 0
+
+    def get_function_concurrency(self, FunctionName: str) -> dict[str, Any]:
+        return {}
+
+    def get_account_settings(self) -> dict[str, Any]:
+        if self.pool is None:
+            raise _Throttled("AccessDeniedException")
+        return {"AccountLimit": {"ConcurrentExecutions": 1000,
+                                 "UnreservedConcurrentExecutions": self.pool}}
+
+    def invoke(self, *, FunctionName: str, InvocationType: str, Payload: bytes) -> dict[str, Any]:
+        import time
+
+        event = json.loads(Payload)
+        with self.lock:
+            self.inflight += 1
+            self.peak = max(self.peak, self.inflight)
+        time.sleep(0.05)
+        with self.lock:
+            self.inflight -= 1
+        return {"Payload": _Body(json.dumps({"index": event["index"], "stage": event["stage"],
+                                             "ok": True}).encode())}
+
+
+def test_an_unreserved_function_is_capped_at_the_account_pool(s3_run, caplog) -> None:
+    """A function with no reservation draws on the account's unreserved concurrency, and a pool
+    wider than THAT starves exactly as one wider than a reservation does. It was uncapped."""
+    fake = _Unreserved(pool=1)
+    with caplog.at_level("WARNING", logger="stratum.executors.aws"):
+        results = run_stage(s3_run.run_dir, "regrid", workers=8, function="fn", client=fake)
+    assert len(results) > 1 and all(r["ok"] for r in results)
+    assert fake.peak == 1
+    assert "no reserved concurrency" in caplog.text and "shares" in caplog.text
+    clear_cache()
+
+
+def test_an_unreadable_limit_leaves_workers_alone_and_says_so(s3_run, caplog) -> None:
+    fake = _Unreserved(pool=None)
+    with caplog.at_level("WARNING", logger="stratum.executors.aws"):
+        results = run_stage(s3_run.run_dir, "regrid", workers=2, function="fn", client=fake)
+    assert all(r["ok"] for r in results) and fake.peak == 2
+    assert "not capped" in caplog.text
+    clear_cache()
 
 
 def test_the_pool_is_capped_at_the_reserved_concurrency(s3_run) -> None:

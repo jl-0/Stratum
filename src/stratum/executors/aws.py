@@ -19,7 +19,9 @@ Two properties make this safe to run at width:
 from __future__ import annotations
 
 import json
+import logging
 import os
+import random
 import time
 from collections.abc import Sequence
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -29,6 +31,8 @@ from typing import Any
 from stratum import console
 from stratum.executors.worker import load_cached
 from stratum.plan.document import plan_digest, read_work
+
+log = logging.getLogger(__name__)
 
 FUNCTION_ENV = "STRATUM_LAMBDA_FUNCTION"
 CONCURRENCY_ENV = "STRATUM_LAMBDA_CONCURRENCY"
@@ -41,7 +45,8 @@ READ_TIMEOUT = 960
 #: never STARTED, so sending it again is not a duplicate and is the one retry the dispatcher
 #: makes itself; botocore still retries nothing.
 THROTTLE_CODES = frozenset({"TooManyRequestsException"})
-#: Backoff between throttled attempts: doubling from 1 s, capped. And how long one item keeps
+#: Backoff between throttled attempts: doubling from 1 s, capped, each wait drawn from the
+#: upper half of its step so threads throttled together do not retry together. And how long one item keeps
 #: trying before it is reported as a failure. The retry rides out a brief throttle - a burst
 #: limit, another consumer of the account's concurrency - and NOT a pool wider than the
 #: reservation: there a thread whose invocation returns re-takes the slot with its next item and
@@ -85,6 +90,33 @@ def reserved_concurrency(client: Any, function: str) -> int | None:
     return int(reserved) if reserved else None
 
 
+def pool_ceiling(client: Any, function: str) -> int | None:
+    """The most invocations of `function` that can be in flight, as far as `client` can read
+    it: its reserved concurrency; without one, the account's unreserved concurrency, which the
+    function shares with every other unreserved function - an upper bound, not a guarantee, so
+    a throttle is still possible and the jittered retry is what absorbs it. None, with a
+    warning, when neither can be read: the pool is then whatever the user asked for."""
+    reserved = reserved_concurrency(client, function)
+    if reserved is not None:
+        return reserved
+    try:
+        unreserved = int(client.get_account_settings()["AccountLimit"]
+                         ["UnreservedConcurrentExecutions"])
+    except Exception:  # noqa: BLE001 - permission to read it is not required to run
+        unreserved = 0
+    if unreserved > 0:
+        log.warning("%s has no reserved concurrency that can be read; it shares the account's "
+                    "%d unreserved executions with every other function, so the pool is capped "
+                    "there and may still be throttled. Reserve concurrency for a ceiling the "
+                    "run can count on", function, unreserved)
+        return unreserved
+    log.warning("%s has no reserved concurrency that can be read, and neither can the "
+                "account's; the pool is not capped. If --workers exceeds what the function "
+                "can run, the excess is throttled until it fails after %.0f s", function,
+                THROTTLE_DEADLINE)
+    return None
+
+
 def _client(client: Any | None = None) -> Any:
     if client is not None:
         return client
@@ -112,8 +144,11 @@ def _invoke_unthrottled(client: Any, **kwargs: Any) -> dict[str, Any]:
         except Exception as e:
             if not _is_throttle(e) or waited >= THROTTLE_DEADLINE:
                 raise
-        time.sleep(delay)
-        waited += delay
+        # jittered: threads throttled at the same instant would otherwise wake at the same
+        # instants, 1, 2, 4 ... s later, and collide on every attempt
+        nap = delay * random.uniform(0.5, 1.0)
+        time.sleep(nap)
+        waited += nap
         delay = min(delay * 2, THROTTLE_BACKOFF_CAP)
 
 
@@ -162,8 +197,7 @@ def run_stage(run_dir: Path | str, stage: str, workers: int | None = None, *,
     if items:
         # never wider than the function will run: the excess does not queue, it starves (see
         # THROTTLE_DEADLINE) and its items fail
-        width = min(concurrency(workers), reserved_concurrency(cli, name) or len(items),
-                    len(items))
+        width = min(concurrency(workers), pool_ceiling(cli, name) or len(items), len(items))
         with (ThreadPoolExecutor(max_workers=width) as pool,
               console.progress(stage, len(items)) as advance):
             futures = {pool.submit(invoke, cli, name, {**base, "index": i}): i
@@ -191,4 +225,5 @@ def run_stage(run_dir: Path | str, stage: str, workers: int | None = None, *,
 
 
 __all__ = ["CONCURRENCY_ENV", "DEFAULT_CONCURRENCY", "FUNCTION_ENV", "AwsExecutorError",
-           "concurrency", "function_name", "invoke", "reserved_concurrency", "run_stage"]
+           "concurrency", "function_name", "invoke", "pool_ceiling", "reserved_concurrency",
+           "run_stage"]

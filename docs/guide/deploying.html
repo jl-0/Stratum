@@ -589,7 +589,9 @@ execution environments between invocations, so a warm one skips the import cost.
 
 <p>Asking for more workers than the reservation allows does not go faster; the dispatcher
 caps its pool at the reservation, because invocations past it are throttled until they fail. Raise
-the reservation first.</p>
+the reservation first. A function with no reservation is capped at the account's unreserved
+concurrency instead, with a warning: that pool is shared, so it is a bound and not a
+guarantee.</p>
 
 <pre><code><span class="c"># live concurrency, without opening the console</span>
 aws cloudwatch get-metric-statistics --namespace AWS/Lambda \
