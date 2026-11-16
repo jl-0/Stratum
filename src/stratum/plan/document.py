@@ -28,6 +28,7 @@ import numpy as np
 import pyarrow as pa
 
 from stratum.access import AssetStore, asset_cache_for
+from stratum.access.store import asset_sizes
 from stratum.ancillary import AuxSource
 from stratum.cache import CacheRoot
 from stratum.classes import Remap
@@ -258,11 +259,15 @@ def context_from_doc(doc: Mapping[str, Any], root: Path | Workspace) -> PlanCont
     cache is always node-local - granule bytes are staged, never stored - so it hangs off the
     workspace's local path and is not mirrored."""
     ws = root if isinstance(root, Workspace) else local_workspace(root)
+    granules = {gid: granule_from_doc(g) for gid, g in doc["granules"].items()}
+    store = AssetStore(asset_cache_for(ws.path))
+    # the catalogue's file sizes, for a response that does not state its own (12 section 4)
+    store.sizes.update(asset_sizes(granules.values()))
     return PlanContext(
         grid=grid_from_doc(doc["grid"]),
         cache=CacheRoot(ws),
-        store=AssetStore(asset_cache_for(ws.path)),
-        granules={gid: granule_from_doc(g) for gid, g in doc["granules"].items()},
+        store=store,
+        granules=granules,
         roles={name: RoleBinding(**r) for name, r in doc["roles"].items()},
         aliases={name: AliasBinding(**a) for name, a in doc["aliases"].items()},
         geolocation_role=doc["geolocation_role"],

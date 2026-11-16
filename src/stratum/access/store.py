@@ -20,6 +20,7 @@ leak the credential (12 section 4).
 from __future__ import annotations
 
 import contextlib
+import fcntl
 import hashlib
 import io
 import os
@@ -35,7 +36,13 @@ from typing import Any
 from urllib.parse import unquote, urlparse
 from urllib.request import url2pathname
 
-from stratum.storage import ensure_free, is_live_partial, partial_path, register_evictable
+from stratum.storage import (
+    PARTIAL_MARK,
+    ensure_free,
+    is_live_partial,
+    partial_path,
+    register_evictable,
+)
 from stratum.types import AssetHandle, Credentials
 
 REMOTE_SCHEMES = ("s3", "https")
@@ -73,6 +80,11 @@ DEFAULT_RESERVE_BYTES = 512 * 1024 * 1024
 #: An entry younger than this is never evicted, so a file another thread just opened is not
 #: pulled out from under it. `prefetch` is the only multi-threaded reader and it only writes.
 EVICT_GRACE_SECONDS = 60.0
+#: How long a download that met a full scratch (`ScratchFull`) waits before trying again. What
+#: holds the space is other downloads in flight or files inside their grace window, so a wait
+#: shorter than the window retries into the same full volume: the ordinary 1+2+4 s backoff
+#: was spent before anything could have become evictable.
+SCRATCH_FULL_WAIT = EVICT_GRACE_SECONDS + 5.0
 #: Block size of a range read (12 section 4). Measured on an EMIT L2B MIN granule
 #: (2026-10-06): 64 KiB reads the class table in 7 requests and ~370 KB; 8 MiB in 4-5 requests
 #: and ~25 MB at the same wall time, because the cost is round trips, not bytes.
@@ -162,6 +174,52 @@ def ensure_room(cache: Path, need: int = DEFAULT_RESERVE_BYTES, *, budget: int |
     return freed
 
 
+def claimed_bytes(cache: Path, *, exclude: Path | None = None) -> int:
+    """Bytes that downloads in flight under `cache` have claimed and not yet written.
+
+    A download sizes its partial to the whole asset before the first byte arrives
+    (`AssetStore._claim`). That is a sparse file, so the volume's free space does not move, but
+    the claim is on disk for every other worker to read: declared size less allocated blocks.
+    Subtracting it is what stops several workers each passing the free-space check against the
+    same room."""
+    total = 0
+    for path in cache.rglob(f"*{PARTIAL_MARK}*"):
+        if path == exclude or not is_live_partial(path):
+            continue
+        try:
+            st = path.stat()
+        except OSError:
+            continue
+        total += max(0, st.st_size - st.st_blocks * 512)
+    return total
+
+
+@contextlib.contextmanager
+def _claims_locked(cache: Path) -> Any:
+    """Hold the cache's claim lock: an `flock` on the directory itself, so it serialises the
+    check-and-claim across threads and processes and leaves no lock file to evict."""
+    fd = os.open(cache, os.O_RDONLY)
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX)
+        yield
+    finally:
+        os.close(fd)                              # closing releases the lock
+
+
+def asset_sizes(granules: Iterable[Any]) -> dict[str, int]:
+    """uri -> size in bytes for every asset whose size the index holds (`size:<asset>` in a
+    granule's attributes: CMR's `SizeInBytes`, 12 section 5). What `AssetStore.sizes` is filled
+    from, for a response that does not say how big it is."""
+    out: dict[str, int] = {}
+    for ref in granules:
+        for name, uri in ref.assets.items():
+            raw = ref.attributes.get(f"size:{name}")
+            with contextlib.suppress(TypeError, ValueError):
+                if raw is not None and int(raw) > 0:
+                    out[str(uri)] = int(raw)
+    return out
+
+
 class AssetStoreError(RuntimeError):
     """Base class for asset staging failures. Messages carry the URL and never a credential."""
 
@@ -195,7 +253,9 @@ class ScratchFull(AssetFetchError):
     done what it can. Raised before the first byte is written, in place of an `ENOSPC` part-way
     through - which reads as a broken disk, leaves the failure to whichever write happens to hit
     it, and may be some other thread's. Transient: what holds the space is other downloads in
-    flight or files inside their grace window, and both pass."""
+    flight or files inside their grace window, and both pass - so the retry waits
+    `SCRATCH_FULL_WAIT`, longer than the window, and evicts again. `free` is net of what other
+    downloads have claimed (`claimed_bytes`)."""
 
     def __init__(self, uri: str, size: int, free: int) -> None:
         self.uri, self.status, self.size, self.free = uri, None, size, free
@@ -549,6 +609,7 @@ class AssetStore:
         backoff: float = DEFAULT_BACKOFF,
         reserve: int = DEFAULT_RESERVE_BYTES,
         trusted_hosts: Sequence[str] = TRUSTED_HOSTS,
+        scratch_wait: float | None = None,
     ) -> None:
         if asset_cache is None:
             env = os.environ.get(ASSET_CACHE_ENV)
@@ -565,6 +626,10 @@ class AssetStore:
         self.retries = max(0, int(retries))
         self.backoff = float(backoff)
         self.reserve = max(0, int(reserve))
+        self.scratch_wait = SCRATCH_FULL_WAIT if scratch_wait is None else float(scratch_wait)
+        #: uri -> size in bytes the index holds (`asset_sizes`), used when a response carries no
+        #: `Content-Length`. Filled by whoever builds the store from a plan's granules.
+        self.sizes: dict[str, int] = {}
         #: Bytes eviction reclaimed, reported so a run can say whether it was cache-bound.
         self.evicted_bytes = 0
         self.trusted_hosts = tuple(trusted_hosts)
@@ -724,7 +789,11 @@ class AssetStore:
                     tmp.unlink(missing_ok=True)
                     if not e.transient or attempt >= self.retries:
                         raise
-                    time.sleep(self.backoff * (2 ** attempt))
+                    delay = self.backoff * (2 ** attempt)
+                    if isinstance(e, ScratchFull):
+                        # nothing becomes evictable sooner than the grace window
+                        delay = max(delay, self.scratch_wait)
+                    time.sleep(delay)
             os.replace(tmp, target)
         finally:
             tmp.unlink(missing_ok=True)
@@ -831,6 +900,30 @@ class AssetStore:
                 time.sleep(self.backoff * (2 ** attempt))
         raise AssertionError("unreachable")
 
+    def _room(self, tmp: Path) -> int:
+        """Free bytes on the cache's volume that no other download has claimed."""
+        try:
+            free = shutil.disk_usage(tmp.parent).free
+        except OSError:
+            return 2 ** 62                        # unknowable: do not refuse on a guess
+        return free - claimed_bytes(self._require_cache(str(tmp)), exclude=tmp)
+
+    def _claim(self, uri: str, tmp: Path, fh: Any, size: int) -> None:
+        """Check that `size` bytes fit and claim them, as one step under the cache's lock: the
+        partial is extended to `size` (sparse), which is what `claimed_bytes` reads. Eviction is
+        allowed to free nothing - everything left is hot or in flight - and then the honest
+        outcome is `ScratchFull` now, not a write into ENOSPC."""
+        with _claims_locked(self._require_cache(uri)):
+            room = self._room(tmp)
+            if room < size:
+                # whatever the size: on a retry after ScratchFull the grace window has let
+                # files age, and an asset inside the reserve made no second pass above
+                self.evicted_bytes += ensure_free(size)
+                room = self._room(tmp)
+            if room < size:
+                raise ScratchFull(uri, size, max(0, room))
+            fh.truncate(size)
+
     def _download(self, uri: str, tmp: Path, expected: tuple[str, str] | None) -> None:
         resp = self._get(uri)
         try:
@@ -845,27 +938,23 @@ class AssetStore:
             # The room made before the request assumed an asset of at most `reserve` bytes. An
             # L2A RFL granule is ~1.7 GB, so a warm Lambda whose /tmp still held the previous
             # one died on ENOSPC halfway through the write. Now the size is known: make room.
-            size = _content_length(resp)
+            # A response with no Content-Length (chunked) falls back to the size the index
+            # holds, so it is not left to the fixed reserve.
+            size = _content_length(resp) or self.sizes.get(uri, 0)
             if size > self.reserve:
                 self.evicted_bytes += ensure_free(size)
-            # Eviction is allowed to free nothing - everything left is hot or in flight. Then
-            # the honest outcome is to say so now, not to write into ENOSPC.
-            if size:
-                try:
-                    free = shutil.disk_usage(tmp.parent).free
-                except OSError:
-                    free = size
-                if free < size:
-                    raise ScratchFull(uri, size, free)
             hasher = hashlib.new(expected[0]) if expected is not None else None
             try:
                 with open(tmp, "wb") as fh:
+                    if size:
+                        self._claim(uri, tmp, fh, size)
                     for chunk in resp.iter_content(chunk_size=self.chunk_size):
                         if not chunk:
                             continue
                         fh.write(chunk)
                         if hasher is not None:
                             hasher.update(chunk)
+                    fh.truncate()                 # the claim was a size; keep what arrived
             except Exception as e:  # narrowed by module below
                 if _is_request_exception(e):
                     raise AssetFetchError(uri, None, type(e).__name__) from None

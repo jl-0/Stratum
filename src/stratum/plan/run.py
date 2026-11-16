@@ -40,6 +40,7 @@ from stratum.access import (
     reader_for,
     to_uri,
 )
+from stratum.access.store import asset_sizes
 from stratum.ancillary import AuxSource, aux_key_for, sources_digest, warp_aux_tile
 from stratum.cache import CacheRoot
 from stratum.classes import Enumeration, EnumerationError, Remap, identity_enumeration
@@ -1115,6 +1116,7 @@ def plan_run(manifest_path: Path | str, out_dir: Path | str | None = None,
     #    contributing granule's class-table asset (the vintage check, 02 section 3) here,
     #    and those are cache hits for the run
     store = AssetStore(asset_cache)
+    store.sizes.update(asset_sizes(refs.values()))
     inspection = inspect_granules(m, refs, readers, needed, geolocation_role, store,
                                   scorer_outputs=scorer_outputs(scorer.instance))
     max_distance = resolve_max_distance(grid, m.grid.max_distance)

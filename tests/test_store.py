@@ -119,6 +119,7 @@ class Harness:
             return s
 
         kw.setdefault("backoff", 0.0)
+        kw.setdefault("scratch_wait", 0.0)
         self.store = AssetStore(cache, auth=auth, session_factory=factory,
                                 chunk_size=64 * 1024, **kw)
 
@@ -686,6 +687,126 @@ def test_an_asset_that_cannot_fit_fails_clearly_before_writing(tmp_path, monkeyp
         h.store.open(URL)
     assert err.value.transient and len(h.calls) == 2, "transient, so it is retried"
     assert not [p for p in (tmp_path / "assets").rglob("*") if p.is_file()], "nothing written"
+
+
+def _volume(monkeypatch, free):
+    """Make the cache's volume report `free()` bytes free."""
+    import shutil
+
+    import stratum.access.store as store_mod
+
+    usage = type(shutil.disk_usage("/"))
+    monkeypatch.setattr(store_mod.shutil, "disk_usage",
+                        lambda p: usage(total=10**9, used=10**9 - free(), free=free()))
+
+
+def test_a_full_scratch_is_retried_after_the_grace_window_and_evicts_again(tmp_path, monkeypatch):
+    """`ScratchFull` is transient because what holds the space passes - but a file becomes
+    evictable only after the 60 s grace window, and the retries used to be spent in 1+2+4 s
+    with no second eviction pass, so the retry could never succeed for the reason it gave. The
+    wait now outlasts the window and the retry evicts again."""
+    import stratum.access.store as store_mod
+    from stratum.access.store import EVICT_GRACE_SECONDS
+
+    state = {"free": 500}
+    naps: list[float] = []
+    asked: list[int] = []
+
+    def evict(need, **kw):
+        asked.append(need)
+        if naps:                                  # the grace window has passed: now it frees
+            state["free"] = 10**8
+            return 9000
+        return 0
+
+    monkeypatch.setattr(store_mod, "ensure_free", evict)
+    monkeypatch.setattr(store_mod.time, "sleep", naps.append)
+    _volume(monkeypatch, lambda: state["free"])
+    # inside the reserve, so nothing but the retry itself would evict a second time
+    h = Harness(tmp_path / "assets", reserve=10**7, scratch_wait=None, retries=2,
+                headers={"Content-Length": str(len(BODY))})
+    assert h.store.open(URL).local.read_bytes() == BODY
+    assert len(naps) == 1 and naps[0] > EVICT_GRACE_SECONDS, naps
+    assert asked[-1] == len(BODY) and h.store.evicted_bytes == 9000
+
+
+def test_a_response_without_content_length_uses_the_catalogue_size(tmp_path, monkeypatch):
+    """A chunked response has no `Content-Length`, and the room made for it was the fixed
+    reserve whatever the asset's size. The index already holds CMR's `SizeInBytes`; the store
+    is told it and makes room for that."""
+    import stratum.access.store as store_mod
+
+    asked: list[int] = []
+    monkeypatch.setattr(store_mod, "ensure_free", lambda need, **kw: asked.append(need) or 0)
+    h = Harness(tmp_path / "assets", reserve=100)
+    h.store.sizes[URL] = 10_000
+    h.store.open(URL)
+    assert asked == [100, 10_000]
+
+
+def test_asset_sizes_come_from_the_granule_attributes():
+    from types import SimpleNamespace
+
+    from stratum.access.store import asset_sizes
+
+    refs = [SimpleNamespace(assets={"RFL": URL, "MASK": FOREIGN, "OBS": "/local/obs.nc"},
+                            attributes={"size:RFL": "1700000000", "size:OBS": "junk"}),
+            SimpleNamespace(assets={}, attributes={})]
+    assert asset_sizes(refs) == {URL: 1_700_000_000}
+
+
+def test_the_worker_store_knows_the_catalogue_sizes(tmp_path):
+    """The sizes reach the store a worker stages with: they ride the granules in plan.json."""
+    import dataclasses
+
+    from synthetic import NadirScorer, build_plan, two_overlapping
+
+    from stratum.plan.document import context_from_doc, context_to_doc
+
+    ctx = build_plan(tmp_path, two_overlapping(), scorer=NadirScorer())
+    gid, ref = next(iter(ctx.granules.items()))
+    name, uri = next(iter(ref.assets.items()))
+    sized = dataclasses.replace(ref, attributes={**ref.attributes, f"size:{name}": "4242"})
+    doc = context_to_doc(dataclasses.replace(ctx, granules={**ctx.granules, gid: sized}))
+    assert context_from_doc(doc, tmp_path).store.sizes[uri] == 4242
+
+
+def test_a_download_claims_its_size_so_concurrent_workers_see_it(tmp_path, monkeypatch):
+    """Check-then-act: several local workers each compared their own size with the same free
+    space and all passed. A download now sizes its partial to the asset before the first byte
+    (a sparse file), and the room another download has claimed but not yet written is
+    subtracted from what the volume reports."""
+    import stratum.access.store as store_mod
+    from stratum.access.store import ScratchFull, claimed_bytes
+
+    cache = tmp_path / "assets"
+    (cache / "ab").mkdir(parents=True)
+    other = cache / "ab" / "other.nc.part-999-1"       # another worker: claimed, nothing written
+    with open(other, "wb") as fh:
+        fh.truncate(800_000)
+    if other.stat().st_blocks:
+        pytest.skip("this filesystem does not keep sparse files sparse")
+    assert claimed_bytes(cache) == 800_000
+    assert claimed_bytes(cache, exclude=other) == 0
+
+    monkeypatch.setattr(store_mod, "ensure_free", lambda need, **kw: 0)
+    _volume(monkeypatch, lambda: 1_000_000)
+    h = Harness(cache, reserve=100, headers={"Content-Length": str(len(BODY))}, retries=0)
+    with pytest.raises(ScratchFull, match=f"needs {len(BODY)} bytes.*has 200000 free"):
+        h.store.open(URL)                              # 1 MB free, 800 kB of it spoken for
+
+    other.unlink()
+    seen: list[int] = []
+    real = FakeResponse.iter_content
+
+    def spying(self, chunk_size):
+        seen.append(claimed_bytes(cache))                 # what a second worker would see now
+        yield from real(self, chunk_size)
+
+    monkeypatch.setattr(FakeResponse, "iter_content", spying)
+    handle = h.store.open(URL)
+    assert seen[0] == len(BODY), "the partial claims the whole asset before a byte is written"
+    assert handle.local.read_bytes() == BODY, "and is cut back to what actually arrived"
 
 
 # ----------------------------------------------------------------------------- range reads

@@ -424,10 +424,22 @@ The guard is **free space on the volume**, not a budget per directory:
   as the headers arrive. An L2A RFL granule is ~1.7 GB.
   If the volume still has less free than that size — eviction is allowed to free nothing —
   the download raises `ScratchFull` before writing a byte, in place of an `ENOSPC` part-way
-  through. It is transient and retried like a `503`. Two gaps remain, deliberately: a response
-  with no `Content-Length` is only covered by the 512 MB reserve, and the check is
-  check-then-act, so several local workers starting large downloads at once can each pass it.
-  One item per Lambda container means neither bites there.
+  through. It is transient and retried, but not on the `503` schedule: what holds the space is
+  a download in flight or a file inside its 60 s grace window, so the retry waits 65 s
+  (`SCRATCH_FULL_WAIT`) and evicts again before it re-checks. Three retries bound it at about
+  3 minutes. Two details close what the size check alone left open:
+  - **No `Content-Length`.** A chunked response does not state its size, so the store falls
+    back to the one the index holds — CMR's `SizeInBytes`, carried as `size:<asset>` in the
+    granule's attributes and so in `plan.json` (`AssetStore.sizes`, filled by the planner and
+    by every worker's `context_from_doc`). A local-directory source has no sizes; such an
+    asset is covered by the 512 MB reserve only.
+  - **Concurrent workers.** The check and the claim are one step under an `flock` on the
+    asset-cache directory: having passed, a download extends its `.part-*` file to the full
+    size before the first byte. That file is sparse, so it costs nothing, but its declared
+    size less its allocated blocks is on disk for every other thread and process to read
+    (`claimed_bytes`), and the check subtracts it from the volume's free space. Two workers
+    can no longer each pass against the same room. The partial is cut back to the bytes that
+    arrived when the body ends.
   - **[observed] 2026-11-02:** before this, one Barstow topaz resolve item failed with `ENOSPC`
     halfway through writing an RFL granule. It ran on a warm Lambda whose `/tmp` still held the
     granule of an earlier item.
