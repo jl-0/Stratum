@@ -707,6 +707,14 @@ def test_mode_gated_independent_thin_group_does_not_blank_the_other() -> None:
     out = s.emit(obs, None)
     assert np.isnan(out["mode_1"][0, 0]) and out["mode_2"][0, 0] == KAO
     assert out["mode_count"][0, 0] == 11              # the dropped group gates nothing
+    # ... so when the thin look has the best geometry it wins, and a layer gathered from the
+    # winner carries the unconfirmed hematite: min_count guarantees mode_1, not that layer
+    obs = stack(pairs, bands={"view_zenith": [5.0 + k for k in range(10)] + [1.0]})
+    for gate in ("hard", "soft"):
+        s = ModeGatedSelect(weights=VZ_ONLY, key="independent", min_count=3, gate=gate)
+        assert winner(s, obs) == 10 and pairs[10][0] == HEM
+        out = s.emit(obs, None)
+        assert np.isnan(out["mode_1"][0, 0]) and out["agreement"][0, 0] == 1.0
     # the same with a refused tie in one group
     obs = stack([(HEM, KAO), (GOE, KAO)], bands={"view_zenith": [2.0, 1.0]})
     s = ModeGatedSelect(weights=VZ_ONLY, key="independent", tie_break="nodata")
@@ -742,6 +750,15 @@ def test_mode_gated_independent_ignore_is_per_group() -> None:
     out = hard.emit(obs, None)
     assert (out["mode_1"][0, 0], out["mode_2"][0, 0]) == (HEM, KAO)
     assert out["n_voters"][0, 0] == 3
+    # the ignore is on the VOTE only. With no look clean in both groups the hard gate leaves
+    # the cell unoccupied - mode_1 is HEM, and every HEM look holds vegetation - and the soft
+    # gate occupies it with the best look, vegetation and all
+    for pairs in ([(HEM, VEG)] * 3 + [(GOE, KAO)] * 2, [(HEM, VEG)] * 5):
+        obs = stack(pairs, bands={"view_zenith": [1.0, 2.0, 3.0, 9.0, 8.0]})
+        assert winner(hard, obs) is None
+        assert hard.emit(obs, None)["mode_1"][0, 0] == HEM
+        assert winner(s, obs) == 0
+    obs = stack([(HEM, VEG), (HEM, VEG), (HEM, KAO)], bands={"view_zenith": [1.0, 2.0, 9.0]})
     # the joint key is unchanged: an ignored look leaves the whole vote
     joint = ModeGatedSelect(weights=VZ_ONLY, ignore={"g2": ["Dry vegetation"]})
     joint.score(obs, None)

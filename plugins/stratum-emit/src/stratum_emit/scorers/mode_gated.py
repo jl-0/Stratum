@@ -242,11 +242,16 @@ class ModeGatedSelect:
        a `nodata` tie) costs only its own group: that group has no answer (`mode_N` is NaN) and
        gates nothing, and the cell is left unoccupied only where both groups are suppressed.
        The selected look is then chosen on the other group alone, so the class gathered from it
-       in the suppressed group is whatever that look holds, confirmed or not.
+       in the suppressed group is whatever that look holds, confirmed or not: `min_count`
+       guarantees `scorer.mode_N`, not a product layer gathered from the winning look.
     4. **Gate.** `hard`: a look whose key differs from the mode may not occupy the cell (NaN).
        `soft`: it is ranked with `soft_penalty` added instead. A look holding an `ignore`d class
        never matches - also where the cell has no mode - so under the hard gate an ignored class
-       is never delivered, whether or not some other look detected anything.
+       is never delivered, whether or not some other look detected anything. The per-group
+       `ignore` of `key: independent` changes the VOTE only: where every look carrying a group's
+       mode holds an ignored class in the other group, the hard gate leaves the cell unoccupied,
+       and the mode is lost with it, because scorer outputs are written where a look won. Under
+       the soft gate such a cell is occupied by the best look, ignored class included.
     5. **Penalty.** Ten metrics, each mapped to [0, 1] with 0 best - `normalize: fixed` clips
        to `bounds`, `normalize: rank` uses the look's rank among the cell's valid looks - and
        combined as a weighted sum with the positive weights renormalised to sum to 1. A metric
