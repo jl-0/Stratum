@@ -233,6 +233,27 @@ def test_a_whole_run_executes_in_lambda(monkeypatch, s3_run) -> None:
     clear_cache()
 
 
+def test_finalize_reads_the_published_items_not_a_stale_mirror(monkeypatch, s3_run) -> None:
+    """The dispatcher's mirror may hold an item.json from an earlier run of the same run id (a
+    same-day re-plan), and a mirror pull leaves an existing file alone. The collection must be
+    built from what the workers just published - the bucket's documents."""
+    from stratum.executors.local import run_all as finalize
+    from stratum.executors.worker import load_cached
+
+    fake = FakeLambda()
+    monkeypatch.setattr("stratum.executors.aws._client", lambda client=None: client or fake)
+    monkeypatch.setenv("STRATUM_LAMBDA_FUNCTION", "stratum-dev-worker")
+    run_all(s3_run.run_dir, workers=2, executor="aws")
+    products = load_cached(s3_run.run_dir).products_dir
+    published = json.loads((products / "collection.json").read_text())["extent"]
+    for stale in products.rglob("item.json"):            # the earlier run's, in the mirror only
+        doc = json.loads(stale.read_text())
+        stale.write_text(json.dumps({**doc, "bbox": [0.0, 0.0, 1.0, 1.0]}))
+    finalize(s3_run.run_dir, stage_runner=lambda run_dir, stage, workers: [], executor="aws")
+    assert json.loads((products / "collection.json").read_text())["extent"] == published
+    clear_cache()
+
+
 def test_a_failed_invocation_becomes_an_outcome_record(monkeypatch, s3_run) -> None:
     """A handler exception must read like a local failure: `stratum status --failed` parses one
     file, not two formats."""

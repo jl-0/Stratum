@@ -144,14 +144,18 @@ def run_all(run_dir: Path | str, workers: int | None = None, *,
     # and about two hours of silence on the western run, serially, for ~1 MB of JSON - and left
     # the products no more durable, since the bucket is the record and the mirror is disposable.
     if run.outputs.get("stac", True):
-        pulled = run.workspace.pull_tree(run.products_dir, only="item.json")
-        if pulled:
-            log.info("mirrored %d item document(s) for the STAC collection", pulled)
         # The collection lists what THIS plan publishes, not what the directory holds: a
         # same-day re-plan reuses the products tree, and a tile or period the new plan no
         # longer covers is still on disk from the run before it.
         planned = {(product_dir(run.products_dir, run.tile(*it["tile"]), epoch_from_doc(it["period"]))
                     / ITEM_NAME) for it in read_work(run_dir, "publish")}
+        # ... and so may be this plan's own items, as the run before wrote them: a pull leaves
+        # an existing file alone, so the mirrored copies go first (a no-op on a local root)
+        for p in planned:
+            run.workspace.drop_mirror(p)
+        pulled = run.workspace.pull_tree(run.products_dir, only="item.json")
+        if pulled:
+            log.info("mirrored %d item document(s) for the STAC collection", pulled)
         items = sorted(p for p in planned if p.is_file())
         if items:
             collection = write_stac_collection(run.products_dir, items,
