@@ -284,5 +284,9 @@ None of this is Tetracorder-specific: the framework matches attributes it was to
    (units `s since 1970-01-01 UTC`) resamples nearest too, in both places: it is float64 with
    NaN nodata, but its value is an identifier - the granule's acquisition second, the key into
    `granules.json` ([10 §3](10-provenance.md)) - and the mean of two of them names no granule.
-   It is recognised by its units, not its dtype. The per-tile files remain
+   It is recognised by its units, not its dtype. So is any band whose units are `code` or
+   `class` (`types.IDENTIFIER_UNITS`): `mineral_joint_from` is uint16 0/1/2 with no nodata,
+   which by dtype is a count, and averaged across a 0 | 2 boundary it reads 1. A plugin that
+   delivers a code or a class id in anything but the categorical convention (uint16, nodata
+   65535) declares it with those units; no list of band names is kept. The per-tile files remain
    the deliverable; the mosaic is derived from them and can be rebuilt at any time.

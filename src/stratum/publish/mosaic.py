@@ -84,7 +84,7 @@ def _is_raster(asset: Mapping[str, Any]) -> bool:
 
 def _nearest(asset: Mapping[str, Any]) -> bool:
     """Decimate rather than average: a rendering, a band holding class ids, or one holding an
-    identifier (an `acquired` timestamp, told by its unit). The same rule publish applies to
+    identifier (an `acquired` timestamp, a `code`, told by its unit). The same rule publish applies to
     each tile's own overviews (`cogs.decimates`)."""
     if "visual" in (asset.get("roles") or ()):
         return True

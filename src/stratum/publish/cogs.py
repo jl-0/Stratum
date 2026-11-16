@@ -21,7 +21,7 @@ from rasterio.shutil import copy as rio_copy
 
 from stratum.publish.colors import RGBA, gdal_colormap, resolve_class_colors
 from stratum.reduce import CATEGORICAL_DTYPE, CATEGORICAL_NODATA
-from stratum.types import ACQUIRED_UNITS, BandSpec, BandStack, ClassTable, TileRef
+from stratum.types import IDENTIFIER_UNITS, BandSpec, BandStack, ClassTable, TileRef
 
 COG_MEDIA_TYPE = "image/tiff; application=geotiff; profile=cloud-optimized"
 REQUIRED_TAGS = ("run_id", "manifest_hash")     # 10 section 3
@@ -101,12 +101,14 @@ def is_categorical_dtype(dtype: Any, nodata: Any) -> bool:
 
 
 def is_identifier_units(units: Any) -> bool:
-    """A band whose values NAME something rather than measure it, told by its units: an
-    `acquired` band (`ACQUIRED_UNITS`) is a timestamp to the second that doubles as the granule
-    id (10 section 3). The mean of two of them is a time at which nothing was acquired and that
-    matches no row of `granules.json`, so such a band decimates exactly as class ids do even
-    though it is float64 with NaN nodata and nothing about its dtype says so."""
-    return units == ACQUIRED_UNITS
+    """A band whose values NAME something rather than measure it, told by its units
+    (`IDENTIFIER_UNITS`). An `acquired` band is a timestamp to the second that doubles as the
+    granule id (10 section 3): the mean of two of them is a time at which nothing was acquired
+    and that matches no row of `granules.json`. A `code` band such as `mineral_joint_from` is
+    0/1/2: the mean of "neither group" and "group 2" is "group 1". Such a band decimates
+    exactly as class ids do, though nothing about its dtype or nodata says so - a uint16 code
+    with no nodata is indistinguishable from a count."""
+    return isinstance(units, str) and units in IDENTIFIER_UNITS
 
 
 def decimates(spec: BandSpec) -> bool:

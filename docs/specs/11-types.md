@@ -465,7 +465,8 @@ class BandSpec:
     name: str
     dtype: str
     description: str
-    units: str = "unitless"
+    units: str = "unitless"            # "code", "class" or ACQUIRED_UNITS declare an identifier:
+                                       # publish resamples it nearest, never averages (07 section 3)
     nodata: float | int | None = None
 
 class SnapshotStack:

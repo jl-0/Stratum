@@ -646,6 +646,43 @@ def test_acquired_overviews_never_invent_a_timestamp(tmp_path):
             assert found <= {first, second}, f"overview x{factor} invented {found - {first, second}}"
 
 
+def test_code_band_overviews_never_invent_a_code(tmp_path):
+    """`mineral_joint_from` says which group answered: 2, 1 or 0. It is uint16 with no nodata,
+    which reads as a count, and averaged across a 0 | 2 boundary it reports 1 - "the fallback
+    group answered" - where no group-1 answer exists. A band whose units declare a code or a
+    class id decimates, whatever its dtype."""
+    from affine import Affine
+    from stratum_emit.reducers import JointMineralVote
+
+    from stratum.publish.cogs import decimates, write_geotiff
+
+    spec = next(s for s in JointMineralVote().outputs if s.name == "mineral_joint_from")
+    assert decimates(spec)
+    data = np.zeros((1024, 1024), dtype="uint16")
+    data[:, 301:] = 2                            # a boundary off every overview's grid
+    path = write_geotiff(tmp_path / "mineral_joint_from.tif", data, spec,
+                         transform=Affine.scale(1 / 3600, -1 / 3600), crs="EPSG:4326",
+                         tags={"run_id": "r", "manifest_hash": "h"}, cog=True)
+    with rasterio.open(path) as s:
+        assert s.overviews(1)
+        for factor in s.overviews(1):
+            coarse = s.read(1, out_shape=(s.height // factor, s.width // factor))
+            assert set(np.unique(coarse)) <= {0, 2}, f"overview x{factor} invented a code"
+
+
+def test_what_decimates_is_declared_by_units_not_guessed_from_dtype():
+    from stratum.publish.cogs import decimates
+    from stratum.types import BandSpec
+
+    def band(dtype, units, nodata=None):
+        return BandSpec(name="b", dtype=dtype, description="d", units=units, nodata=nodata)
+
+    assert decimates(band("float32", "class", float("nan")))      # a scorer's mode_1
+    assert decimates(band("uint16", "code"))
+    assert not decimates(band("uint16", "count")), "n_epochs still averages"
+    assert not decimates(band("float32", "fraction", float("nan")))
+
+
 def test_media_type_follows_the_format_actually_written():
     from stratum.publish.cogs import media_type, raster_format
     assert "cloud-optimized" in media_type("cog")

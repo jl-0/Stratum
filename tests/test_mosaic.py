@@ -67,6 +67,27 @@ def test_an_acquired_layer_decimates_in_the_mosaic() -> None:
     assert not _nearest(depth)
 
 
+def test_a_code_layer_decimates_in_the_mosaic() -> None:
+    """`mineral_joint_from` (0/1/2, uint16, no nodata) is told from a count only by its unit,
+    which the item asset carries. Averaged in the mosaic, a 0 | 2 seam reads 1."""
+    from stratum_emit.reducers import JointMineralVote
+
+    from stratum.publish.mosaic import _nearest
+    from stratum.publish.stac import raster_bands
+
+    specs = {s.name: s for s in JointMineralVote().outputs}
+
+    def asset(name: str) -> dict:
+        return {"roles": ["data"], "href": f"./{name}.tif",
+                "raster:bands": raster_bands(specs[name])}
+
+    assert _nearest(asset("mineral_joint_from")), "a 0/1/2 code must decimate, never average"
+    assert not _nearest(asset("mineral_joint_agreement"))
+    count = {"roles": ["data"], "href": "./n_epochs.tif",
+             "raster:bands": [{"data_type": "uint16", "unit": "count"}]}
+    assert not _nearest(count)
+
+
 def test_a_layer_the_run_does_not_have_is_an_error(products: Products) -> None:
     with pytest.raises(ValueError, match="no layer 'mineral_9'"):
         plan_mosaics(RUN, products.items(RUN), layers=["mineral_9"])

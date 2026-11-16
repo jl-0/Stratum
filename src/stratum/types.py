@@ -546,6 +546,13 @@ BUILTIN_SOURCES: Mapping[str, str] = {"acquired": "float64", "sensor_column": "f
 #: for every band in these units, whether the schema derived it or a reducer declared it, so a
 #: reducer that delivers a look's acquisition declares this rather than plain "s".
 ACQUIRED_UNITS = "s since 1970-01-01 UTC"
+#: Units that DECLARE a delivered band's values to be names rather than measurements: an
+#: `acquired` timestamp (the granule id), a class id held in a dtype that does not say so (a
+#: scorer's float32 `mode_1`), or a small code (`mineral_joint_from`: 0/1/2). The mean of two
+#: names is a third name nobody chose, so publish resamples these nearest wherever a band is
+#: made coarser (07 section 3). A band author states it here, in the units; publish does not
+#: guess it from the dtype or keep a list of band names.
+IDENTIFIER_UNITS = frozenset({ACQUIRED_UNITS, "class", "code"})
 
 #: A layer source naming one of the SCORER's declared `outputs` (04 section 4, 13 section 2):
 #: `source: scorer.<output>`. Not a role, not an alias - the prefix is reserved in the one

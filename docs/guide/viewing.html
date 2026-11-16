@@ -183,9 +183,10 @@ rather than mirrored; a layer without one falls back to one overlay per product 
 mercator, about 30&nbsp;m on the ground in the western US) for one-arcsecond products. A mosaic is
 about the size of the tiles it merges.</td></tr>
 <tr><td>Resampling</td><td>Nearest for categorical bands, RGBA renderings and
-<code>acquired</code> timestamps (which name a granule), average for continuous ones &mdash; the
-same rule as each tile's own overviews. No class id or granule timestamp is ever
-averaged.</td></tr>
+<code>acquired</code> timestamps (which name a granule) and bands whose units are
+<code>code</code> or <code>class</code> (<code>mineral_joint_from</code>), average for
+continuous ones &mdash; the same rule as each tile's own overviews. No class id, code or granule
+timestamp is ever averaged.</td></tr>
 <tr><td>Bands with no nodata</td><td>(<code>n_epochs</code>, <code>n_observed</code>) gain an alpha
 band, so outside the run is transparent rather than zero.</td></tr>
 <tr><td>Re-running</td><td>A mosaic already in the tree is kept; <code>--force</code> rebuilds, and
