@@ -334,7 +334,7 @@ def test_an_in_flight_write_is_never_evicted(monkeypatch, tmp_path):
     from stratum.storage import ensure_free
 
     d = tmp_path / "mirror"
-    part = _aged(d / "assets" / "x.nc.part-123-456", 5_000, age=900)
+    part = _aged(d / "assets" / "x.nc.part-123-456", 5_000, age=600)
     tmp = _aged(d / "cache" / "glt" / "t" / ".abc123-dead.tmp", 5_000, age=99_999)
     done = _aged(d / "cache" / "glt" / "t" / "done.tif", 100, age=99_999)
     _free(monkeypatch, 0)

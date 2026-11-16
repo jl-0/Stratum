@@ -589,7 +589,7 @@ def test_eviction_is_lru_not_fifo(tmp_path):
 
 def test_eviction_never_touches_an_in_flight_download_or_a_fresh_entry(tmp_path):
     cache = tmp_path / "assets"
-    part = _asset(cache, "dddd_x.nc.part-123-456", 500, age=900)
+    part = _asset(cache, "dddd_x.nc.part-123-456", 500, age=600)
     fresh = _asset(cache, "eeee_fresh.nc", 500, age=1.0)
     ensure_room(cache, need=10_000, budget=1, grace=60.0)
     assert part.exists(), ".part- files are in-flight downloads, never candidates"

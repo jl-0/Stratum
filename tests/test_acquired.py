@@ -64,6 +64,9 @@ def test_granules_json_names_the_granule_behind_every_value(run: PlanResult) -> 
     assert item["assets"]["granules"]["href"] == "./granules.json"
     bands = item["assets"]["acquired_1"]["raster:bands"][0]
     assert bands["data_type"] == "float64" and bands["unit"] == "s since 1970-01-01 UTC"
+    # ... which is what the layer mosaic keys on: the published asset decimates, never averages
+    from stratum.publish.mosaic import _nearest
+    assert _nearest(item["assets"]["acquired_1"])
 
 
 def test_granule_band_names_the_selected_scene_as_a_class(run: PlanResult) -> None:
