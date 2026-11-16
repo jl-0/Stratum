@@ -443,7 +443,7 @@ The guard is **free space on the volume**, not a budget per directory:
 - **An orphaned partial is not in flight.** A download killed mid-write — a Lambda timeout, an
   out-of-memory kill — never unlinks its `.part-*`, and exempting it forever strands up to a
   whole asset per killed item with nothing left that could free it. A partial that has not been
-  **written to** for an hour (`STALE_PARTIAL_SECONDS`) has no writer and is evicted like any
+  **written to** for 15 minutes (`STALE_PARTIAL_SECONDS`) has no writer and is evicted like any
   other cold file. Modification time is the test because only a writer advances it: a live
   download touches it with every 1 MiB chunk and gives up after a 300 s read timeout, and a
   Lambda invocation lasts at most 900 s, so a partial another process or thread is still

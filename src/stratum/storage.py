@@ -67,8 +67,10 @@ PARTIAL_MARK = ".part-"
 #: A partial download not WRITTEN to for this long has no writer left: its process was killed
 #: (a Lambda timeout, an OOM, a Ctrl-C) before it could unlink it. A live download advances the
 #: modification time with every 1 MiB chunk and gives up after a 300 s read timeout, and a
-#: Lambda invocation is at most 900 s, so an hour of silence cannot be a download in progress.
-STALE_PARTIAL_SECONDS = 3600.0
+#: Lambda invocation is at most 900 s, so that much silence cannot be a download in progress.
+#: No longer than that: a run restarted after a kill, or a busy warm container, must be able
+#: to reclaim the orphan (up to a 1.7 GB asset) while it still needs the room.
+STALE_PARTIAL_SECONDS = 900.0
 
 _EVICTABLE: set[Path] = set()
 #: Artifacts the CURRENT work item has claimed and is about to read. A reduce item stacks 52
