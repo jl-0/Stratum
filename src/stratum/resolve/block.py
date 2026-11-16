@@ -204,6 +204,9 @@ def observation_inputs(plan: PlanContext, glt_key: CacheKey, granule: GranuleRef
     inputs: dict[str, Any] = {
         "artifact_type": "observation",
         "glt_key": glt_key.hash,
+        # catalogue metadata a scorer ranks on (`obs.granule.cloud_fraction`). It is the index's
+        # value, not the asset's, so no checksum moves when CMR revises it
+        "cloud_fraction": granule.cloud_fraction,
         "asset_roles": asset_roles,
         "band_aliases": {name: {"role": a.role, "band": int(a.band)}
                          for name, a in sorted(plan.aliases.items()) if a.role in read},

@@ -494,7 +494,8 @@ def test_the_code_terms_leave_out_only_what_their_stage_cannot_load() -> None:
              "import stratum.executors.awslambda\n"
              "assert not [m for m in sys.modules if m.startswith('stratum.preview')], "
              "'the worker loads preview'\n")
-    done = subprocess.run([sys.executable, "-c", probe], capture_output=True, text=True)
+    done = subprocess.run([sys.executable, "-c", probe], capture_output=True, text=True,
+                          check=False)
     assert done.returncode == 0, done.stderr
 
 
@@ -751,6 +752,21 @@ def test_the_band_an_alias_points_at_is_in_the_observation_key(pair_plan: PlanCo
     unread = replace(plan, roles={**plan.roles, "spare": plan.roles["geometry"]},
                      aliases={**plan.aliases, "spare_band": AliasBinding("spare", 1)})
     assert observation_inputs(unread, glt, a) == inputs
+
+
+def test_the_catalogue_cloud_fraction_is_in_the_observation_key(pair_plan: PlanContext) -> None:
+    """A scorer ranks looks on `obs.granule.cloud_fraction`, which is an index column and no
+    asset's content: an index rebuilt after CMR revised it must miss, not hit the old ranking."""
+    from stratum.resolve import snapshot_key
+    plan = pair_plan
+    a = plan.granules["A"]
+    glt = glt_key_for(plan, TILE, "A")
+    inputs = observation_inputs(plan, glt, a)
+    assert inputs["cloud_fraction"] == a.cloud_fraction
+    cloudier = replace(plan, granules={**plan.granules, "A": replace(a, cloud_fraction=0.99)})
+    it = item(TILE, EPOCH, 0, 0)
+    assert snapshot_key(it, plan).hash != snapshot_key(it, cloudier).hash
+    assert glt_key_for(cloudier, TILE, "A").hash == glt.hash
 
 
 # ------------------------------------------ a multi-band layer no observation won in some epoch
