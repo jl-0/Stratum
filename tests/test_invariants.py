@@ -160,12 +160,11 @@ def test_the_plan_records_the_code_its_keys_were_built_under(granules: Path) -> 
     can tell when its own code is not the code that was planned."""
     from importlib.metadata import version
 
-    from stratum.cache import package_hash
+    from stratum.cache import package_hash, reduce_code, resolve_code
     plan = plan_run(write_manifest(granules / "code.yaml", run_label="code",
                                    scorer={"ref": "min_view_zenith"}))
     ctx_doc = plan.document["context"]
-    assert ctx_doc["code"] == {"resolve": package_hash("stratum.resolve"),
-                               "reduce": package_hash("stratum.reduce")}
+    assert ctx_doc["code"] == {"resolve": resolve_code(), "reduce": reduce_code()}
     emit = package_hash("stratum_emit").removeprefix("sha256:")[:16]
     assert ctx_doc["scorer"]["version"] == f"{version('stratum-emit')}+{emit}"
     run = load_run(plan.run_dir)
@@ -218,12 +217,16 @@ def test_a_worker_refuses_a_plan_made_under_other_code(granules: Path) -> None:
         with pytest.raises(PlanError, match="mask"):
             execute_under({"masks": mask})
         # the framework's resolve or reduce code differs
-        with pytest.raises(PlanError, match="stratum.resolve"):
+        with pytest.raises(PlanError, match="resolve_code"):
             execute_under({"code": {**ctx_doc["code"], "resolve": "sha256:planner"}})
-        with pytest.raises(PlanError, match="stratum.reduce"):
+        with pytest.raises(PlanError, match="reduce_code"):
             execute_under({"code": {**ctx_doc["code"], "reduce": "sha256:planner"}}, "reduce")
+        # ... and publish refuses too: its code is in reduce_code, and a stale image would
+        # otherwise publish without error
+        with pytest.raises(PlanError, match="reduce_code"):
+            execute_under({"code": {**ctx_doc["code"], "reduce": "sha256:planner"}}, "publish")
         # a plan written before code identity was recorded names none: also refused
-        with pytest.raises(PlanError, match="stratum.resolve"):
+        with pytest.raises(PlanError, match="resolve_code"):
             execute_under({"code": {}})
         run = load_run(plan.run_dir)                 # ... and still loads, for `stratum status`
         assert run.context.resolve_code is None

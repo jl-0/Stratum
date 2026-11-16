@@ -430,26 +430,72 @@ def test_a_plugin_edit_moves_its_version_without_a_bump(tmp_path: Path, monkeypa
 def test_the_snapshot_key_carries_the_resolve_code(pair_plan: PlanContext, tmp_path: Path) -> None:
     """06 section 3 rule 3: the read path, the gather and the argmax are framework code no plugin
     version covers. Their content hash is a snapshot-key term, so a fix to them is a miss rather
-    than a hit on the pre-fix pixels - and it is not a GLT term."""
+    than a hit on the pre-fix pixels - and it is not a GLT term.
+
+    The term covers the `stratum` package, not `stratum.resolve` alone: resolve and reduce call
+    into `types`, `classes`, `hooks`, the worker, and the product-block writer lives in
+    `publish`. An edit there used to be a run of cache hits."""
     import shutil
 
-    import stratum.resolve
-    from stratum.cache import package_hash, source_hash
+    import stratum
+    from stratum.cache import (
+        REDUCE_CODE_SKIP,
+        RESOLVE_CODE_SKIP,
+        reduce_code,
+        resolve_code,
+        source_hash,
+    )
     from stratum.resolve import snapshot_key
     it = item(TILE, EPOCH, 0, 0)
     key = snapshot_key(it, pair_plan)
-    assert key.inputs["resolve_code"] == package_hash("stratum.resolve") == pair_plan.resolve_code
+    assert key.inputs["resolve_code"] == resolve_code() == pair_plan.resolve_code
+    assert pair_plan.reduce_code == reduce_code()
     # the hash is of content: a copy hashes the same, an edited copy does not
-    copy = tmp_path / "resolve"
-    shutil.copytree(Path(stratum.resolve.__file__).parent, copy,
+    copy = tmp_path / "stratum"
+    shutil.copytree(Path(stratum.__file__).parent, copy,
                     ignore=shutil.ignore_patterns("__pycache__"))
-    assert source_hash(copy) == pair_plan.resolve_code
-    with (copy / "block.py").open("a") as f:
-        f.write("# a fix\n")
-    edited = replace(pair_plan, resolve_code=source_hash(copy))
-    assert edited.resolve_code != pair_plan.resolve_code
+
+    def codes() -> tuple[str, str]:
+        return (source_hash(copy, skip=RESOLVE_CODE_SKIP), source_hash(copy, skip=REDUCE_CODE_SKIP))
+
+    def edit(module: str) -> tuple[bool, bool]:
+        """(resolve_code moved, reduce_code moved) after an edit to `module`."""
+        before = codes()
+        with (copy / module).open("a") as f:
+            f.write("# a fix\n")
+        after = codes()
+        return before[0] != after[0], before[1] != after[1]
+
+    assert codes() == (pair_plan.resolve_code, pair_plan.reduce_code)
+    for module in ("resolve/block.py", "types.py", "classes.py", "hooks.py", "index/refs.py",
+                   "executors/worker.py", "reduce/bands.py"):
+        assert edit(module) == (True, True), module
+    # the product-block writer is product code and cannot touch a snapshot
+    assert edit("publish/stitch.py") == (False, True)
+    # the viewer runs in no worker
+    assert edit("preview/server.py") == (False, False)
+
+    edited = replace(pair_plan, resolve_code=codes()[0])
     assert snapshot_key(it, edited).hash != key.hash
     assert glt_key_for(edited, TILE, "A").hash == glt_key_for(pair_plan, TILE, "A").hash
+
+
+def test_the_code_terms_leave_out_only_what_their_stage_cannot_load() -> None:
+    """The two exclusions are claims about the import graph, so they are checked against it, in
+    a fresh interpreter: nothing a snapshot is built from loads `stratum.publish`, and the
+    worker never loads `stratum.preview`."""
+    import subprocess
+    import sys
+
+    probe = ("import sys, stratum.resolve, stratum_emit.scorers, stratum_emit.masks, "
+             "stratum_emit.reducers, stratum_emit.readers\n"
+             "assert not [m for m in sys.modules if m.startswith(('stratum.publish', "
+             "'stratum.preview'))], 'resolve loads publish or preview'\n"
+             "import stratum.executors.awslambda\n"
+             "assert not [m for m in sys.modules if m.startswith('stratum.preview')], "
+             "'the worker loads preview'\n")
+    done = subprocess.run([sys.executable, "-c", probe], capture_output=True, text=True)
+    assert done.returncode == 0, done.stderr
 
 
 # ------------------------------------------------------------------------------ snapshot IO

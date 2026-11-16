@@ -12,7 +12,7 @@ from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
-from stratum.cache import CacheKey, glt_inputs, package_hash, product_inputs
+from stratum.cache import CacheKey, glt_inputs, product_inputs, reduce_code, resolve_code
 from stratum.plan.document import (
     STAGES,
     PlanError,
@@ -117,17 +117,18 @@ def regrid_item(item: Mapping[str, Any], run: RunPlan) -> tuple[CacheKey, bool]:
 def check_code(ctx: PlanContext) -> None:
     """Refuse a plan made under other code than this process runs (06 section 3 rule 3).
 
-    The keys carry the PLANNER's code identity - each plugin's `version` and the hashes of
-    `stratum.resolve` and `stratum.reduce` - so that a worker reproduces the planner's keys. That
+    The keys carry the PLANNER's code identity - each plugin's `version` and the framework's
+    `resolve_code` / `reduce_code` hashes - so that a worker reproduces the planner's keys. That
     is only honest while the worker runs the same code. One that does not (a Lambda image built
     before the plugin was edited) would write the old code's output under the new code's keys
     into the shared cache, where every later run hits it. Checked before the hit test, so a
-    stale worker fails loudly on its first item instead of on its first miss. The twin of
+    stale worker fails loudly on its first item instead of on its first miss - and by publish
+    too, whose code is in `reduce_code`, so a stale image cannot publish either. The twin of
     `regrid_item`'s REGRID_ALGO_VERSION guard, and cheap: every term is memoised per process."""
     wrong = [f"{name} is {mine} here but {planned} in the plan"
              for name, planned, mine in (
-                 ("stratum.resolve", ctx.resolve_code, package_hash("stratum.resolve")),
-                 ("stratum.reduce", ctx.reduce_code, package_hash("stratum.reduce")))
+                 ("stratum (resolve_code)", ctx.resolve_code, resolve_code()),
+                 ("stratum (reduce_code)", ctx.reduce_code, reduce_code()))
              if planned != mine]
     plugins = [("scorer", ctx.scorer), *(("mask", m) for m in ctx.masks)]
     if ctx.reducer is not None:
@@ -231,6 +232,7 @@ def publish_item(item: Mapping[str, Any], run: RunPlan) -> tuple[Path, bool]:
     tile's product blocks are the reduce items of this (tile, period), each addressed by its
     recomputed key; a missing one means reduce did not run."""
     ctx = run.context
+    check_code(ctx)
     tile = _tile(run, item)
     period = Epoch(*(epoch_from_doc(item["period"]).start, epoch_from_doc(item["period"]).end))
     blocks = [it for it in read_work(run.run_dir, "reduce")

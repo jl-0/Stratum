@@ -356,31 +356,36 @@ def ortho_inputs(granule_id: str, role: str, asset_checksum: str | None, var: st
 
 
 # ------------------------------------------------------------- 06 section 3 rule 3: code identity
-def source_hash(*roots: Path) -> str:
+def source_hash(*roots: Path, skip: Sequence[str] = ()) -> str:
     """sha256 over the Python source under `roots`: every `*.py` below a directory, or the file
     itself, each under its path relative to the root's parent, in sorted order. Bytes and names
     only - no mtimes, no absolute paths - so the same source hashes the same in a checkout, an
-    editable install and a container image."""
+    editable install and a container image. `skip` names subpackages directly under a root to
+    leave out."""
     h = hashlib.sha256()
     for root in roots:
         root = Path(root)
         files = sorted(root.rglob("*.py")) if root.is_dir() else [root]
         for f in files:
+            if root.is_dir() and f.relative_to(root).parts[0] in skip:
+                continue
             name = f.relative_to(root.parent).as_posix()
             h.update(name.encode() + b"\0" + f.read_bytes() + b"\0")
     return "sha256:" + h.hexdigest()
 
 
 @functools.cache
-def package_hash(name: str) -> str | None:
-    """`source_hash` of an importable package (its whole tree) or module (its file), once per
-    process; None when it has no source file to read (a class built in a REPL).
+def package_hash(name: str, skip: tuple[str, ...] = ()) -> str | None:
+    """`source_hash` of an importable package (its whole tree, less the subpackages in `skip`)
+    or module (its file), once per process; None when it has no source file to read (a class
+    built in a REPL).
 
     This is the code identity of 06 section 3 rule 3, and the ONE definition of it: a science
     plugin's `version` ends in the hash of its top-level package (`stratum.resolve.plugin_version`),
-    and the snapshot and product keys carry the hash of `stratum.resolve` and `stratum.reduce`.
-    The planner computes it, `plan.json` records it, and a worker whose own differs refuses the
-    plan. Nothing is recorded by hand, so there is nothing to forget to bump."""
+    and the snapshot and product keys carry the hash of the framework (`resolve_code`,
+    `reduce_code` below). The planner computes it, `plan.json` records it, and a worker whose
+    own differs refuses the plan. Nothing is recorded by hand, so there is nothing to forget to
+    bump."""
     try:
         module = importlib.import_module(name)
     except ImportError:
@@ -388,7 +393,28 @@ def package_hash(name: str) -> str | None:
     roots = [Path(p) for p in getattr(module, "__path__", ())]
     if not roots and getattr(module, "__file__", None):
         roots = [Path(module.__file__)]
-    return source_hash(*roots) if roots else None
+    return source_hash(*roots, skip=skip) if roots else None
+
+
+#: The `stratum` subpackages outside each framework code term. Everything else is in: resolve
+#: and reduce call across the whole package (`types`, `classes`, `hooks`, `index`, `access`,
+#: the worker itself), and a list of the modules they happen to import today is a list that
+#: goes stale in the unsafe direction. `preview` is the viewer and never runs in a worker;
+#: `publish` runs only on finished snapshots - but it holds the product-block writer, so it IS
+#: product code. tests/test_invariants.py pins both exclusions against the import graph.
+RESOLVE_CODE_SKIP = ("preview", "publish")
+REDUCE_CODE_SKIP = ("preview",)
+
+
+def resolve_code() -> str | None:
+    """The framework code a snapshot is built under: its key's `resolve_code` term."""
+    return package_hash("stratum", RESOLVE_CODE_SKIP)
+
+
+def reduce_code() -> str | None:
+    """The framework code a product block is built and published under: its key's
+    `reduce_code` term."""
+    return package_hash("stratum", REDUCE_CODE_SKIP)
 
 
 #: What a snapshot directory holds. 2 added `observed.tif` (cells any observation reached, before
@@ -407,7 +433,7 @@ def snapshot_inputs(obs_keys: Sequence[CacheKey | str], aux_keys: Sequence[Cache
     and the sorted list is the set's canonical form - two blocks reached by the same
     observations get the same key however they were enumerated (06 section 3, rule 1).
 
-    `resolve_code` is `package_hash("stratum.resolve")` as the planner recorded it: the read
+    `resolve_code` is `stratum.cache.resolve_code()` as the planner recorded it: the read
     path, the gather and the argmax are framework code that determines every snapshot, and no
     plugin version covers them (06 section 3 rule 3). `resolve_block` always passes it."""
     inputs = {
@@ -449,5 +475,5 @@ __all__ = [
     "ARTIFACT_KINDS", "INPUTS_NAME", "MEMBERS_NAME", "SNAPSHOT_FORMAT", "CacheKey", "CacheRoot",
     "aux_inputs",
     "glt_inputs", "grid_def_fields", "ortho_inputs", "package_hash", "product_inputs",
-    "snapshot_inputs", "source_hash",
+    "reduce_code", "resolve_code", "snapshot_inputs", "source_hash",
 ]

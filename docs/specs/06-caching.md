@@ -167,8 +167,14 @@ else may be written into a snapshot directory: `read_snapshot` discovers layers 
      package - to a plugin the run does not name, or to a comment - is a miss for every run using
      that package. A spurious miss is the safe direction (rule 1).
    - **Framework.** `resolve_code` in the snapshot key and `reduce_code` in the product key are
-     the hashes of `stratum.resolve` and `stratum.reduce`: the read path, gather and argmax, and
-     the built-in aggregation, which no plugin version covers. A reduce-only edit keeps snapshots.
+     hashes of the **`stratum` package**, which no plugin version covers - the same whole-package
+     rule as a plugin, for the same reason: resolve and reduce call into `types`, `classes`,
+     `hooks`, `index`, `access` and the worker, and a list of the modules they import today goes
+     stale in the unsafe direction. Each term leaves out only what its stage cannot load:
+     `resolve_code` omits `publish` and `preview`; `reduce_code` omits `preview` (the
+     product-block writer lives in `publish`). So an edit under `publish/` re-runs reduce and
+     keeps snapshots, a viewer edit moves nothing, and any other framework edit re-keys both.
+     A test checks both exclusions against the import graph.
 
    The **planner** computes these and `plan.json` records them (`context.code`, and each
    plugin's `version`), so a worker reproduces the planner's keys rather than its own. A worker
@@ -179,9 +185,12 @@ else may be written into a snapshot directory: `read_snapshot` discovers layers 
 
    Regrid and the aux/ortho warp deliberately stay on rule 2's hand-bumped integer: a GLT is
    expensive and shared across every experiment, and a comment edit must not rebuild geometry.
-   What this does **not** cover: framework code outside those two packages that resolve or reduce
-   call into (`stratum.types`, `stratum.classes`, `stratum.publish.write_product_block`), a
-   **reader** plugin from a different package than the run's scorer and masks, a plugin's
+   So a fix that changes a GLT - under `stratum/regrid`, `stratum/ancillary` or
+   `vendor/SpectralUtil` (`find_subgrid_locations`, `clean_contiguous`) - rebuilds no GLT until
+   `REGRID_ALGO_VERSION` is bumped with it: the snapshot key moves, and resolve then reads the
+   old geometry. (`ALGO_HASH` reminds for `stratum/regrid/*.py`; nothing reminds for the
+   vendored tree.)
+   What this does **not** cover: a **reader** plugin from a different package than the run's scorer and masks, a plugin's
    third-party dependencies, and a wheel fetched from a mutable URI - not built; when it is, the
    wheel's content hash joins this identity.
 4. **Aux sources are keyed by content**, via ETag or an explicit version. A DEM swapped in place

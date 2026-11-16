@@ -28,7 +28,7 @@ import numpy as np
 from shapely.geometry.base import BaseGeometry
 
 from stratum.ancillary import AuxSource
-from stratum.cache import CacheRoot, package_hash
+from stratum.cache import CacheRoot, package_hash, reduce_code, resolve_code
 from stratum.classes import Remap
 from stratum.hooks import PixelMask, Scorer
 from stratum.types import (
@@ -261,9 +261,9 @@ class PlanContext:
                     granule's own table and refuses it unless its fingerprint is the one its remap
                     was resolved from. Empty (a hand-built context) checks nothing.
     resolve_code, reduce_code
-                    `package_hash` of `stratum.resolve` and `stratum.reduce` at plan time: the
-                    framework code that determines a snapshot and a product block, in their keys
-                    (06 section 3 rule 3). Defaulted from the running code, so a planner never
+                    The content hash of the `stratum` package at plan time, less what cannot
+                    touch a snapshot (`publish`, `preview`) or a product block (`preview`): the
+                    framework code term of their keys (06 section 3 rule 3). Defaulted from the running code, so a planner never
                     passes them; a worker's come from plan.json and are compared with its own.
     aux_sources     alias -> AuxSource for every source the manifest declared (05 section 5),
                     already staged and digested by the planner. Empty for a run with no aux,
@@ -290,8 +290,8 @@ class PlanContext:
     aux_sources: Mapping[str, AuxSource] = field(default_factory=dict)
     reducer: PluginBinding | None = None
     table_probes: Mapping[str, ClassTableProbe] = field(default_factory=dict)
-    resolve_code: str | None = field(default_factory=lambda: package_hash("stratum.resolve"))
-    reduce_code: str | None = field(default_factory=lambda: package_hash("stratum.reduce"))
+    resolve_code: str | None = field(default_factory=resolve_code)
+    reduce_code: str | None = field(default_factory=reduce_code)
 
     def __post_init__(self) -> None:
         for name in self.aliases:
