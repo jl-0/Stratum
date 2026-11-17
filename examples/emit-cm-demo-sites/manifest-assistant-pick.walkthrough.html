@@ -1,0 +1,436 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Contender C Walkthrough</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Space+Grotesk:wght@500;600&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: one reading column in two parts (science, then implementation), each a run of short sections; tables carry the reference detail. */
+:root {
+  --bg: #f7f8f7; --surface: #ffffff; --fg: #1b2422; --muted: #5b6966; --rule: #dde3e1;
+  --accent: #0f6e63; --accent-soft: #e2f0ed; --code-bg: #eef1f0;
+  --open: #b4500a; --open-bg: #fcebdc; --done: #1d6b3a; --done-bg: #e0f1e6; --part: #7a6400; --part-bg: #f8f0cc;
+  --display: "Space Grotesk", "Inter", system-ui, sans-serif;
+  --body: "Inter", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --bg: #121716; --surface: #1a211f; --fg: #e4eae8; --muted: #9aa8a4; --rule: #2c3633;
+  --accent: #5cc4b5; --accent-soft: #17302c; --code-bg: #222b29;
+  --open: #ffab6b; --open-bg: #3a2413; --done: #7fd39b; --done-bg: #16301f; --part: #e6cf63; --part-bg: #332c10;
+  color-scheme: dark } }
+:root[data-theme="dark"] {
+  --bg: #121716; --surface: #1a211f; --fg: #e4eae8; --muted: #9aa8a4; --rule: #2c3633;
+  --accent: #5cc4b5; --accent-soft: #17302c; --code-bg: #222b29;
+  --open: #ffab6b; --open-bg: #3a2413; --done: #7fd39b; --done-bg: #16301f; --part: #e6cf63; --part-bg: #332c10;
+  color-scheme: dark }
+
+body { margin: 0; background: var(--bg); color: var(--fg); font-family: var(--body); font-size: 15px; line-height: 1.6;
+  padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); padding-block: 32px 72px; }
+.wrap { max-width: 880px; margin: 0 auto; display: flex; flex-direction: column; gap: 30px; }
+header, section { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+h1 { font-family: var(--display); font-size: 30px; line-height: 1.15; margin: 0; font-weight: 600; text-wrap: balance; }
+h2 { font-family: var(--display); font-size: 21px; margin: 0; font-weight: 600; text-wrap: balance; }
+h3 { font-size: 15.5px; margin: 0; font-weight: 600; text-wrap: balance; }
+p { margin: 0; max-width: 72ch; }
+ul, ol { margin: 0; padding-left: 22px; display: flex; flex-direction: column; gap: 6px; max-width: 72ch; }
+code { font-family: var(--mono); font-size: 0.86em; background: var(--code-bg); padding: 1px 5px; border-radius: 4px; overflow-wrap: anywhere; }
+pre.code { font-family: var(--mono); font-size: 12.5px; line-height: 1.55; background: var(--code-bg); padding: 12px 14px; border-radius: 6px; margin: 0; overflow-x: auto; }
+.eyebrow { font-size: 12px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); font-weight: 600; }
+.meta { color: var(--muted); font-size: 13.5px; }
+.lede { font-size: 16.5px; }
+.part { border-top: 2px solid var(--accent); padding-top: 14px; }
+.part .eyebrow { color: var(--accent); }
+.panel { background: var(--surface); border: 1px solid var(--rule); border-radius: 8px; padding: 16px 18px; display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.tw { overflow-x: auto; }
+table { border-collapse: collapse; width: 100%; font-size: 13.5px; }
+th, td { text-align: left; vertical-align: top; padding: 7px 10px; border-top: 1px solid var(--rule); }
+th { font-size: 12px; letter-spacing: .05em; text-transform: uppercase; color: var(--muted); font-weight: 600; border-top: 0; }
+td.n { font-variant-numeric: tabular-nums; white-space: nowrap; }
+.pill { display: inline-block; font-size: 11px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; padding: 1px 7px; border-radius: 4px; white-space: nowrap; }
+.pill.open { background: var(--open-bg); color: var(--open); }
+.pill.done { background: var(--done-bg); color: var(--done); }
+.pill.part { background: var(--part-bg); color: var(--part); }
+.formula { font-family: var(--mono); font-size: 13px; background: var(--accent-soft); border-radius: 6px; padding: 10px 14px; overflow-x: auto; white-space: pre; }
+.diagram { overflow-x: auto; background: var(--surface); border: 1px solid var(--rule); border-radius: 8px; padding: 12px; }
+.win { background: var(--accent-soft); }
+.note { color: var(--muted); font-size: 13.5px; }
+.flow { display: block; min-width: 640px; width: 100%; height: auto; }
+.flow rect { fill: var(--accent-soft); stroke: var(--accent); stroke-width: 1.2; }
+.flow rect.pick { fill: var(--surface); stroke-width: 2; }
+.flow line { stroke: var(--muted); stroke-width: 1.5; }
+.flow polygon { fill: var(--muted); }
+.flow text { fill: var(--fg); font-family: var(--body); font-size: 12.5px; text-anchor: middle; }
+.flow text .t { font-weight: 600; }
+.flow text .s { fill: var(--muted); }
+</style>
+</head>
+<body>
+
+<div class="wrap">
+
+<header>
+  <span class="eyebrow">EMIT Critical Minerals · L3 mosaic · to-do item 1</span>
+  <h1>Contender C walkthrough</h1>
+  <p class="meta">Written 16 Nov 2026 for review before the CONUS 2023 run. Code references are to Stratum branch <code>review-fixes</code> at <code>b49b385</code> (not yet merged to <code>main</code>).</p>
+  <p class="lede">Contender C builds a one-year mineral map by picking, for every 60 m grid cell, the single EMIT overpass that best represents the year. It first finds what most overpasses agree the mineral is, in each Tetracorder group separately, then chooses the best-quality overpass among those that show that answer.</p>
+</header>
+
+<section>
+  <h2>In one paragraph</h2>
+  <p>Every overpass ("look") of a cell during the year is masked for cloud, water, built-up land and poor illumination. The surviving looks vote, group 1 and group 2 separately, and the most common mineral in each group is the cell's consensus. Each look also gets a quality penalty from ten metrics, each expressed as the look's rank among that cell's own looks. Looks that show both consensus minerals are ranked by penalty; looks that do not are kept but pushed to the back. The top look wins, and every delivered value for the cell (both mineral ids, both band depths, fractional cover, acquisition time) comes from that one look, so each cell traces to one spectrum.</p>
+  <div class="diagram">
+<svg class="flow" viewBox="0 0 785 306" role="img" aria-label="Flow of contender C: looks are filtered and masked, then voted per group and ranked, gated, and one look is picked and delivered">
+<rect x="10" y="10" width="190" height="66" rx="6"/>
+<text x="105" y="34"><tspan class="t">All looks of the cell</tspan><tspan class="s" x="105" dy="16">every overpass</tspan><tspan class="s" x="105" dy="15">in the year</tspan></text>
+<rect x="240" y="10" width="190" height="66" rx="6"/>
+<text x="335" y="34"><tspan class="t">Granule filter</tspan><tspan class="s" x="335" dy="16">scene cloud ≤ 0.8</tspan><tspan class="s" x="335" dy="15">solar zenith ≤ 70°</tspan></text>
+<rect x="470" y="10" width="190" height="66" rx="6"/>
+<text x="565" y="34"><tspan class="t">Pixel masks</tspan><tspan class="s" x="565" dy="16">edge, L2A flags,</tspan><tspan class="s" x="565" dy="15">land cover, cos(i), fill</tspan></text>
+<rect x="355" y="120" width="190" height="66" rx="6"/>
+<text x="450" y="144"><tspan class="t">Vote per group</tspan><tspan class="s" x="450" dy="16">mode of group 1</tspan><tspan class="s" x="450" dy="15">mode of group 2</tspan></text>
+<rect x="585" y="120" width="190" height="66" rx="6"/>
+<text x="680" y="144"><tspan class="t">Rank ten metrics</tspan><tspan class="s" x="680" dy="16">rank within the cell</tspan><tspan class="s" x="680" dy="15">penalty P per look</tspan></text>
+<rect x="470" y="230" width="190" height="66" rx="6"/>
+<text x="565" y="254"><tspan class="t">Soft gate</tspan><tspan class="s" x="565" dy="16">both modes: −P</tspan><tspan class="s" x="565" dy="15">otherwise: −(P + 10)</tspan></text>
+<rect x="240" y="230" width="190" height="66" rx="6" class="pick"/>
+<text x="335" y="254"><tspan class="t">Highest score wins</tspan><tspan class="s" x="335" dy="16">one look per cell</tspan><tspan class="s" x="335" dy="15">tie: earliest look</tspan></text>
+<rect x="10" y="230" width="190" height="66" rx="6"/>
+<text x="105" y="254"><tspan class="t">Deliver that look</tspan><tspan class="s" x="105" dy="16">minerals, depths,</tspan><tspan class="s" x="105" dy="15">cover, date</tspan></text>
+<line x1="200" y1="43" x2="230.0" y2="43.0"/><polygon points="238,43 230.0,47.0 230.0,39.0"/>
+<line x1="430" y1="43" x2="460.0" y2="43.0"/><polygon points="468,43 460.0,47.0 460.0,39.0"/>
+<line x1="535" y1="76" x2="457.2" y2="114.5"/><polygon points="450,118 455.4,110.9 458.9,118.0"/>
+<line x1="595" y1="76" x2="672.8" y2="114.5"/><polygon points="680,118 671.1,118.0 674.6,110.9"/>
+<line x1="450" y1="186" x2="527.8" y2="224.5"/><polygon points="535,228 526.1,228.0 529.6,220.9"/>
+<line x1="680" y1="186" x2="602.2" y2="224.5"/><polygon points="595,228 600.4,220.9 603.9,228.0"/>
+<line x1="470" y1="263" x2="440.0" y2="263.0"/><polygon points="432,263 440.0,259.0 440.0,267.0"/>
+<line x1="240" y1="263" x2="210.0" y2="263.0"/><polygon points="202,263 210.0,259.0 210.0,267.0"/>
+</svg>
+  </div>
+</section>
+
+<!-- =================================================================== SCIENCE -->
+<section class="part">
+  <span class="eyebrow">Part 1</span>
+  <h2>The science</h2>
+</section>
+
+<section>
+  <h3>What goes in</h3>
+  <div class="tw"><table>
+    <thead><tr><th>Input</th><th>Product (today)</th><th>Used for</th></tr></thead>
+    <tbody>
+      <tr><td>Mineral id, group 1 and 2</td><td>L2B MIN V001</td><td>The vote and the delivered map. Native Tetracorder classes, not EMIT-10.</td></tr>
+      <tr><td>Band depth, group 1 and 2</td><td>L2B MIN V001</td><td>Delivered; also a ranking metric</td></tr>
+      <tr><td>Band-depth uncertainty and fit</td><td>L2B MINUNCERT V001</td><td>Ranking metrics</td></tr>
+      <tr><td>Viewing geometry</td><td>L1B OBS V001</td><td>View zenith, solar zenith, path length, cos(i)</td></tr>
+      <tr><td>Cloud and water flags</td><td>L2A MASK V002</td><td>Pixel mask; cloud probability as a ranking metric</td></tr>
+      <tr><td>Fractional cover (bare, PV, NPV)</td><td>L2B FRCOV V001</td><td>Bare fraction as a ranking metric; all three delivered</td></tr>
+      <tr><td>Land cover</td><td>ESA WorldCover 2021, 10 m</td><td>Pixel mask (water, built-up)</td></tr>
+    </tbody>
+  </table></div>
+  <p>Grid: the L3 reflectance lattice, EPSG:4326 at 0.00055° (about 61 m), in 0.55° tiles. Time: one epoch covering the whole year, so "the stack" is every look of the year.</p>
+</section>
+
+<section>
+  <h3>Step 1. Which scenes are considered</h3>
+  <p>A scene is dropped whole if its catalogue cloud fraction is above 0.8 or its solar zenith is above 70°. On the demo sites this kept 157 of 465 scenes.</p>
+</section>
+
+<section>
+  <h3>Step 2. Which pixels are usable</h3>
+  <p>A look of a cell is valid only if it passes all four masks and has no fill in any band the ranking reads.</p>
+  <div class="tw"><table>
+    <thead><tr><th>Mask</th><th>Rule</th></tr></thead>
+    <tbody>
+      <tr><td>Edge trim</td><td>Drop the 7 outermost cross-track detector columns each side</td></tr>
+      <tr><td>L2A standard</td><td>Drop where any of cloud, cirrus, water, spacecraft or dilated-cloud is flagged</td></tr>
+      <tr><td>Land cover</td><td>Drop WorldCover water and built-up</td></tr>
+      <tr><td>Illumination</td><td>Drop where cos(i) is below 0.3</td></tr>
+      <tr><td>Fill</td><td>Drop where any ranked band is fill. Fractional cover is fill wherever its own QC flags cloud, urban, water or snow.</td></tr>
+    </tbody>
+  </table></div>
+  <p>A masked look neither votes nor can win. This is why roads appear as thin no-data lines: the land-cover mask and the fractional-cover fill both follow them (see <a href="#open">open items</a>).</p>
+</section>
+
+<section>
+  <h3>Step 3. The vote</h3>
+  <ul>
+    <li>Group 1 and group 2 are voted on separately (<code>key: independent</code>). A noisy group-2 answer does not cost group 1 its consensus.</li>
+    <li>Each valid look that detected something in a group casts one vote for that mineral. A look that detected nothing in a group abstains in that group.</li>
+    <li>The mineral with the most votes is the group's <strong>mode</strong>. A tie between minerals goes to the tied look with the lowest penalty.</li>
+    <li>One agreeing look is enough (<code>min_count: 1</code>).</li>
+  </ul>
+</section>
+
+<section>
+  <h3>Step 4. Ranking the looks</h3>
+  <p>Ten metrics, equally weighted. For each metric, each look gets its rank among the cell's valid looks, scaled so the best look is 0 and the worst is 1. Tied looks share the average rank. A cell with one valid look scores 0.</p>
+  <div class="formula">penalty(metric, look) = rank among the cell's n valid looks / (n − 1)
+P(look)               = mean of the ten metric penalties        (0 best, 1 worst)</div>
+  <div class="tw"><table>
+    <thead><tr><th>Metric</th><th>Reads</th><th>Better when</th><th>What it measures</th></tr></thead>
+    <tbody>
+      <tr><td><code>vza</code></td><td>View zenith</td><td>Lower</td><td>Viewing geometry</td></tr>
+      <tr><td><code>sza</code></td><td>Solar zenith</td><td>Lower</td><td>Illumination</td></tr>
+      <tr><td><code>airmass</code></td><td>1/cos(sza) + 1/cos(vza)</td><td>Lower</td><td>Atmospheric path</td></tr>
+      <tr><td><code>path_length</code></td><td>Sensor-to-ground distance</td><td>Lower</td><td>Viewing geometry</td></tr>
+      <tr><td><code>cloud_prob</code></td><td>L2A mask band 8</td><td>Lower</td><td>Pixel cloud likelihood</td></tr>
+      <tr><td><code>scene_cloudiness</code></td><td>Catalogue cloud fraction of the scene</td><td>Lower</td><td>Scene-level cloud</td></tr>
+      <tr><td><code>bare</code></td><td>Bare-soil fraction</td><td>Higher</td><td>Surface exposure</td></tr>
+      <tr><td><code>banddepth</code></td><td>Mean of the two groups' band depths</td><td>Higher</td><td>Property of the identified mineral</td></tr>
+      <tr><td><code>fit</code></td><td>Mean of the two groups' fits</td><td>Higher</td><td>Property of the identified mineral</td></tr>
+      <tr><td><code>bd_unc</code></td><td>Mean of the two groups' depth uncertainties</td><td>Lower</td><td>Property of the identified mineral</td></tr>
+    </tbody>
+  </table></div>
+  <p>Rank normalisation needs no tuned bounds and behaves the same at a site with 7 scenes as at one with 150. It also means only the order of values matters, so a change of scale in an input (for example fit stored at half scale) does not change the result.</p>
+</section>
+
+<section>
+  <h3>Step 5. The gate and the pick</h3>
+  <div class="formula">score(look) = −P            if the look shows the group-1 mode AND the group-2 mode
+            = −(P + 10)     otherwise                       (soft gate)
+winner      = the valid look with the highest score; a tie goes to the earliest look</div>
+  <p>Because P is at most 1, the +10 puts every non-matching look behind every matching one, but still lets one win if no look matches. A hard gate would leave such cells empty.</p>
+</section>
+
+<section>
+  <h3>Worked example: one cell, five valid looks</h3>
+  <div class="tw"><table>
+    <thead><tr><th>Look</th><th>Group 1</th><th>Group 2</th><th>P (illustrative)</th><th>Shows both modes</th><th>Score</th></tr></thead>
+    <tbody>
+      <tr><td>1</td><td>hematite</td><td>kaolinite</td><td class="n">0.45</td><td>yes</td><td class="n">−0.45</td></tr>
+      <tr class="win"><td>2</td><td>hematite</td><td>kaolinite</td><td class="n">0.30</td><td>yes</td><td class="n"><strong>−0.30</strong></td></tr>
+      <tr><td>3</td><td>goethite</td><td>kaolinite</td><td class="n">0.10</td><td>no</td><td class="n">−10.10</td></tr>
+      <tr><td>4</td><td>hematite</td><td>illite</td><td class="n">0.20</td><td>no</td><td class="n">−10.20</td></tr>
+      <tr><td>5</td><td>none</td><td>kaolinite</td><td class="n">0.25</td><td>no</td><td class="n">−10.25</td></tr>
+    </tbody>
+  </table></div>
+  <ul>
+    <li>Group 1: hematite 3, goethite 1, look 5 abstains. Mode is hematite.</li>
+    <li>Group 2: kaolinite 4, illite 1. Mode is kaolinite.</li>
+    <li>Looks 1 and 2 show both modes. Look 2 has the lower penalty and wins, although look 3 has the best quality of all.</li>
+    <li>Delivered <code>agreement</code> is 2/5 = 0.4: the share of valid looks that show <em>both</em> modes, even though 4 of 5 agree on kaolinite.</li>
+  </ul>
+</section>
+
+<section>
+  <h3>What comes out</h3>
+  <div class="tw"><table>
+    <thead><tr><th>Layer</th><th>Meaning</th></tr></thead>
+    <tbody>
+      <tr><td><code>mineral_1</code>, <code>mineral_2</code></td><td>The winning look's Tetracorder class in each group</td></tr>
+      <tr><td><code>depth_1</code>, <code>depth_2</code></td><td>The winning look's band depths</td></tr>
+      <tr><td><code>bare</code>, <code>pv</code>, <code>npv</code></td><td>The winning look's fractional cover</td></tr>
+      <tr><td><code>acquired_1</code> (and <code>granule_1</code>)</td><td>Which scene won; one scene per cell for both groups</td></tr>
+      <tr><td><code>n_valid</code></td><td>Valid looks of the cell</td></tr>
+      <tr><td><code>mode_count</code>, <code>agreement</code></td><td>Looks showing both modes, and that count over <code>n_valid</code></td></tr>
+      <tr><td><code>selection_penalty</code></td><td>The winner's P</td></tr>
+      <tr><td><code>n_observed</code></td><td>Whether any scene reached the cell before masking</td></tr>
+    </tbody>
+  </table></div>
+</section>
+
+<section>
+  <h3>Properties to understand before scaling</h3>
+  <div class="panel">
+    <ol>
+      <li><strong>The map shows the winning look's minerals, not the modes.</strong> Where no look shows both modes, at least one delivered group is not that group's consensus. The scorer computes the per-group modes (<code>mode_1</code>, <code>mode_2</code>) but C does not deliver them.</li>
+      <li><strong><code>agreement</code> is a both-groups measure.</strong> It under-reports a cell where one group is unanimous and the other is sparse, and it drives the map's transparency.</li>
+      <li><strong>Three of the ten ranking metrics describe the mineral, not the look.</strong> Band depth, fit and depth uncertainty favour looks whose identified mineral has deep, well-fit features. In C this affects only which look is picked, not the vote (review finding S4).</li>
+      <li><strong>Band depth averages in a zero for an undetected group.</strong> A look that detected only one group has half the depth score of the same look with both.</li>
+      <li><strong>Fill removes a look from the vote, not only from selection.</strong> The external tiled aggregator keeps such a look as a voter, so the two tools can find different modes. Setting the <code>bare</code> weight to 0 restores its voter set.</li>
+      <li><strong>Adjacent scenes of one pass may count as two looks</strong> in a thin strip along scene boundaries (review finding S10, suspected, not measured).</li>
+      <li><strong>Roads are no-data.</strong> Kept by decision on 16 Nov 2026.</li>
+    </ol>
+  </div>
+</section>
+
+<section>
+  <h3>What changes for CONUS 2023</h3>
+  <div class="tw"><table>
+    <thead><tr><th>Setting</th><th>Demo sites today</th><th>CONUS 2023 plan</th><th>To-do</th></tr></thead>
+    <tbody>
+      <tr><td>Year</td><td>2025</td><td>2023</td><td>6</td></tr>
+      <tr><td>L2B MIN, L1B OBS</td><td>V001</td><td>V002</td><td>6</td></tr>
+      <tr><td>L2A mask</td><td>V002</td><td>V003</td><td>2, 6</td></tr>
+      <tr><td>Cloud mask</td><td>L2A flags incl. dilated cloud</td><td>SpecTf cloud flag; dilated cloud dropped</td><td>2</td></tr>
+      <tr><td>Cloud-edge buffer</td><td>none</td><td>Optional, from the buffer-distance band, 2–3 px at most</td><td>3</td></tr>
+      <tr><td>Fallback mask</td><td>n/a</td><td>Union of traditional and SpecTf, if SpecTf drops too much</td><td>4</td></tr>
+      <tr><td>Fractional cover</td><td>V001</td><td>V002 exists; not yet named in the to-do</td><td>new</td></tr>
+      <tr><td>Area</td><td>4 demo zones, 24-tile budget</td><td>CONUS; budget and land-cover tile list must grow</td><td>new</td></tr>
+      <tr><td>Scoring</td><td colspan="2">Unchanged</td><td></td></tr>
+    </tbody>
+  </table></div>
+  <p class="note">CMR on 16 Nov 2026, box 125°W–66°W, 24°N–50°N, calendar 2023: L2B MIN V002, L1B RAD V002, L2A MASK V003 and FRCOV V002 each list 4,813 granules; L2B MIN V001 lists 5,102. V002 lists no 2025 CONUS mineral granules, so the demo re-run must also move to 2023.</p>
+</section>
+
+<!-- =================================================================== IMPLEMENTATION -->
+<section class="part">
+  <span class="eyebrow">Part 2</span>
+  <h2>The implementation</h2>
+  <p>Stratum is a framework plus an EMIT plugin. The framework knows grids, epochs, caching and stages. Everything EMIT-specific (readers, masks, scorers) lives in <code>plugins/stratum-emit</code> and is found by name.</p>
+</section>
+
+<section>
+  <h3>How a manifest name becomes code</h3>
+  <p>The manifest names a plugin with <code>ref:</code>. The plugin package registers that name as a Python entry point in <code>plugins/stratum-emit/pyproject.toml</code>. At plan time the framework looks the name up and instantiates the class with the manifest's <code>params</code>.</p>
+<pre class="code">manifest-assistant-pick.yaml        scorer: { ref: mode_gated_select, params: {...} }
+plugins/stratum-emit/pyproject.toml [project.entry-points."stratum.scorers"]
+                                    mode_gated_select = "stratum_emit.scorers:ModeGatedSelect"
+src/stratum/plugins.py:28           resolve(kind, ref)  -> the class, via importlib entry_points
+src/stratum/plan/run.py:375         instantiate(kind, ref, params) -> ModeGatedSelect(**params)</pre>
+  <p>Masks (<code>stratum.masks</code>) and readers (<code>stratum.readers</code>, keyed by collection short name) resolve the same way. C names no reducer, so the framework's built-in one runs.</p>
+</section>
+
+<section>
+  <h3>Manifest to code, key by key</h3>
+  <p class="note">Manifest: <code>examples/emit-cm-demo-sites/manifest-assistant-pick.yaml</code>. Plugin paths are under <code>plugins/stratum-emit/src/stratum_emit/</code>; framework paths under <code>src/stratum/</code>.</p>
+  <div class="tw"><table>
+    <thead><tr><th>Manifest key</th><th>Resolves to</th><th>Where</th></tr></thead>
+    <tbody>
+      <tr><td><code>grid</code>, <code>regrid_method: kdtree</code></td><td><code>build_glt</code>, wrapping SpectralUtil <code>find_subgrid_locations</code></td><td><code>regrid/__init__.py:212</code></td></tr>
+      <tr><td><code>time.epoch: P1Y</code></td><td>One epoch; resolve sees the whole year as one stack</td><td><code>time.py</code></td></tr>
+      <tr><td><code>inputs.roles.*</code></td><td>Readers <code>L2BMin</code>, <code>L1BRad</code>, <code>L2AMask</code>, <code>L2BFrcovTiff</code></td><td><code>readers/</code></td></tr>
+      <tr><td><code>inputs.band_aliases</code></td><td>Named bands of a multi-band role (<code>view_zenith</code> = OBS band 2, <code>cloud_prob</code> = mask band 8)</td><td><code>plan/run.py:467</code></td></tr>
+      <tr><td><code>aux.landcover</code></td><td><code>warp_aux_tile</code>, mode resampling to the tile grid</td><td><code>ancillary/__init__.py:259</code></td></tr>
+      <tr><td><code>granule_filter</code></td><td><code>MaxCloudFraction</code>, <code>MaxSolarZenith</code></td><td><code>filters.py:80, 96</code></td></tr>
+      <tr><td><code>pixel_mask: edge_trim</code></td><td><code>EdgeTrim.valid</code> (sensor space)</td><td><code>masks/__init__.py:16</code></td></tr>
+      <tr><td><code>pixel_mask: l2a_standard</code></td><td><code>L2AStandard.valid</code>; picks mask bands by name</td><td><code>masks/__init__.py:58</code></td></tr>
+      <tr><td><code>pixel_mask: landcover</code></td><td><code>Landcover.valid</code></td><td><code>masks/__init__.py:152</code></td></tr>
+      <tr><td><code>pixel_mask: cos_i</code></td><td><code>CosineI.valid</code></td><td><code>masks/__init__.py:121</code></td></tr>
+      <tr><td><code>scorer.ref: mode_gated_select</code></td><td><code>ModeGatedSelect</code></td><td><code>scorers/mode_gated.py:206</code></td></tr>
+      <tr><td><code>snapshot.layers.mineral_1</code> (<code>vote</code>)</td><td>Built-in <code>vote</code>; with one epoch it returns the selected look's class</td><td><code>reduce/builtin.py:172</code></td></tr>
+      <tr><td><code>snapshot.layers.*</code> (<code>best</code>)</td><td>Built-in <code>continuous</code></td><td><code>reduce/builtin.py:277</code></td></tr>
+      <tr><td><code>source: scorer.agreement</code> etc.</td><td>Values returned by <code>ModeGatedSelect.emit</code></td><td><code>scorers/mode_gated.py:659</code></td></tr>
+      <tr><td><code>outputs</code></td><td><code>publish_period</code>, <code>write_data_cogs</code></td><td><code>publish/period.py:249</code>, <code>publish/cogs.py:197</code></td></tr>
+    </tbody>
+  </table></div>
+</section>
+
+<section>
+  <h3>The five stages of a run</h3>
+  <div class="tw"><table>
+    <thead><tr><th>Stage</th><th>Unit of work</th><th>What it does</th><th>Entry</th></tr></thead>
+    <tbody>
+      <tr><td>Plan</td><td>Whole run</td><td>Reads the manifest, queries the index, applies the granule filter, instantiates plugins, checks inputs, writes <code>plan.json</code> and the work lists</td><td><code>plan/run.py:916 plan_run</code></td></tr>
+      <tr><td>Regrid</td><td>Granule × tile</td><td>Builds the lookup from grid cell to sensor pixel (the GLT)</td><td><code>executors/worker.py:64 regrid_item</code></td></tr>
+      <tr><td>Resolve</td><td>500 × 500 block × epoch</td><td>Reads every look, masks, scores, picks; writes a snapshot</td><td><code>worker.py:146 resolve_item</code> → <code>resolve/block.py:523 resolve_block</code></td></tr>
+      <tr><td>Reduce</td><td>Block</td><td>Collapses epochs into the product. One epoch here, so it passes the pick through.</td><td><code>worker.py:196 reduce_item</code> → <code>reduce/builtin.py:39</code></td></tr>
+      <tr><td>Publish</td><td>Tile</td><td>Stitches blocks; writes COGs, legends, STAC</td><td><code>worker.py:230 publish_item</code></td></tr>
+    </tbody>
+  </table></div>
+  <p>On AWS each unit is one Lambda invocation. Every stage output is cached under a key built from its inputs, so a re-run only redoes what changed.</p>
+</section>
+
+<section>
+  <h3>Inside resolve: where C's method runs</h3>
+  <p><code>ModeGatedSelect</code> declares <code>capability = "stack"</code>. That tells the framework to hand it all looks at once, not one at a time.</p>
+  <ol>
+    <li><code>_resolve_stack</code> (<code>resolve/block.py:409</code>) calls <code>read_observation</code> (<code>resolve/observation.py:214</code>) for each scene reaching the block. That reads each role through the GLT, applies the sensor-space masks, then the map-space masks, and sets <code>valid</code>.</li>
+    <li>The looks are stacked into arrays of shape (N looks, 500, 500) and passed to <code>scorer.score(obs, aux)</code> once.</li>
+    <li><code>score</code> returns one score per look per cell. <code>stack_argmax</code> (<code>block.py:391</code>) picks the highest; the earliest look wins a tie.</li>
+    <li>Every snapshot layer is gathered from the winning look. Scorer diagnostics come from <code>scorer.emit</code>.</li>
+  </ol>
+</section>
+
+<section>
+  <h3>Inside <code>ModeGatedSelect.score</code></h3>
+  <div class="tw"><table>
+    <thead><tr><th>Step</th><th>Code</th><th>Lines</th></tr></thead>
+    <tbody>
+      <tr><td>Zero the class ids of invalid looks</td><td><code>g1</code>, <code>g2</code></td><td class="n">560–567</td></tr>
+      <tr><td>Per-metric raw values, one look at a time</td><td><code>_raw</code></td><td class="n">444–467</td></tr>
+      <tr><td>Rank each metric within the cell</td><td><code>penalties</code> → <code>rank_penalty</code></td><td class="n">469–487, 133</td></tr>
+      <tr><td>Combine into P with the normalised weights</td><td><code>_weighted</code></td><td class="n">493–497</td></tr>
+      <tr><td>Vote each group on its own</td><td><code>key == "independent"</code> branch → <code>_mode</code> → <code>tally</code></td><td class="n">605–627, 513, 111</td></tr>
+      <tr><td>Mark looks showing both modes</td><td><code>match</code></td><td class="n">616</td></tr>
+      <tr><td>Soft gate</td><td><code>s = where(match, -P, -(P + soft_penalty))</code></td><td class="n">635</td></tr>
+      <tr><td>Invalid looks get no score</td><td><code>s = where(valid &amp; ~drop, s, nan)</code></td><td class="n">636</td></tr>
+      <tr><td>Diagnostics kept for <code>emit</code></td><td><code>self._memo</code></td><td class="n">646–656</td></tr>
+    </tbody>
+  </table></div>
+  <p>Parameters C sets that do nothing under its settings: <code>bounds</code> (unused with rank normalisation), <code>partial_vote_weight</code> and <code>partial_tie_penalty</code> (joint key only), <code>ignore</code> and <code>g2_mask_classes</code> (empty). Defaults in force: <code>vote_weight: count</code>, <code>nondetect: abstain</code>, <code>combine: weighted</code>.</p>
+</section>
+
+<section>
+  <h3>What the review changed for this path</h3>
+  <ul>
+    <li>C's selection logic is unchanged; a test pins its output on the pre-review commit.</li>
+    <li>Cache keys now include the alias-to-band binding, the scene cloud fraction, and a content hash of the plugin and framework code. Changing the mask band or any scorer line now forces a recompute.</li>
+    <li>A worker refuses a plan made under different code, so a stale Lambda image fails loudly.</li>
+    <li>Consequence: after any code change, rebuild the image, re-plan, and expect a cold run.</li>
+  </ul>
+</section>
+
+<!-- =================================================================== OPEN -->
+<section class="part" id="open">
+  <span class="eyebrow">Part 3</span>
+  <h2>Open questions and review status</h2>
+</section>
+
+<section>
+  <h3>Questions for the science lead</h3>
+  <div class="tw"><table>
+    <thead><tr><th>Question</th><th>Status</th></tr></thead>
+    <tbody>
+      <tr><td>Is C the final method?</td><td><span class="pill open">open</span> Pending this walkthrough</td></tr>
+      <tr><td>Should the product deliver the per-group modes (<code>mode_1</code>, <code>mode_2</code>) in place of, or beside, the winning look's classes?</td><td><span class="pill open">open</span></td></tr>
+      <tr><td>Should band depth, fit and depth uncertainty stay in the ranking? (S4)</td><td><span class="pill open">open</span></td></tr>
+      <tr><td>Should band depth average in a zero for an undetected group?</td><td><span class="pill open">open</span></td></tr>
+      <tr><td>Should a look with fractional-cover fill still vote?</td><td><span class="pill open">open</span></td></tr>
+      <tr><td>Per-group agreement in place of the both-groups measure? (L10)</td><td><span class="pill open">open</span></td></tr>
+      <tr><td>Is SpecTf too aggressive over bright targets?</td><td><span class="pill open">open</span> Needs the demo re-run</td></tr>
+      <tr><td>EMIT-10 lumping: how to read <code>-1</code> rows (S1); fraction floor and non-geologic rows (S11)</td><td><span class="pill open">open</span> Off C's path; matters for the downstream EMIT-10 aggregation</td></tr>
+      <tr><td>US West provisional lumping tables (L12)</td><td><span class="pill open">open</span> Off C's path</td></tr>
+      <tr><td>Roads as no-data</td><td><span class="pill done">decided</span> Keep for now</td></tr>
+    </tbody>
+  </table></div>
+</section>
+
+<section>
+  <h3>Engineering questions</h3>
+  <div class="tw"><table>
+    <thead><tr><th>Question</th><th>Status</th></tr></thead>
+    <tbody>
+      <tr><td>Does V002 cover CONUS 2023?</td><td><span class="pill done">answered</span> 4,813 granules in the box against 5,102 in V001. The 289-granule gap is not explained.</td></tr>
+      <tr><td>Which mask bands are SpecTf?</td><td><span class="pill part">partly</span> In V002: band 8 probability, 9 flag, 10 buffer distance. V003 exists in CMR; no file opened yet.</td></tr>
+      <tr><td>Is <code>cloud_prob</code> = mask band 8 correct?</td><td><span class="pill part">partly</span> Yes for V002; re-check on V003</td></tr>
+      <tr><td>Did commit <code>e2a31b6</code> change C's output?</td><td><span class="pill done">answered</span> No</td></tr>
+      <tr><td>What is the dashed seam?</td><td><span class="pill done">answered</span> Roads: land-cover built-up mask plus fractional-cover fill. Not confirmed against the exact line shown on 12 Nov.</td></tr>
+      <tr><td>CONUS cost and runtime</td><td><span class="pill open">open</span> Not estimated</td></tr>
+      <tr><td>Land-cover tiles for CONUS</td><td><span class="pill open">open</span> The manifest lists 5 WorldCover tiles; CONUS needs the full set</td></tr>
+      <tr><td>Fractional cover V002</td><td><span class="pill open">open</span> Not in the to-do; decide whether item 6 includes it</td></tr>
+      <tr><td>Is V002 fit still stored at half scale?</td><td><span class="pill open">open</span> Does not affect C under rank normalisation</td></tr>
+      <tr><td>Width of the seam double-count strip (S10)</td><td><span class="pill open">open</span> Not measured</td></tr>
+      <tr><td>Does Lambda keep <code>/tmp</code> after a timeout?</td><td><span class="pill open">open</span> Not tested</td></tr>
+      <tr><td>The shared <code>pixel_mask</code> test pin</td><td><span class="pill open">open</span> <code>tests/test_examples.py</code> must change with item 2</td></tr>
+      <tr><td>Merge of <code>review-fixes</code>, image rebuild</td><td><span class="pill open">open</span> Branch is local only; nothing has run on AWS</td></tr>
+    </tbody>
+  </table></div>
+</section>
+
+<section>
+  <h3>Code review ledger (48 findings)</h3>
+  <div class="tw"><table>
+    <thead><tr><th>Outcome</th><th>Count</th><th>Findings</th></tr></thead>
+    <tbody>
+      <tr><td>Fixed on <code>review-fixes</code></td><td class="n">26</td><td>C1–C5, S3, S5, S12, B1–B3, P1, P2, P4, P5, O1–O4, L3, L6, L7, L8, L14, L15, L17 (two of its items)</td></tr>
+      <tr><td>Moot once EMIT-10 voting and unused variants are removed</td><td class="n">6</td><td>S2, S7, S8, L4, L5, L11</td></tr>
+      <tr><td>Science decision</td><td class="n">4</td><td>S1, S4, S11, L12</td></tr>
+      <tr><td>Deferred</td><td class="n">12</td><td>S6, S9, S10, B4, B5, P3, L1, L2, L9, L10, L13, L16</td></tr>
+    </tbody>
+  </table></div>
+  <ul>
+    <li><strong>S9</strong> (dilated cloud hides the Mountain Pass pit) is deferred because to-do items 2 and 6 replace that mask.</li>
+    <li><strong>S6</strong> (modes lost where no look passes the gate) does not occur under C's soft gate. It returns if the hard gate is used or if <code>mode_1</code>/<code>mode_2</code> are delivered.</li>
+    <li><strong>S3 and S5</strong> are fixed for the vote only; neither option is used by C, and pruning may remove them.</li>
+    <li><strong>Known limits of the fixes:</strong> regrid and vendored SpectralUtil code are versioned by a hand-bumped number, not the content hash; a Lambda function with an unreadable concurrency reservation may be capped lower than needed; the download store is now POSIX-only.</li>
+  </ul>
+</section>
+
+</div>
+
+</body>
+</html>
