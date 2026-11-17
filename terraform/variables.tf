@@ -211,7 +211,7 @@ variable "run_memory_mb" {
 }
 
 variable "run_storage_gib" {
-  description = "Ephemeral storage: the bundle, the assets and aux sources the planner stages, and the run-directory mirror."
+  description = "Ephemeral storage: the bundle, the assets and aux sources the planner stages, and the run-directory mirror. 200 GiB is Fargate's ceiling."
   type        = number
-  default     = 100
+  default     = 200
 }
