@@ -257,3 +257,39 @@ def test_a_same_day_replan_does_not_link_tiles_the_new_plan_dropped(tmp_path: Pa
     run_all(second.run_dir, workers=1)
     assert (products / tile / "20260701_20260801" / "item.json").is_file()   # stale, still there
     assert linked() == [f"./{tile}/20260601_20260701/item.json"]
+
+
+def test_aux_is_warped_by_the_run_not_by_the_plan(tmp_path: Path) -> None:
+    """05 section 5: the plan resolves an aux source to an identity and stops; the run stages
+    and warps it before its first stage, onto the tiles it resolves. So a plan - and a dry run
+    - writes no aux artifact, and the run's products are masked by the land cover all the same."""
+    from affine import Affine
+
+    write_scenes(tmp_path / "granules")
+    w, s, e, n = TILE.bounds
+    cover = np.full((60, 60), 60, dtype="uint8")              # WorldCover "bare"
+    cover[:, :30] = 80                                        # the western half is water
+    with rasterio.open(tmp_path / "landcover.tif", "w", driver="GTiff", height=60, width=60,
+                       count=1, dtype="uint8", crs="EPSG:4326", nodata=0,
+                       transform=Affine((e - w) / 50, 0, w - 5 * (e - w) / 50,
+                                        0, -(n - s) / 50, n + 5 * (n - s) / 50)) as dst:
+        dst.write(cover, 1)
+    manifest = write_manifest(
+        tmp_path / "manifest.yaml", run_label="aux",
+        aux={"landcover": {"uri": "landcover.tif", "kind": "categorical",
+                           "resampling": "nearest"}},
+        pixel_mask=[{"ref": "edge_trim", "columns": 7},
+                    {"ref": "landcover", "exclude": ["water"]}])
+    result = plan_run(manifest)
+    aux_dir = result.root / "cache" / "aux"
+    assert not list(aux_dir.rglob("*.tif")), "the plan warped an aux source"
+    assert "tiles_warped" not in result.document["aux"]
+
+    execution = run_all(result.run_dir, workers=1)
+    assert execution["aux"]["sources"] == ["landcover"] and execution["aux"]["warped"] == 1
+    assert len(list(aux_dir.rglob("*.tif"))) == 1
+    products = next(result.root.glob("products/*/*/*"))
+    mineral = band(products, "mineral_1")
+    assert (mineral[:, :20] == ND).all(), "water was not masked"
+    assert (mineral[:, 30:] != ND).any(), "nothing survived on bare ground"
+    assert run_all(result.run_dir, workers=1)["aux"]["warped"] == 0

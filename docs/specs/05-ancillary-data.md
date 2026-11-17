@@ -126,7 +126,8 @@ Three things this buys:
 
 1. The planner validates existence and readability **before provisioning compute** — a typo in a
    DEM path fails in the plan stage, not in 4,000 concurrent workers.
-2. Aux can be prefetched and warped during planning, so resolve never blocks on a cold fetch.
+2. Aux can be fetched and warped once, ahead of the workers, so resolve never blocks on a cold
+   fetch.
 3. Source identity enters the cache key.
 
 That third point is the load-bearing one:
@@ -159,18 +160,26 @@ which requires enumerating what exists — and a run never queries a catalogue
 which is a sub-feature in its own right and has no consumer yet. `AuxSpec` still validates the
 field; `validate_static` refuses a manifest that sets it.
 
-**Source identity is a content digest, not the ETag.** [06 §2](06-caching.md) names
-`source_etag`; the key carries `sha256` of the staged bytes instead. `AssetStore` never reads a
-response ETag, an aux file carries no catalogue checksum, and a multipart ETag hashes
-part-hashes rather than content. The digest is strictly stronger, works identically for
-`file://`, and needs no extra round-trip. The ETag is recorded beside it in provenance as
-explanatory metadata.
+**Source identity: a content digest for a local file, ETag and size for a remote one**
+(2026-11-17). A plan decides what a run would do, so it must not fetch what it only needs to
+name. A local part is hashed (`sha256` of its bytes), as before. A remote part is asked for its
+ETag and size in a one-byte range request — through the same session and redirects a download
+uses — and its identity is `etag:<etag>:<size>`. A multipart ETag is not a content hash, but it
+changes whenever the object is replaced, which is the property rule 4 of
+[06 §3](06-caching.md) needs. A part whose server reports no ETag is the one case still staged
+and hashed at plan time. A source of several parts is identified by the digest of its parts'
+identities in order. Before this, every part was downloaded to be hashed: 157 files and 10 GB
+for a land-cover source over the conterminous United States, to produce a plan.
 
-**The planner warps, not the worker.** §5 point 2 offers plan-time warping as an option; it is
-the default, because the asset cache is node-local while the artifact cache is shared. A worker
-that fetched aux itself would pull the whole source once per invocation. Warping every tile in
-the AOI at plan time means no worker opens the source at all — six tiles of ESA WorldCover cost
-about three seconds.
+**The run stages and warps, before its first stage; not the plan and not a worker.** Not a
+worker, because the asset cache is node-local while the artifact cache is shared: a worker that
+fetched aux itself would pull the whole source once per invocation, whereas a tile warped once
+is read by every worker. Not the plan, because warping decides nothing. So whoever orchestrates
+the run — `stratum run`, or `stratum orchestrate` in a task — stages each source some tile still
+needs, checks its identity is still the one the plan keyed on (and stops if it is not), and
+warps it in threads onto **the tiles the run resolves**, which is fewer than the area of
+interest wherever no granule reaches. A source every tile already has warped is not downloaded.
+A dry run does none of it.
 
 **A declared alias enters the key whether or not it is read.** §5's promise is enforced through
 the snapshot key, and that key is built *before* the scorer runs, so "what was actually read" is
@@ -193,8 +202,8 @@ refused — the same limit granule assets have ([12 §4](12-data-access.md)).
 ## 7. Open questions
 
 1. ~~Should `aux` support remote HTTP sources, or require staging into our bucket first?~~
-   **Resolved:** staged. Aux is copied into the deployment's root first; a run never depends on
-   third-party uptime.
+   **Resolved:** staged, by the run before its first stage. From that point a run never depends
+   on third-party uptime; a plan depends on it for one small request per remote part.
 2. ~~Do we need vector→vector spatial joins (e.g. "distance to nearest mine"), or is rasterize-and-
    burn sufficient?~~ **Resolved:** the scorer can do it itself, and helpers cover the common cases.
    `obs.coords` gives every cell's centre in the grid CRS and in lon/lat; `aux.features(alias)`

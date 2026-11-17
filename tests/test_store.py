@@ -937,3 +937,24 @@ def test_open_ranged_prefers_a_local_or_cached_copy(tmp_path):
     target.parent.mkdir(parents=True)
     target.write_bytes(BODY)
     assert isinstance(store.open_ranged(URL, checksum=f"sha512:{SHA}"), CachedAsset)
+
+
+def test_probe_reports_etag_and_size_from_one_byte(tmp_path: Path, monkeypatch) -> None:
+    """What a plan asks of a remote aux source: that it exists and which version it is, for the
+    price of one byte. The size comes from Content-Range, since Content-Length is the range's."""
+    store = AssetStore(tmp_path)
+    asked: list[dict] = []
+
+    def get(uri: str, headers=None):
+        asked.append(dict(headers or {}))
+        return FakeResponse(206, b"x", {"Content-Range": "bytes 0-0/104857600",
+                                        "Content-Length": "1", "ETag": '"abc-12"'})
+    monkeypatch.setattr(store, "_get", get)
+    assert store.probe("https://example.org/a.tif") == ("abc-12", 104857600)
+    assert asked == [{"Range": "bytes=0-0"}]
+    monkeypatch.setattr(store, "_get", lambda uri, headers=None: FakeResponse(404, b""))
+    with pytest.raises(AssetFetchError):
+        store.probe("https://example.org/missing.tif")
+    monkeypatch.setattr(store, "_get", lambda uri, headers=None: FakeResponse(
+        200, b"x", {"Content-Length": "7"}))               # no range support, no ETag
+    assert store.probe("https://example.org/plain.tif") == (None, 7)

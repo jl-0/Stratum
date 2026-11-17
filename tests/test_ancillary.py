@@ -568,3 +568,127 @@ def test_the_accessor_says_which_tile_is_missing_rather_than_naming_a_path(tmp_p
     aux = BlockAux({source.alias: key}, {source.alias: source}, BlockRef(TILE, 0, 0), cache)
     with pytest.raises(AuxError, match="planner warps every declared source"):
         aux.raster("landcover")
+
+
+# ------------------------------------------------- 05 section 5: a plan fetches nothing remote
+class _Staged:
+    def __init__(self, path, etag):
+        self._path, self.etag = path, etag
+
+    def path(self):
+        return self._path
+
+
+class FakeRemote:
+    """An asset store over `{uri: (local file, etag)}` that records what was asked of it:
+    `probes` cost a byte each, `opens` cost the whole file."""
+
+    def __init__(self, files):
+        self.files, self.probes, self.opens = dict(files), [], []
+
+    def probe(self, uri):
+        self.probes.append(uri)
+        path, etag = self.files[uri]
+        return etag, path.stat().st_size
+
+    def open(self, uri):
+        self.opens.append(uri)
+        path, etag = self.files[uri]
+        return _Staged(path, etag)
+
+
+def _manifest(uris, resampling="nearest"):
+    from types import SimpleNamespace
+    return SimpleNamespace(aux={"landcover": SimpleNamespace(
+        uris=list(uris), kind="categorical", resampling=resampling)})
+
+
+def test_a_remote_source_is_identified_at_plan_time_without_being_fetched(tmp_path):
+    """A plan decides what a run would do. A continental land-cover source is 157 files and
+    10 GB, and none of it is needed to decide: each part's ETag and size name it well enough to
+    key on, and the order of the parts is part of the identity because later parts win."""
+    from stratum.plan.run import declare_aux
+
+    a = aligned_source(tmp_path, np.full((20, 20), 5, "uint8"), "a.tif", nodata=0)
+    b = aligned_source(tmp_path, np.full((20, 20), 9, "uint8"), "b.tif", nodata=0)
+    ua, ub = "https://example.org/a.tif", "https://example.org/b.tif"
+    store = FakeRemote({ua: (a, "e-a"), ub: (b, "e-b")})
+    source = declare_aux(_manifest([ua, ub]), store)["landcover"]
+    assert store.probes == [ua, ub] and store.opens == [], "the plan downloaded an aux source"
+    assert source.paths == () and source.uris == (ua, ub)
+    assert AuxSource.from_doc("landcover", source.to_doc()) == source     # plan.json round trip
+    swapped = declare_aux(_manifest([ub, ua]), FakeRemote(store.files))["landcover"]
+    assert swapped.digest != source.digest, "reordering a mosaic is a different artifact"
+    replaced = declare_aux(_manifest([ua, ub]),
+                           FakeRemote({ua: (a, "e-a2"), ub: (b, "e-b")}))["landcover"]
+    assert replaced.digest != source.digest, "a replaced file must move the key"
+    one = declare_aux(_manifest([ua]), FakeRemote(store.files))["landcover"]
+    assert one.digest == f"etag:e-a:{a.stat().st_size}"
+
+
+def test_a_local_source_keeps_its_content_digest(tmp_path):
+    """A local file is here, so it is hashed as it always was: the keys of every run over local
+    aux are the ones they had before a remote source stopped being fetched at plan time."""
+    from stratum.plan.run import declare_aux
+
+    a = aligned_source(tmp_path, np.full((20, 20), 5, "uint8"), "a.tif", nodata=0)
+    b = aligned_source(tmp_path, np.full((20, 20), 9, "uint8"), "b.tif", nodata=0)
+    store = FakeRemote({})
+    source = declare_aux(_manifest(["a.tif", "b.tif"]), store, manifest_dir=tmp_path)["landcover"]
+    assert store.probes == [] and store.opens == []
+    assert source.paths == (a.resolve(), b.resolve())
+    assert source.digest == sources_digest([a, b])
+    assert declare_aux(_manifest(["a.tif"]), store, manifest_dir=tmp_path)["landcover"].digest \
+        == file_digest(a)
+
+
+def test_a_source_without_an_etag_is_hashed_instead(tmp_path):
+    """No ETag leaves nothing to key on but the bytes: that part is staged and hashed."""
+    from stratum.plan.run import declare_aux
+
+    a = aligned_source(tmp_path, np.full((20, 20), 5, "uint8"), "a.tif", nodata=0)
+    store = FakeRemote({"https://example.org/a.tif": (a, None)})
+    source = declare_aux(_manifest(["https://example.org/a.tif"]), store)["landcover"]
+    assert store.opens == ["https://example.org/a.tif"] and source.digest == file_digest(a)
+
+
+def test_staging_refuses_a_source_replaced_since_the_plan(tmp_path):
+    """The run stages what the plan named. A file replaced in between would be warped under a
+    key that names its predecessor, so the identity is checked again as the bytes arrive."""
+    from stratum.plan import PlanError
+    from stratum.plan.run import declare_aux, stage_aux
+
+    a = aligned_source(tmp_path, np.full((20, 20), 5, "uint8"), "a.tif", nodata=0)
+    uri = "https://example.org/a.tif"
+    planned = declare_aux(_manifest([uri]), FakeRemote({uri: (a, "v1")}))["landcover"]
+    staged = stage_aux(planned, FakeRemote({uri: (a, "v1")}))
+    assert staged.paths == (a,) and staged.digest == planned.digest
+    with pytest.raises(PlanError, match="plan again"):
+        stage_aux(planned, FakeRemote({uri: (a, "v2")}))
+
+
+def test_the_run_warps_only_what_is_missing_and_stages_only_then(tmp_path):
+    """Before its first stage a run warps aux onto the tiles it resolves. A tile already warped
+    costs nothing, and when every tile is, the source is never downloaded at all."""
+    from stratum.plan.run import declare_aux, warp_aux_for_tiles
+
+    values = np.arange(400, dtype="uint8").reshape(20, 20) % 100 + 1
+    a = aligned_source(tmp_path, values, nodata=0)
+    uri = "https://example.org/a.tif"
+    store = FakeRemote({uri: (a, "v1")})
+    sources = declare_aux(_manifest([uri]), store)
+    cache = CacheRoot(tmp_path / "root")
+    east = TileRef(GRID, 1, 0)
+    key = aux_key_for(cache, TILE, sources["landcover"])
+    with pytest.raises(AuxError, match="not staged"):
+        warp_aux_tile(cache, TILE, sources["landcover"])        # the plan's source cannot warp
+    assert not cache.committed(key)
+
+    assert warp_aux_for_tiles(cache, [TILE], sources, store=store, workers=2) == 1
+    assert store.opens == [uri] and cache.committed(key)
+    with rasterio.open(key.path) as src:
+        np.testing.assert_array_equal(src.read(1), values)
+    assert warp_aux_for_tiles(cache, [TILE, east], sources, store=store, workers=2) == 1
+    assert store.opens == [uri, uri], "only the missing tile was warped, from one staging"
+    assert warp_aux_for_tiles(cache, [TILE, east], sources, store=store) == 0
+    assert store.opens == [uri, uri], "nothing was missing, so nothing was staged"

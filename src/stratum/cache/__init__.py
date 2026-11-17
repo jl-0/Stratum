@@ -114,6 +114,13 @@ class CacheRoot:
             return True
         return False
 
+    def committed(self, key: CacheKey) -> bool:
+        """Whether the artifact exists, WITHOUT fetching it: here, or as a commit marker in the
+        bucket. For a caller deciding what is left to build, not about to read - `hit` on a
+        remote workspace mirrors the artifact, which is a download per key asked about."""
+        return self._present(key) or (self.workspace.remote
+                                      and self.workspace.exists(key.inputs_path))
+
     def _claim(self, key: CacheKey) -> None:
         """A hit is a promise to READ, and the read comes after every other hit in the item has
         been resolved - so the artifact is marked used and pinned until the item ends.

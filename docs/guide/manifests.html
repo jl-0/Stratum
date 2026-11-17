@@ -491,16 +491,17 @@ moved.</p>
 
 <p>The plan selects granules, applies the filters, freezes the survivors, and only then opens real
 files to check the manifest against the data: that each role's variable exists, that the sensor
-roles agree on shape, that every granule's class table has the same fingerprint. It also stages,
-digests and <strong>warps</strong> every aux source onto every tile:</p>
+roles agree on shape, that every granule's class table has the same fingerprint. It also resolves every aux source to
+the identity the cache keys carry &mdash; a content digest for a local file, the ETag and size for
+a remote one &mdash; without downloading it. The run fetches and warps it, before its first stage:</p>
 
 <pre><code>"aux": {"sources": {"landcover": {"digest": "sha256:a667a785&hellip;",
-                                  "resampling": "mode"}},
-        "tiles_warped": 18}</code></pre>
+                                  "resampling": "mode"}}}</code></pre>
 
-<p>Warping here rather than in a worker matters on a cluster: the artifact cache is shared but the
-download cache is per worker, so warping once at plan time means <em>no worker ever opens the
-source</em>. Eighteen tiles of WorldCover cost a few seconds and about 4&nbsp;MB of cache.</p>
+<p>Warping once, ahead of the workers, matters on a cluster: the artifact cache is shared but the
+download cache is per worker, so <em>no worker ever opens the source</em>. Whoever orchestrates the
+run does it before the first stage, for the tiles the run resolves; eighteen tiles of WorldCover
+cost a few seconds and about 4&nbsp;MB of cache. A plan or a dry run does none of it.</p>
 
 <p>Note the source is <em>four</em> files. WorldCover ships as 3&deg; tiles and this AOI spans the
 corner of four of them, so the manifest names all four and they are composited later-over-earlier.

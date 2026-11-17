@@ -75,10 +75,12 @@ class AuxError(RuntimeError):
 class AuxSource:
     """One declared aux source, as the planner resolved it (05 section 5).
 
-    `paths` are LOCAL files - the planner stages every source before a worker runs, so "a run
-    never depends on third-party uptime" (05 section 6, question 1) is a property of the code and
-    not a hope. `digest` is the content hash that enters the cache key; see `aux_inputs` for why
-    it is a digest and not the ETag 06 section 2 names.
+    `digest` is the source's IDENTITY, the term that enters the cache key: a content hash for a
+    local file, and for a remote one its ETag and size, which the planner learns from a
+    one-byte request so that planning downloads nothing (05 section 5). `uris` is every part in
+    the order declared. `paths` are LOCAL files and are empty for a source with a remote part
+    until the run stages it (`stage_aux`), which happens once, before the first stage, so that
+    "a run never depends on third-party uptime" (05 section 6, question 1) holds from there on.
     """
 
     alias: str
@@ -88,6 +90,7 @@ class AuxSource:
     kind: str
     resampling: str
     etag: str | None = None
+    uris: tuple[str, ...] = ()
 
     @property
     def nodata(self) -> float:
@@ -100,14 +103,16 @@ class AuxSource:
 
     def to_doc(self) -> dict[str, Any]:
         return {"uri": self.uri, "paths": [str(p) for p in self.paths], "digest": self.digest,
-                "kind": self.kind, "resampling": self.resampling, "etag": self.etag}
+                "kind": self.kind, "resampling": self.resampling, "etag": self.etag,
+                "uris": list(self.uris)}
 
     @classmethod
     def from_doc(cls, alias: str, doc: Mapping[str, Any]) -> AuxSource:
         return cls(alias=alias, uri=str(doc["uri"]),
                    paths=tuple(Path(p) for p in doc.get("paths", ())),
                    digest=str(doc["digest"]), kind=str(doc["kind"]),
-                   resampling=str(doc["resampling"]), etag=doc.get("etag"))
+                   resampling=str(doc["resampling"]), etag=doc.get("etag"),
+                   uris=tuple(str(u) for u in doc.get("uris", ())))
 
 
 def file_digest(path: Path, *, chunk: int = 1 << 20) -> str:
@@ -266,6 +271,10 @@ def warp_aux_tile(cache: CacheRoot, tile: TileRef, source: AuxSource, pad: int =
     key = aux_key_for(cache, tile, source, pad)
     if cache.hit(key):
         return key
+    if not source.paths:
+        raise AuxError(f"aux source {source.alias!r} is not staged, so tile ({tile.tx}, "
+                       f"{tile.ty}) cannot be warped; a run stages and warps aux before its "
+                       "first stage (05 section 5)")
     area = TileExtent(tile, pad) if pad else tile
     data = warp_to_tile(source.paths, area, resampling=source.resampling,
                         dtype=source.dtype, nodata=source.nodata)

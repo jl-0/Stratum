@@ -12,10 +12,12 @@ download real assets, and an over-budget plan must refuse before the first byte.
 from __future__ import annotations
 
 import dataclasses
+import hashlib
 import logging
+import os
 from collections import Counter
 from collections.abc import Callable, Iterable, Mapping, Sequence
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
@@ -37,11 +39,13 @@ from stratum.access import (
     RangedAsset,
     RangeUnsupported,
     asset_cache_for,
+    is_local,
+    local_path,
     reader_for,
     to_uri,
 )
 from stratum.access.store import asset_sizes
-from stratum.ancillary import AuxSource, aux_key_for, sources_digest, warp_aux_tile
+from stratum.ancillary import AuxSource, aux_key_for, file_digest, warp_aux_tile
 from stratum.cache import CacheRoot
 from stratum.classes import Enumeration, EnumerationError, Remap, identity_enumeration
 from stratum.filters import FilterError, FilterReport, apply_filters, build_filters
@@ -501,84 +505,175 @@ def _matches(value: Any, wanted: Any, tolerance: float | None) -> bool:
     return value == wanted or str(value).strip() == str(wanted).strip()
 
 
-def stage_aux(m: Manifest, store: AssetStore, manifest_dir: Path | None = None
-              ) -> dict[str, AuxSource]:
-    """Stage, digest and open every declared aux source (05 section 5).
+#: How many aux parts a plan identifies at once (`declare_aux`). Few on purpose: these are
+#: requests to someone else's server, and sixteen at once were refused.
+AUX_PROBE_THREADS = 4
 
-    Three things this buys, and they are the whole reason declaration is mandatory:
 
-    1. A typo in a DEM path fails here, before compute is provisioned - not in 4,000 concurrent
-       workers.
-    2. The bytes are local before any worker runs, so "a run never depends on third-party
-       uptime" (05 section 6, question 1) is a property of the code.
-    3. The source's CONTENT enters the cache key, so replacing a file in place under a stable
+def _aux_part(store: AssetStore, uri: str) -> tuple[str, str | None]:
+    """One part of an aux source as `(identity, etag)`, the identity being what enters the key.
+
+    A local file is hashed: it is here, and its content is the only identity it has. A remote
+    one is asked for its ETag and size in a one-byte request and NOT downloaded - a plan decides
+    what a run would do, and a CONUS land-cover source is 157 files and 10 GB. An ETag changes
+    whenever the object is replaced, which is the property the key needs (06 section 3, rule 4).
+    A server that reports no ETag leaves nothing to key on but the bytes, so that part alone is
+    staged and hashed, with a warning.
+    """
+    if is_local(uri):
+        return file_digest(local_path(uri)), None
+    etag, size = store.probe(uri)
+    if etag is None:
+        log.warning("aux %s reports no ETag; staging it at plan time to hash it", uri)
+        path = store.open(uri).path()
+        if path is None:
+            raise AssetStoreError(f"{uri} did not stage to a local file")
+        return file_digest(Path(path)), None
+    return f"etag:{etag}:{size if size is not None else '?'}", etag
+
+
+def _aux_identity(parts: Sequence[str]) -> str:
+    """The identity of a source that is several parts: the digest of the parts' identities, in
+    the order declared, so reordering a mosaic is a different artifact (later parts win). The
+    same formula as `sources_digest`, so an all-local source keeps the key it always had."""
+    if len(parts) == 1:
+        return parts[0]
+    return "sha256:" + hashlib.sha256("\n".join(parts).encode()).hexdigest()
+
+
+def declare_aux(m: Manifest, store: AssetStore, manifest_dir: Path | None = None
+                ) -> dict[str, AuxSource]:
+    """Resolve every declared aux source to an identity, without fetching a remote one
+    (05 section 5).
+
+    What declaration buys at plan time:
+
+    1. A typo in a DEM path or URL fails here, before compute is provisioned - not in 4,000
+       concurrent workers. A local file is opened and must carry a CRS; a remote one must answer.
+    2. The source's identity enters the cache key, so replacing a file in place under a stable
        URI invalidates correctly (06 section 3, rule 4).
 
-    The digest is of the staged bytes rather than the server's ETag, which 06 section 2 names:
-    `AssetStore` never reads a response ETag, an aux file carries no catalogue checksum, and a
-    multipart ETag hashes part-hashes rather than content. The ETag is recorded beside it as
-    explanatory metadata when the caller knows one.
+    What it no longer does is download and warp. A plan, and so a dry run, costs one small
+    request per remote part; the bytes are staged and the tiles warped by the run, before its
+    first stage (`stage_aux`, `warp_aux_for_tiles`).
     """
     sources: dict[str, AuxSource] = {}
     problems: list[str] = []
-    for alias, spec in m.aux.items():
-        uris = spec.uris
-        paths: list[Path] = []
-        etags: list[str] = []
-        for uri in uris:
-            try:
-                if "://" not in uri or uri.startswith("file://"):
-                    bare = uri.removeprefix("file://")
-                    local = (manifest_dir / bare) if manifest_dir is not None \
-                        else resolve_local(m, bare, f"aux.{alias}.uri")
-                    handle = store.open(to_uri(Path(local).resolve()))
-                else:
-                    handle = store.open(uri)
-                path = handle.path()
-                if path is None:
-                    raise AssetStoreError(f"{uri} did not stage to a local file")
-                with rasterio.open(str(path)) as src:
+
+    def part(alias: str, uri: str) -> tuple[str, str, str | None] | str:
+        """`(full uri, identity, etag)`, or the problem as a string."""
+        try:
+            if "://" not in uri or uri.startswith("file://"):
+                bare = uri.removeprefix("file://")
+                local = (manifest_dir / bare) if manifest_dir is not None \
+                    else resolve_local(m, bare, f"aux.{alias}.uri")
+                full = to_uri(Path(local).resolve())
+                with rasterio.open(str(local_path(full))) as src:
                     if src.crs is None:
-                        problems.append(f"aux.{alias}: {uri} has no CRS, so it cannot be warped "
-                                        "onto the grid (05 section 2)")
-                        continue
-                paths.append(Path(path))
-                if handle.etag:
-                    etags.append(str(handle.etag))
-            except (AssetStoreError, OSError, rasterio.errors.RasterioIOError) as e:
-                problems.append(f"aux.{alias}: {uri} could not be read: {e}")
-        if paths and len(paths) == len(uris):
-            # the mosaic's identity is the digest of its parts IN ORDER: later sources win where
-            # they overlap, so reordering is a different artifact (05 section 2)
+                        return (f"aux.{alias}: {uri} has no CRS, so it cannot be warped onto "
+                                "the grid (05 section 2)")
+            else:
+                full = uri
+            identity, etag = _aux_part(store, full)
+            return full, identity, etag
+        except (AssetStoreError, OSError, rasterio.errors.RasterioIOError) as e:
+            return f"aux.{alias}: {uri} could not be read: {e}"
+
+    for alias, spec in m.aux.items():
+        uris: list[str] = []
+        parts: list[str] = []
+        etags: list[str] = []
+        # one small request per remote part, so a source of many parts is asked concurrently;
+        # `map` keeps the declared order, which the identity depends on
+        with ThreadPoolExecutor(max_workers=min(AUX_PROBE_THREADS, len(spec.uris))) as pool:
+            answers = list(pool.map(lambda u, a=alias: part(a, u), spec.uris))
+        for answer in answers:
+            if isinstance(answer, str):
+                problems.append(answer)
+                continue
+            full, identity, etag = answer
+            uris.append(full)
+            parts.append(identity)
+            if etag:
+                etags.append(etag)
+        if uris and len(uris) == len(spec.uris):
+            every_local = all(is_local(u) for u in uris)
             sources[alias] = AuxSource(
-                alias=alias, uri=uris[0] if len(uris) == 1 else f"{uris[0]} (+{len(uris) - 1})",
-                paths=tuple(paths), digest=sources_digest(paths), kind=spec.kind,
-                resampling=str(spec.resampling), etag=",".join(etags) or None)
+                alias=alias,
+                uri=spec.uris[0] if len(uris) == 1 else f"{spec.uris[0]} (+{len(uris) - 1})",
+                paths=tuple(local_path(u) for u in uris) if every_local else (),
+                digest=_aux_identity(parts), kind=spec.kind,
+                resampling=str(spec.resampling), etag=",".join(etags) or None,
+                uris=tuple(uris))
     if problems:
         raise PlanError("aux sources are not usable (05 section 5):\n  - "
                         + "\n  - ".join(problems))
     return sources
 
 
-def warp_aux_for_tiles(cache: CacheRoot, tiles: Sequence[TileRef],
-                       sources: Mapping[str, AuxSource], pad: int = 0) -> int:
-    """Warp every declared aux source onto every tile the run will touch, at PLAN time.
+def stage_aux(source: AuxSource, store: AssetStore) -> AuxSource:
+    """`source` with every part on local disk, ready to warp. A source that is already local is
+    returned as it is.
 
-    05 section 5 point 2 makes this an option; the deployment makes it the only sane default.
-    The node-local asset cache is per worker - a Lambda's own disk - so a worker that fetched aux
-    itself would pull the whole source once per invocation, hundreds of times. The artifact cache
-    is shared, so warping here means no worker ever opens the source at all: they window-read a
-    tile someone already warped. Locally it costs a second and makes resolve's first block
-    identical in cost to its last.
+    The parts are identified again as they are staged, and the run stops if the identity is no
+    longer the one the plan keyed on: a file replaced between plan and run would otherwise be
+    warped under a key that names its predecessor.
     """
-    warped = 0
-    for tile in tiles:
-        for source in sources.values():
-            key = aux_key_for(cache, tile, source, pad)
-            if not cache.hit(key):
-                warp_aux_tile(cache, tile, source, pad)
-                warped += 1
-    return warped
+    if source.paths:
+        return source
+    paths: list[Path] = []
+    parts: list[str] = []
+    for uri in source.uris:
+        identity, _ = _aux_part(store, uri)
+        parts.append(identity)
+        path = store.open(uri).path()
+        if path is None:
+            raise AssetStoreError(f"{uri} did not stage to a local file")
+        with rasterio.open(str(path)) as src:
+            if src.crs is None:
+                raise PlanError(f"aux.{source.alias}: {uri} has no CRS, so it cannot be warped "
+                                "onto the grid (05 section 2)")
+        paths.append(Path(path))
+    if _aux_identity(parts) != source.digest:
+        raise PlanError(f"aux.{source.alias}: the source is not the one this run was planned "
+                        f"against (identity {_aux_identity(parts)}, planned {source.digest}); "
+                        "plan again")
+    return dataclasses.replace(source, paths=tuple(paths))
+
+
+def warp_aux_for_tiles(cache: CacheRoot, tiles: Sequence[TileRef],
+                       sources: Mapping[str, AuxSource], pad: int = 0, *,
+                       store: AssetStore | None = None, workers: int | None = None) -> int:
+    """Warp every source in `sources` onto every tile in `tiles` that lacks it, before the
+    first stage of a run. Returns how many warps were made.
+
+    Done by whoever orchestrates the run, not by a worker and not by the plan (05 section 5).
+    Not a worker: the asset cache is node-local, so a worker that fetched aux itself would pull
+    the source once per invocation, while the artifact cache is shared - warped here, no worker
+    ever opens the source. Not the plan: a plan decides, and warping a continent decides nothing.
+
+    `tiles` is the tiles the run resolves, not the area of interest: a tile no granule reaches
+    is never read. A source is staged only if some tile still needs it, so a run whose warps are
+    all cached downloads nothing. Warps run in threads - GDAL releases the GIL - `workers` wide.
+    """
+    todo = [(tile, alias) for tile in tiles for alias, source in sources.items()
+            if not cache.committed(aux_key_for(cache, tile, source, pad))]
+    if not todo:
+        return 0
+    needed = sorted({alias for _, alias in todo})
+    if any(not sources[a].paths for a in needed) and store is None:
+        raise PlanError(f"aux source(s) {needed} need staging and no asset store was given")
+    staged = {a: sources[a] if sources[a].paths else stage_aux(sources[a], store)
+              for a in needed}
+    width = max(1, min(workers or (os.cpu_count() or 1), len(todo)))
+    with (ThreadPoolExecutor(max_workers=width) as pool,
+          console.progress("aux", len(todo), lines=True) as advance):
+        futures = [pool.submit(warp_aux_tile, cache, tile, staged[alias], pad)
+                   for tile, alias in todo]
+        for fut in as_completed(futures):
+            fut.result()
+            advance()
+    return len(todo)
 
 
 def inspect_granules(m: Manifest, refs: Mapping[str, GranuleRef], readers: Mapping[str, Any],
@@ -1122,12 +1217,10 @@ def plan_run(manifest_path: Path | str, out_dir: Path | str | None = None,
                                   scorer_outputs=scorer_outputs(scorer.instance))
     max_distance = resolve_max_distance(grid, m.grid.max_distance)
 
-    # -- aux, staged and warped HERE rather than in a worker (05 section 5). A typo fails before
-    #    compute is provisioned; the bytes are local before any worker runs; and because the
-    #    artifact cache is shared while the asset cache is node-local, warping every tile now
-    #    means no worker ever opens the source.
-    aux_sources = stage_aux(m, store)
-    aux_warped = warp_aux_for_tiles(CacheRoot(ws), tiles, aux_sources, pad)
+    # -- aux, DECLARED here and nothing more (05 section 5): each source is resolved to the
+    #    identity the keys carry, so a typo fails before compute is provisioned, and no byte of
+    #    a remote source is fetched. The run stages and warps it, before its first stage.
+    aux_sources = declare_aux(m, store)
 
     # -- outputs, validated against the resolved schema now, not after regrid has run
     #    (07 section 3 "declared in the manifest and validated at plan time"; 12 section 7)
@@ -1187,8 +1280,7 @@ def plan_run(manifest_path: Path | str, out_dir: Path | str | None = None,
         # what a plugin may reach, and the CONTENT it was keyed on (05 section 5, 06 section 2)
         "aux": {"sources": {a: {"uri": src.uri, "kind": src.kind,
                                 "resampling": src.resampling, "digest": src.digest}
-                            for a, src in sorted(aux_sources.items())},
-                "tiles_warped": aux_warped},
+                            for a, src in sorted(aux_sources.items())}},
         "counts": counts,
     })
     write_plan(run_dir, doc)

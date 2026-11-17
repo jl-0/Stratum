@@ -147,13 +147,18 @@ Established by reading code and data. Do not re-derive; do not assume the opposi
   lets a snow pixel vote; no snow mask is needed. Verified on all five codes, 2026-09-24
   ([11 §2](docs/specs/11-types.md)). The L2A mask has no snow flag, and L2B discards
   Tetracorder's own snow detections.
-- **Aux is `raster()` only, and the planner warps it.** Static `https://`/`file://` sources, one
+- **Aux is `raster()` only, and the RUN warps it - a plan fetches nothing.** Static `https://`/`file://` sources, one
   URI or a LIST of them (a global raster ships as a tile set, so any AOI wider than one tile needs
   several composited later-over-earlier; the digest is over the parts in order, so reordering is a
   different artifact),
-  staged and digested at plan time, warped once per tile because the artifact cache is shared
-  while the asset cache is node-local. Keys carry a content **digest**, not the ETag (06 §2 says
-  etag; 05 §6 records why the code differs), and carry every alias a plugin DECLARED, read or
+  IDENTIFIED at plan time (`declare_aux`): a local part by content digest, a remote part by
+  `etag:<etag>:<size>` from a one-byte range request, so a plan or dry run downloads nothing
+  (the CONUS land cover is 157 files and 10.3 GB; identifying it takes about 40 s). The run
+  stages and warps before its first stage (`prepare_aux` in `executors/local.py`), in threads,
+  only onto tiles the resolve work list names, re-checking each identity as it stages. A worker
+  never opens a source: the artifact cache is shared while the asset cache is node-local. Keep
+  the plan-time probes few (4 threads): sixteen at once were refused by the source's server.
+  Keys carry every alias a plugin DECLARED, read or
   not, because the snapshot key is built before the scorer runs. `temporal` date-keying is
   refused: it needs a listing of what exists, and a run never queries a catalogue.
 - **A sensor-space mask may not declare `required_aux`.** Aux is on the block grid by definition;

@@ -112,6 +112,23 @@ def budget_gate(run: RunPlan | Mapping[str, Any]) -> None:
     raise BudgetExceeded(f"run {doc['run_id']} is over budget: {why}. {hint}")
 
 
+def prepare_aux(run: RunPlan) -> dict[str, Any]:
+    """Stage and warp the aux sources the run's plugins declared, onto the tiles it resolves,
+    before the first stage (05 section 5). The orchestrator's own work, on its own cores,
+    whatever executes the items: a worker reads a warped tile from the shared cache and never
+    opens a source. A run with no aux, or whose warps are all cached, does nothing here."""
+    from stratum.plan.run import warp_aux_for_tiles
+
+    ctx = run.context
+    wanted = {alias: ctx.aux_sources[alias] for alias in ctx.aux_to_read()}
+    tiles = sorted({tuple(it["tile"]) for it in read_work(run.run_dir, "resolve")})
+    t0 = time.perf_counter()
+    warped = (warp_aux_for_tiles(ctx.cache, [run.tile(*t) for t in tiles], wanted, ctx.tile_pad,
+                                 store=ctx.store) if wanted and tiles else 0)
+    return {"sources": sorted(wanted), "tiles": len(tiles) if wanted else 0, "warped": warped,
+            "seconds": round(time.perf_counter() - t0, 3)}
+
+
 def run_all(run_dir: Path | str, workers: int | None = None, *,
             stage_runner: Callable[..., list[dict[str, Any]]] | None = None,
             executor: str = "local") -> dict[str, Any]:
@@ -128,6 +145,7 @@ def run_all(run_dir: Path | str, workers: int | None = None, *,
     run = load_cached(run_dir)
     started = datetime.now(UTC)
     execution: dict[str, Any] = {"stages": {}, "cache_hits": {}, "failed_items": []}
+    execution["aux"] = prepare_aux(run)
     for stage in STAGES:
         t0 = time.perf_counter()
         results = runner(run_dir, stage, workers)

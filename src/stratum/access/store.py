@@ -837,6 +837,35 @@ class AssetStore:
                                       "check the Earthdata credentials (08 section 5)")
         return resp
 
+    def probe(self, uri: str) -> tuple[str | None, int | None]:
+        """An https asset's `(etag, size)` without its body: one one-byte range request.
+
+        What lets a plan name a remote file - that it exists, and which version of it - without
+        downloading it. A range GET rather than HEAD because it takes the same path a download
+        does (the trusted session, a redirect to a signed URL), and some hosts refuse HEAD.
+        Either value is `None` when the server does not report it."""
+        if scheme_of(uri) != "https":
+            raise _unsupported(uri)
+        for attempt in range(self.retries + 1):
+            try:
+                resp = self._get(uri, {"Range": "bytes=0-0"})
+                try:
+                    if resp.status_code not in (200, 206):
+                        raise AssetFetchError(uri, resp.status_code)
+                    headers = getattr(resp, "headers", None) or {}
+                    total = (str(headers.get("Content-Range", "")).rpartition("/")[2]
+                             if resp.status_code == 206
+                             else str(headers.get("Content-Length", "")))
+                    etag = str(headers.get("ETag", "")).strip().strip('"')
+                    return etag or None, int(total) if total.isdigit() else None
+                finally:
+                    resp.close()
+            except AssetFetchError as e:
+                if not e.transient or attempt >= self.retries:
+                    raise
+                time.sleep(self.backoff * (2 ** attempt))
+        raise AssertionError("unreachable")
+
     def _request(self, session: Any, uri: str, headers: Mapping[str, str] | None = None) -> Any:
         extra = {"headers": dict(headers)} if headers else {}
         try:
