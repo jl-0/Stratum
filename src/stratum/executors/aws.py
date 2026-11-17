@@ -59,6 +59,36 @@ class AwsExecutorError(RuntimeError):
     """The deployment is not configured, or an invocation failed in a way retrying will not fix."""
 
 
+def fetch_bundle(uri: str, *, client: Any | None = None) -> Path:
+    """Copy a staged manifest bundle out of the bucket and return the local directory.
+
+    A manifest names files beside it - its index, class and colour tables, a zone registry - so
+    what a detached run is handed is a PREFIX holding that tree, not one object. It is copied
+    under the scratch directory with its relative layout intact, which is all the manifest's
+    relative paths need. The copy is pinned: it is input, not a re-fetchable cache entry, and
+    the run that reads it lasts longer than any eviction grace window.
+    """
+    from stratum.storage import ObjectStore, parse_s3, pin, scratch_dir
+
+    parsed = parse_s3(uri)
+    if parsed is None or not parsed[1]:
+        raise AwsExecutorError(f"--bundle must be an s3://bucket/prefix/ URI; got {uri!r}")
+    bucket, prefix = parsed
+    store = ObjectStore(bucket, client=client)
+    keys = [k for k in store.list(prefix + "/") if not k.endswith("/")]
+    if not keys:
+        raise AwsExecutorError(f"nothing is staged under {uri!r}")
+    dest = scratch_dir() / "bundles" / prefix.replace("/", "_")
+    for key in keys:
+        rel = Path(key[len(prefix) + 1:])
+        if rel.is_absolute() or ".." in rel.parts:
+            raise AwsExecutorError(f"bundle key {key!r} would land outside the bundle")
+        store.get(key, dest / rel)
+    pin(dest)
+    log.info("staged %d bundle file(s) from %s", len(keys), uri)
+    return dest
+
+
 def function_name(name: str | None = None) -> str:
     """The worker function: the argument, else `$STRATUM_LAMBDA_FUNCTION`. `make tf-output`
     prints it; it is deployment configuration and never a manifest field (08 section 1)."""

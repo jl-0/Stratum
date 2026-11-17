@@ -661,7 +661,10 @@ twelve EMIT plugins; an invocation through the Lambda Runtime Interface Emulator
 handler; `terraform validate` passes on both roots. **Not yet verified against real AWS** — no
 deployment had been applied when this was written.
 
-Still open here: nothing survives closing the laptop (the orchestrator is the CLI), nothing is
+A run can now be detached (2026-11-17): `make cloud-run-detached` stages the manifest's
+directory as a bundle in the bucket and starts `stratum orchestrate` as a Fargate task
+(`terraform/run.tf`), which is `run --executor aws` from inside the deployment. Unverified
+against real AWS when written. Still open here: nothing is
 scheduled, and the manifest's `plugins.wheel` cold-start fetch is modelled and unbuilt.
 
 ---

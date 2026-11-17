@@ -46,6 +46,7 @@ on a laptop, on a cluster, and as the worker entrypoint.</p>
 <tbody>
 <tr><td><a href="#plan"><code>stratum plan</code></a></td><td>Resolve a manifest, freeze the granule set, write the work list, report the fan-out. Provisions nothing.</td><td><span class="chip chip-locked">built</span></td></tr>
 <tr><td><a href="#run"><code>stratum run</code></a></td><td>Plan and execute every stage — locally</td><td><span class="chip chip-locked">built</span> local only</td></tr>
+<tr><td><a href="#orchestrate"><code>stratum orchestrate</code></a></td><td>Run a manifest staged in the bucket, from inside the deployment. What the detached run task executes.</td><td><span class="chip chip-locked">built</span></td></tr>
 <tr><td><a href="#exec"><code>stratum exec</code></a></td><td>Execute one work item from a plan. The worker entrypoint.</td><td><span class="chip chip-locked">built</span></td></tr>
 <tr><td><a href="#status"><code>stratum status</code></a></td><td>Per-stage progress of a run, from its work lists and results files</td><td><span class="chip chip-locked">built</span></td></tr>
 <tr><td><a href="#report"><code>stratum report</code></a></td><td>Print the run report</td><td><span class="chip chip-locked">built</span></td></tr>
@@ -168,6 +169,28 @@ says <code>on_exceed: warn</code>. <code>require_approval</code> also stops it t
 listed and recorded in <code>work/{stage}.results.jsonl</code>. Re-running the same manifest is
 cheap and safe: completed regrid, resolve and reduce items are cache hits and are skipped, so an
 interrupted run resumes. Publish is never a hit — products are written fresh under the run id.</p>
+
+<h2 id="orchestrate">stratum orchestrate</h2>
+
+<pre><code>stratum orchestrate --bundle s3://BUCKET/PREFIX/ -m PATH [--workers N] [--dry-run]</code></pre>
+
+<p><code>stratum run --executor aws</code>, started where the workers are. It copies the bundle
+out of the bucket, loads the Earthdata credential from the deployment's secret, then plans and
+dispatches exactly as <code>run</code> does. You do not normally type it:
+<code>make cloud-run-detached MANIFEST=&hellip;</code> stages the bundle and starts a Fargate task
+that runs it, then returns.</p>
+
+<div class="tw">
+<table>
+<thead><tr><th>Option</th><th>Effect</th><th>Status</th></tr></thead>
+<tbody>
+<tr><td><code>--bundle URI</code></td><td>A bucket prefix holding the manifest and every file it names by relative path</td><td><span class="chip chip-locked">built</span></td></tr>
+<tr><td><code>-m PATH</code></td><td>The manifest's path inside the bundle</td><td><span class="chip chip-locked">built</span></td></tr>
+<tr><td><code>--workers N</code></td><td>As on <code>run</code>: invocations in flight</td><td><span class="chip chip-locked">built</span></td></tr>
+<tr><td><code>--dry-run</code></td><td>Plan and preflight; dispatch nothing</td><td><span class="chip chip-locked">built</span></td></tr>
+</tbody>
+</table>
+</div>
 
 <h2 id="exec">stratum exec</h2>
 

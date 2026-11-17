@@ -28,9 +28,11 @@ runbook.</p>
   <span class="label">Where this gets you</span>
   <p>A run whose every work item executes in Lambda, orchestrated from your laptop. The platform
   root creates a bucket, an image repository, a secret container and three roles; the deployment
-  root creates the worker function from an image you build. What is <em>not</em> here: nothing
-  survives closing the laptop yet, and nothing is scheduled &mdash; those are the third and fourth
-  steps in <a href="#next">What comes next</a>. <a href="../status.html">Status</a> is the
+  root creates the worker function from an image you build. <code>make cloud-run-detached MANIFEST=&hellip;</code>
+  starts the same run as a Fargate task and returns, so it carries on with the laptop closed; it
+  needs the viewer's VPC and has not yet been exercised against a deployment. What is
+  <em>not</em> here: nothing is scheduled &mdash; that is the fourth
+  step in <a href="#next">What comes next</a>. <a href="../status.html">Status</a> is the
   authority on what exists.</p>
 </div>
 
@@ -50,7 +52,7 @@ deliberately small:</p>
 <tr><td>Three IAM roles</td><td>Lambda worker, orchestrator task, task execution</td><td><span class="chip chip-locked">built</span></td></tr>
 <tr><td>Lambda function</td><td>Runs one work item — the same <code>exec_item</code> every executor calls</td><td><span class="chip chip-locked">built</span></td></tr>
 <tr><td>Log group and budget</td><td>Explicit retention, and an alarm before the first execution</td><td><span class="chip chip-locked">built</span></td></tr>
-<tr><td>ECS task definition</td><td>The orchestrator, when a run should survive a closed laptop</td><td><span class="chip chip-open">not started</span></td></tr>
+<tr><td>ECS task definition</td><td>The orchestrator, when a run should survive a closed laptop (<code>terraform/run.tf</code>, <code>make cloud-run-detached</code>)</td><td><span class="chip chip-locked">built</span></td></tr>
 </tbody>
 </table>
 </div>
@@ -456,7 +458,7 @@ EC2.</p>
 <tbody>
 <tr><td>S3 storage root</td><td>your laptop</td><td>your laptop</td><td>you</td><td><span class="chip chip-locked">built</span></td></tr>
 <tr><td>Image and Lambda worker</td><td>your laptop</td><td><strong>Lambda</strong></td><td>you</td><td><span class="chip chip-locked">built</span></td></tr>
-<tr><td>Detached orchestrator</td><td><strong>Fargate</strong></td><td>Lambda</td><td>you</td><td><span class="chip chip-open">not started</span></td></tr>
+<tr><td>Detached orchestrator</td><td><strong>Fargate</strong></td><td>Lambda</td><td>you</td><td><span class="chip chip-locked">built</span></td></tr>
 <tr><td>Scheduled runs</td><td>Fargate</td><td>Lambda</td><td><strong>EventBridge</strong></td><td><span class="chip chip-open">not started</span></td></tr>
 </tbody>
 </table>

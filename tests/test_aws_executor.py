@@ -468,3 +468,77 @@ def test_the_image_cmd_names_a_real_handler() -> None:
     ref = line.split('"')[1]
     module, _, attr = ref.rpartition(".")
     assert callable(getattr(importlib.import_module(module), attr)), ref
+
+
+class _BundleS3:
+    """`list_objects_v2` and `download_file` over a dict of key -> bytes."""
+
+    def __init__(self, objects: dict[str, bytes]) -> None:
+        self.objects = objects
+
+    def get_paginator(self, name: str):
+        outer = self
+
+        class Pages:
+            def paginate(self, Bucket: str, Prefix: str):
+                return [{"Contents": [{"Key": k} for k in outer.objects if k.startswith(Prefix)]}]
+        return Pages()
+
+    def download_file(self, bucket: str, key: str, dest: str) -> None:
+        Path(dest).write_bytes(self.objects[key])
+
+
+def test_a_bundle_lands_with_its_layout_and_is_pinned(monkeypatch, tmp_path: Path) -> None:
+    """A detached run is handed a prefix, not a file: the manifest's relative paths (its index,
+    a registry one directory up) must resolve in the copy. The copy is input, so it is pinned
+    against the eviction that is free to delete any mirror."""
+    from stratum import storage
+    from stratum.executors.aws import fetch_bundle
+
+    monkeypatch.setenv("STRATUM_SCRATCH", str(tmp_path))
+    s3 = _BundleS3({"bundles/c-1/site/manifest.cloud.yaml": b"m", "bundles/c-1/zones.yaml": b"z",
+                    "bundles/c-1/site/index/granules.parquet": b"i", "bundles/c-10/other": b"x"})
+    try:
+        root = fetch_bundle("s3://bkt/bundles/c-1/", client=s3)
+        assert (root / "site/manifest.cloud.yaml").read_bytes() == b"m"
+        assert (root / "site/../zones.yaml").read_bytes() == b"z"
+        assert (root / "site/index/granules.parquet").is_file()
+        assert not (root / "other").exists(), "a sibling prefix sharing the name was copied"
+        assert storage.is_pinned(root / "site/manifest.cloud.yaml")
+    finally:
+        storage.clear_pins()
+
+
+def test_an_empty_or_non_s3_bundle_is_refused(monkeypatch, tmp_path: Path) -> None:
+    from stratum.executors.aws import AwsExecutorError, fetch_bundle
+
+    monkeypatch.setenv("STRATUM_SCRATCH", str(tmp_path))
+    with pytest.raises(AwsExecutorError, match="nothing is staged"):
+        fetch_bundle("s3://bkt/bundles/none/", client=_BundleS3({}))
+    with pytest.raises(AwsExecutorError, match="s3://bucket/prefix/"):
+        fetch_bundle("/local/dir", client=_BundleS3({}))
+
+
+def test_orchestrate_is_run_with_the_aws_executor(monkeypatch, tmp_path: Path) -> None:
+    """`stratum orchestrate` adds two things to `run --executor aws` and nothing else: it stages
+    the bundle and loads the Earthdata credential first."""
+    from click.testing import CliRunner
+
+    from stratum import cli
+    from stratum.executors import aws, awslambda
+
+    bundle = tmp_path / "b"
+    (bundle / "site").mkdir(parents=True)
+    (bundle / "site" / "m.cloud.yaml").write_text("x")
+    seen: dict = {}
+    monkeypatch.setattr(aws, "fetch_bundle", lambda uri: bundle)
+    monkeypatch.setattr(awslambda, "load_credentials", lambda: seen.setdefault("secret", True))
+    monkeypatch.setattr(cli.run, "callback", lambda **kw: seen.update(kw))
+    done = CliRunner().invoke(cli.main, ["orchestrate", "--bundle", "s3://bkt/bundles/x/",
+                                         "-m", "site/m.cloud.yaml", "--workers", "40"])
+    assert done.exit_code == 0, done.output
+    assert seen["secret"] and seen["executor"] == "aws" and seen["workers"] == 40
+    assert seen["manifest"] == str(bundle / "site" / "m.cloud.yaml") and not seen["dry_run"]
+    missing = CliRunner().invoke(cli.main, ["orchestrate", "--bundle", "s3://bkt/bundles/x/",
+                                            "-m", "site/absent.yaml"])
+    assert missing.exit_code != 0 and "holds no site/absent.yaml" in missing.output

@@ -17,12 +17,16 @@ SCRIPTS = Path(__file__).resolve().parents[1] / "scripts"
 VIEWER_ARN = "arn:aws:ecs:us-west-2:000000000000:task-definition/stratum-test-viewer:7"
 VIEWER_TASK = "arn:aws:ecs:us-west-2:000000000000:task/stratum-test/viewer0001"
 MOSAIC_TASK = "arn:aws:ecs:us-west-2:000000000000:task/stratum-test/mosaic0001"
+RUN_ARN = "arn:aws:ecs:us-west-2:000000000000:task-definition/stratum-test-run:3"
+RUN_TASK = "arn:aws:ecs:us-west-2:000000000000:task/stratum-test/run0001"
 
 TERRAFORM_STUB = f"""#!/usr/bin/env bash
 case "$*" in
   *"output -raw viewer_cluster"*) printf stratum-test ;;
   *"output -raw viewer_task_definition"*) printf '{VIEWER_ARN}' ;;
   *"output -raw viewer_image_uri"*) printf 'repo@sha256:abc' ;;
+  *"output -raw run_task_definition"*) printf '{RUN_ARN}' ;;
+  *"output -raw storage_root"*) printf 's3://stratum-test-bucket/' ;;
   *"output -json viewer_network"*)
     printf '{{"subnets":["s-1"],"security_groups":["sg-1"],"assign_public_ip":"DISABLED","port":8000}}' ;;
 esac
@@ -37,6 +41,7 @@ case "$*" in
   *"ecs list-tasks"*"--family"*) ;;
   *"ecs list-tasks"*) echo "{VIEWER_TASK}	{MOSAIC_TASK}" ;;
   *"ecs stop-task"*) echo stopped ;;
+  *"ecs run-task"*) echo "{RUN_TASK}" ;;
   *"ecs describe-tasks"*) echo eni-1 ;;
   *"ec2 describe-network-interfaces"*) echo 10.0.0.9 ;;
 esac
@@ -81,3 +86,31 @@ def test_viewer_url_lists_only_viewer_tasks(stubbed: dict[str, str]) -> None:
                           capture_output=True, text=True, timeout=60, check=False)
     assert done.returncode == 0, done.stderr
     assert VIEWER_TASK in done.stdout and MOSAIC_TASK not in done.stdout
+
+
+def test_run_task_stages_the_manifest_tree_and_starts_a_detached_run(
+        stubbed: dict[str, str], tmp_path: Path) -> None:
+    """`make cloud-run-detached`: the manifest's directory and the plain files above it are
+    staged under one bundle prefix, the task is handed that prefix and the cloud manifest's path
+    inside it, and the script returns without waiting for the run."""
+    site = tmp_path / "examples" / "site"
+    (site / "index").mkdir(parents=True)
+    (site / "out").mkdir()
+    (site / "manifest.yaml").write_text("outputs:\n  bucket: ./out\n")
+    (tmp_path / "examples" / "zones.yaml").write_text("zones: {}\n")
+    done = subprocess.run(["bash", str(SCRIPTS / "run-task.sh"), str(site / "manifest.yaml"),
+                           "--workers", "40"], env=stubbed, capture_output=True, text=True,
+                          timeout=60, check=False)
+    assert done.returncode == 0, done.stderr
+    assert "bucket: s3://stratum-test-bucket/" in (site / "manifest.cloud.yaml").read_text()
+    calls = _calls(stubbed)
+    sync = next(c for c in calls if "s3 sync" in c)
+    assert "s3://stratum-test-bucket/bundles/manifest-" in sync and sync.count("--exclude") == 2
+    assert any("s3 cp" in c and c.rstrip().split()[-2].endswith("/zones.yaml") for c in calls)
+    started = next(c for c in calls if "ecs run-task" in c)
+    assert RUN_ARN in started
+    assert '"stratum", "orchestrate", "--bundle", "s3://stratum-test-bucket/bundles/manifest-' \
+        in started
+    assert '"-m", "site/manifest.cloud.yaml", "--workers", "40"' in started
+    assert RUN_TASK in done.stdout and "no longer needs this machine" in done.stdout
+    assert not any("describe-tasks" in c for c in calls), "the script waited for the run"

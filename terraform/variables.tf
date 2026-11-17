@@ -196,3 +196,22 @@ variable "mosaic_workers" {
   type        = number
   default     = 2
 }
+
+# --- the detached run task (run.tf) -------------------------------------------------------------
+variable "run_cpu" {
+  description = "Fargate CPU units for `stratum orchestrate`. The planner warps aux once per tile; dispatch is threads waiting on Lambda."
+  type        = number
+  default     = 4096
+}
+
+variable "run_memory_mb" {
+  description = "Fargate memory for `stratum orchestrate`. Must be a valid pairing with run_cpu."
+  type        = number
+  default     = 16384
+}
+
+variable "run_storage_gib" {
+  description = "Ephemeral storage: the bundle, the assets and aux sources the planner stages, and the run-directory mirror."
+  type        = number
+  default     = 100
+}

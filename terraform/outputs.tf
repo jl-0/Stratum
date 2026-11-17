@@ -65,3 +65,9 @@ output "mosaic_task_definition" {
   description = "Task definition for `stratum mosaic`. `make cloud-mosaic RUN=<run id>` runs it in the viewer's cluster and network."
   value       = one(aws_ecs_task_definition.mosaic[*].arn)
 }
+
+# --- the detached run task ----------------------------------------------------------------------
+output "run_task_definition" {
+  description = "Task definition for `stratum orchestrate`. `make cloud-run-detached MANIFEST=...` runs it in the viewer's cluster and network."
+  value       = one(aws_ecs_task_definition.run[*].arn)
+}

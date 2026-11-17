@@ -97,6 +97,31 @@ resource "aws_iam_role_policy" "task_invoke" {
   policy = data.aws_iam_policy_document.invoke_workers.json
 }
 
+# The orchestrator plans, so it stages assets from the DAAC as a worker does, and its preflight
+# reads the worker's configuration and concurrency before dispatching (run.tf).
+resource "aws_iam_role_policy" "task_secret" {
+  role   = aws_iam_role.task.id
+  name   = "read-edl-secret"
+  policy = data.aws_iam_policy_document.read_edl_secret.json
+}
+
+data "aws_iam_policy_document" "describe_workers" {
+  statement {
+    actions   = ["lambda:GetFunctionConfiguration", "lambda:GetFunctionConcurrency"]
+    resources = ["arn:aws:lambda:${var.region}:${local.account_id}:function:stratum-${var.deployment}-*"]
+  }
+  statement {
+    actions   = ["lambda:GetAccountSettings"]
+    resources = ["*"]
+  }
+}
+
+resource "aws_iam_role_policy" "task_describe" {
+  role   = aws_iam_role.task.id
+  name   = "describe-workers"
+  policy = data.aws_iam_policy_document.describe_workers.json
+}
+
 # --- the ECS task execution role: pulls the image, writes logs ---------------------------------
 resource "aws_iam_role" "task_exec" {
   name                 = local.role_name.task_exec

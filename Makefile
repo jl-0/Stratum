@@ -2,7 +2,7 @@
 # repository names an account, a profile, a bucket, or a site's IAM requirements.
 SHELL := /usr/bin/env bash
 .PHONY: help env-check bootstrap stratum-infrastructure infra infra-plan infra-output \
-        cloud-run cloud-mosaic image image-local destroy test lint viewer viewer-up viewer-url \
+        cloud-run cloud-run-detached cloud-mosaic image image-local destroy test lint viewer viewer-up viewer-url \
         viewer-down viewer-logs
 
 help:
@@ -12,6 +12,7 @@ help:
 	@echo "infra-plan              plan the same, without applying"
 	@echo "infra-output            show the outputs (storage root, function name, run command)"
 	@echo "cloud-run               run examples/emit-cmr-nevada in AWS (MANIFEST=... to pick another)"
+	@echo "cloud-run-detached      the same run as a Fargate task: survives closing this machine"
 	@echo "cloud-mosaic            merge a published run into one COG per layer (RUN=<run id>)"
 	@echo "image                   build the worker image and push it; prints the digest to pin"
 	@echo "image-local             build it without pushing, for a local docker run"
@@ -54,6 +55,10 @@ cloud-run: env-check
 	./scripts/cloud-manifest.sh $(MANIFEST)
 	STRATUM_LAMBDA_FUNCTION=$$(./scripts/tf.sh output -raw function_name) \
 	  ./scripts/stratum.sh run -m $(MANIFEST:.yaml=.cloud.yaml) --executor aws $(ARGS)
+
+# The same run, started and left: the dispatch loop runs in a Fargate task (terraform/run.tf)
+# instead of in this shell. ARGS reaches `stratum orchestrate`, e.g. ARGS="--workers 200".
+cloud-run-detached: env-check ; ./scripts/run-task.sh $(MANIFEST) $(ARGS)
 
 # After a cloud run: one web-mercator COG per layer, which is what the viewer and MMGIS read
 # (guide/viewing.html). A Fargate task; ARGS reaches `stratum mosaic`, e.g. ARGS="--force".

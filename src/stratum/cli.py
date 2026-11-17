@@ -187,6 +187,38 @@ def run(manifest: str | None, patch: tuple[str, ...], from_provenance: str | Non
     click.echo(f"products  {result.document['products_dir']}")
 
 
+@main.command()
+@click.option("--bundle", required=True,
+              help="s3://bucket/prefix/ holding the manifest and the files beside it.")
+@click.option("-m", "--manifest", required=True,
+              help="The manifest's path inside the bundle.")
+@click.option("--workers", type=int, default=None, help="Invocations in flight; as for run.")
+@click.option("--dry-run", is_flag=True, help="Plan and preflight; dispatch nothing.")
+@click.pass_context
+def orchestrate(ctx: click.Context, bundle: str, manifest: str, workers: int | None,
+                dry_run: bool) -> None:
+    """Run a staged manifest from inside the deployment: `run --executor aws`, detached.
+
+    What a task runs so that a run does not depend on the machine that started it (08 section
+    1). It copies the bundle out of the bucket, loads the Earthdata credential the way a worker
+    does, and then is `stratum run` - the same plan, the same dispatch, the same Finalize.
+    """
+    from stratum.executors.aws import AwsExecutorError, fetch_bundle
+    from stratum.executors.awslambda import HandlerError, load_credentials
+    from stratum.storage import StorageError
+
+    try:
+        root = fetch_bundle(bundle)
+        load_credentials()
+    except (AwsExecutorError, HandlerError, StorageError) as e:
+        raise click.ClickException(str(e)) from None
+    path = root / manifest
+    if not path.is_file():
+        raise click.ClickException(f"the bundle {bundle} holds no {manifest}")
+    ctx.invoke(run, manifest=str(path), executor="aws", workers=workers, dry_run=dry_run,
+               plain=True, verbose=True)
+
+
 @main.command("exec")
 @click.option("--plan", "plan_dir", required=True, type=click.Path(exists=True))
 @click.option("--stage", required=True,

@@ -290,7 +290,7 @@ executor.</td><td><a class="src" data-sym="def run_all" href="https://github.com
 <tr><td><code>executors/aws.py</code></td><td>The dispatch half of the cloud executor: a thread pool
 over <code>lambda:InvokeFunction</code>, writing the same outcome records. Imported only when
 <code>--executor aws</code> is asked for, so a local run never imports
-boto3.</td><td><a class="src" data-sym="def run_stage(run_dir: Path | str, stage: str" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/executors/aws.py#L175">run_stage</a></td></tr>
+boto3.</td><td><a class="src" data-sym="def run_stage(run_dir: Path | str, stage: str" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/executors/aws.py#L205">run_stage</a></td></tr>
 <tr><td><code>executors/preflight.py</code></td><td>The executor's half of validation, run after the plan and before dispatch: disk for <code>local</code>; credentials, the worker function, its timeout and concurrency for <code>aws</code>. Returns findings; the CLI refuses on a failure.</td><td><a class="src" data-sym="def preflight(" href="https://github.com/jl-0/Stratum/blob/main/src/stratum/executors/preflight.py#L44">preflight</a></td></tr>
 <tr><td><code>executors/awslambda.py</code></td><td>The worker half: the Lambda entrypoint. Credential
 from Secrets Manager, run directory mirrored from the bucket, then the same

@@ -129,6 +129,23 @@ JSONL an `ItemReader` consumes, so §3 remains additive rather than superseded.
 The orchestrator holds **no state**: every result is in the bucket before the invocation returns.
 Losing the laptop loses the dispatch, never the work.
 
+### The detached orchestrator (2026-11-17)
+
+`stratum orchestrate --bundle s3://… -m <path>` is `stratum run --executor aws` started from
+inside the deployment, so a run does not depend on the machine that asked for it. It runs as a
+Fargate task (`terraform/run.tf`) in the viewer's cluster and network, on the worker's image.
+
+| | |
+|---|---|
+| Input | A **bundle**: a bucket prefix holding the manifest and the files it names by relative path (index, class and colour tables, a zone registry), copied into scratch with its layout intact and pinned against eviction |
+| Credential | The Earthdata secret, loaded as a worker loads it: the planner stages one asset per role and range-reads class tables |
+| Role | The task role: bucket read-write, `lambda:InvokeFunction`, the secret, and read-only access to the function's configuration and concurrency for preflight |
+| Network | 443 and DNS out, **with a route to the internet**: the planner searches CMR, reaches the DAAC and fetches aux sources. The workers are unchanged and still not VPC-attached |
+| Otherwise | The same plan, dispatch, outcome records and Finalize as `run`. Nothing is waited on by the caller; the log group is the record of progress |
+
+Stopping the task loses the dispatch and nothing else, exactly as closing the laptop did; starting
+it again is nearly all cache hits. **Not yet exercised against a deployment.**
+
 ### Preflight: the executor's half of validation (2026-10-07)
 
 A plan proves the manifest and the data ([09 §5](09-run-manifest.md), [12 §7](12-data-access.md))
@@ -179,8 +196,9 @@ no placement decision to make and nothing to provision. The router below is what
 when an item appears that does not fit, not a stage that was skipped: the estimates it needs are
 open question 5.
 
-The plan stage runs wherever `stratum run` runs, which today is a laptop. Routing it, and moving
-the orchestrator off the laptop, are the third and fourth steps of the deployment.
+The plan stage runs wherever the orchestrator runs: a laptop under `stratum run`, or the Fargate
+task under `stratum orchestrate` (above). Routing items between Lambda and Batch is still a later
+step of the deployment.
 
 ### One image, two entrypoints
 
