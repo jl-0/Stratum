@@ -293,7 +293,7 @@ def test_the_conus_manifests_name_only_files_a_detached_run_stages() -> None:
             continue
         text = path.read_text()
         named = re.findall(r'"@ref:([^"]+)"', text) + re.findall(r"^\s*registry:\s*(\S+)", text,
-                                                                 flags=re.M)
+                                                                 flags=re.MULTILINE)
         for rel in named:
             target = (conus / rel).resolve()
             assert target.is_file(), f"{path.name}: {rel} does not exist"
