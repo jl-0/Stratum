@@ -151,7 +151,7 @@ carry plugins this table does not know about.
 |---|---|---|---|---|
 | `edge_trim` | `EdgeTrim` | sensor | — | Drop the outer **7 columns** each side (5 minimum). Every column is a different detector; the outermost are unreliable. |
 | `slit_dust` | `SlitDust` | sensor | — | Drop 2–3 columns at cross-track centre. Mostly cleaned up upstream; off by default. |
-| `l2a_standard` | `L2AStandard` | map | `mask` role | Cloud, cirrus, water, spacecraft flags — AMD's `filter-clouds-1-4` semantics |
+| `l2a_standard` | `L2AStandard` | map | `mask` role | Flags chosen by name: `cloud`, `cirrus`, `water`, `spacecraft`, `dilated_cloud`, `spectf_cloud`; the default four are AMD's `filter-clouds-1-4` semantics. A flag the granule's mask does not carry fails (V003 has no spacecraft flag). `spectf_buffer: N` also drops cells whose "SpecTf-Buffer Distance" is in [0, N] sensor pixels; −1 in that band means no cloud within the product's cap |
 | `soil_fraction` | `SoilFraction` | map | `frcov` role | Require soil fraction ≥ threshold. See §4. |
 | `cos_i` | `CosineI` | map | `cos_i` alias (L1B OBS band 8, 0-based) | Require cos(i) ≥ `min_cos_i` (0.3); non-finite is invalid. `i` is the angle between the sun and the local surface normal, so this drops sun-grazed slopes as well as low sun. `alias` renames the band it reads. |
 | `landcover` | `Landcover` | map | an **aux** alias | Drop cells whose land cover cannot carry a surface mineral signal — open water, built-up, closed canopy. Classes are named, not numbered; `codes` defaults to ESA WorldCover's and **must** be passed for any other product ([05 §7](05-ancillary-data.md) question 4). |

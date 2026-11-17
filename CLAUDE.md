@@ -201,6 +201,17 @@ Established by reading code and data. Do not re-derive; do not assume the opposi
   the 1.85 GB RAD file that a mosaic run must never fetch — so the collection is `EMITL1BRAD`,
   the role is `{collection: EMITL1BRAD, asset: OBS}`, and `patterns` lists only the OBS asset.
   `EMITL2AMASK` is published at collection version `002` (the mask role pins `version: "002"`).
+  **The reprocessed archive is a second version of every collection, not a replacement**
+  [observed 2026-11-17, granule `20230804T191650`]: MIN, RAD and FRCOV at `002`, the mask at
+  `003`, each beside the old one, so a run pins the version in `patterns` (long form). File names
+  lose the orbit and scene suffix (`EMIT_L2B_MIN_002_20230804T191650.nc`), so the granule id is
+  the timestamp alone. MIN has Tetracorder 6's 312-entry table and no `url` attribute.
+  MINUNCERT still writes 0 for a non-detection and fit still tops out at 0.5. The V003 mask has
+  SEVEN bands, not eleven - Cloud, Cirrus, Water, Dilated Cloud, SpecTf-Cloud Probability,
+  SpecTf-Cloud Flag, SpecTf-Buffer Distance - so there is no spacecraft flag and cloud
+  probability is band 4, not 8: alias it by `match: {name: ...}`, never by index. Buffer
+  distance is pixels to the nearest SpecTf cloud, 0 on it, -1 beyond about 20. V002 covers 2023
+  over CONUS (4,813 granules) and nothing of 2025 yet.
   `EMITL2BFRCOV.001` is per-fraction GeoTIFFs (`FRCOVBARE`/`PV`/`NPV` + `UNC` twins, `FRCOVQC`),
   not NetCDF, read by `L2BFrcovTiff` as an **ortho-native role** (12 §2). Verified against CMR
   2026-09-02.
@@ -343,6 +354,11 @@ the credentials walk-through and the measured download volume and timings; its `
 a 2 x 3 tile set - Cuprite/Goldfield at `tile_size: 0.5` with an `aoi.bbox` instead of an explicit
 tile list - and exists to exercise multi-tile fan-out, publish and STAC (719 work items, 6.4 GB).
 `examples/zones.yaml` is the AOI zone registry.
+`examples/emit-conus-2023/` is contender C on the reprocessed archive - V002 inputs, the V003
+mask's SpecTf cloud flag with a two-pixel buffer, calendar 2023: `manifest-demo-sites.yaml` over
+the four demonstration sites, and `manifest.yaml`, the same configuration over a CONUS box (5,184
+tiles, 157 WorldCover tiles), which `tests/test_examples.py` pins to differ only in area, aux
+tiles, index and budget.
 `examples/emit-cm-demo-sites/` holds the contending configurations over the four demonstration
 sites (A `low_vegetation_nadir` weekly then vote, B `mode_gated_select` at the external tool's defaults,
 C a variant of B), and the current **yearly** set (`manifest-yearly-*.yaml`): one P1Y epoch, the

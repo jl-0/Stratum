@@ -69,7 +69,7 @@ def run_stage(run_dir: Path | str, stage: str, workers: int | None = None) -> li
     elif n:
         mp = multiprocessing.get_context("spawn")
         with (ProcessPoolExecutor(max_workers=min(workers, n), mp_context=mp) as pool,
-              console.progress(stage, n) as advance):
+              console.progress(stage, n, lines=True) as advance):
             futures = {pool.submit(_attempt, str(run_dir), stage, i): i for i in range(n)}
             for fut in as_completed(futures):
                 i = futures[fut]

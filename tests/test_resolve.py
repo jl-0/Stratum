@@ -154,6 +154,38 @@ def test_l2a_standard_reads_mask_bands_by_name() -> None:
         L2AStandard(flags=("snow",))
 
 
+def test_l2a_standard_spectf_flag_and_buffer_on_the_v003_band_set() -> None:
+    """The V003 mask: seven bands, no spacecraft flag, and the SpecTf pair. `spectf_cloud` is
+    the classifier's flag; `spectf_buffer` drops cells within that many pixels of it, reading the
+    distance band, where -1 means "no cloud within the product's cap" and is never inside."""
+    names = ["Cloud Flag", "Cirrus Flag", "Water Flag", "Dilated Cloud Flag",
+             "SpecTf-Cloud Probability", "SpecTf-Cloud Flag", "SpecTf-Buffer Distance"]
+    mask = np.zeros((1, 6, len(names)), dtype=np.float32)
+    mask[0, 0, 5] = 1                                    # the SpecTf cloud itself
+    mask[0, :, 6] = [0.0, 1.0, 2.0, 2.236, 12.0, -1.0]   # distance to it, in pixels
+    mask[0, :, 3] = 1                                    # the whole row is "dilated cloud"
+    mask[0, 4, 4] = 0.9                                  # a probability is not a flag
+    obs = ObsWindow(space="block", bands={"mask": mask}, valid=np.ones((1, 6), bool),
+                    granules=(), epoch=EPOCH, band_attrs={"mask": {"name": names}})
+
+    def kept(**kw: object) -> list[bool]:
+        return L2AStandard(**kw).valid(obs, NullAux())[0].tolist()
+
+    assert kept(flags=("spectf_cloud", "cirrus", "water")) == [False, True, True, True, True, True]
+    assert kept(flags=("cirrus",), spectf_buffer=0) == [False, True, True, True, True, True]
+    assert kept(flags=("spectf_cloud",), spectf_buffer=2) == [False, False, False, True, True, True]
+    assert kept(flags=("dilated_cloud",)) == [False] * 6      # what the SpecTf flag replaces
+    with pytest.raises(KeyError, match="Spacecraft Flag"):    # V003 has none: fail, never skip
+        kept()
+    with pytest.raises(KeyError, match="SpecTf-Buffer Distance"):
+        L2AStandard(flags=("cloud",), spectf_buffer=2).valid(
+            ObsWindow(space="block", bands={"mask": mask}, valid=np.ones((1, 6), bool),
+                      granules=(), epoch=EPOCH, band_attrs={"mask": {"name": names[:4]}}),
+            NullAux())
+    with pytest.raises(ValueError, match="spectf_buffer"):
+        L2AStandard(spectf_buffer=-1)
+
+
 def test_slit_dust_is_not_in_the_slice() -> None:
     with pytest.raises(NotImplementedError, match="04 section 3"):
         SlitDust().valid(_sensor_obs(SensorWindow(0, 0, 1, 1), (1, 1)), NullAux())

@@ -59,7 +59,19 @@ class L2AStandard:
     """Cloud, cirrus, water, spacecraft flags from the L2A mask product - the `mask` role, a
     multi-band variable whose band names the reader reports (`obs.band_attrs["mask"]["name"]`,
     e.g. "Cloud flag", "Cirrus flag", "Water flag", "Spacecraft Flag", "Dilated Cloud Flag").
-    A cell is usable when every selected flag is 0."""
+    A cell is usable when every selected flag is 0.
+
+    Which flags exist depends on the mask collection's version, and a flag the granule does not
+    carry fails loudly rather than being skipped: V002 has all six; V003 drops the spacecraft
+    flag and keeps the rest. `spectf_cloud` is the SpecTf classifier's cloud flag, which replaces
+    the pair `cloud` + `dilated_cloud` - the dilated flag is a fixed several-kilometre buffer and
+    removes clear ground beside any cloud. Listing `cloud` AND `spectf_cloud` is their union.
+
+    `spectf_buffer` widens the SpecTf flag by a number of sensor pixels, to trim the bright and
+    shadowed margin a cloud's flag does not cover. It reads the product's "SpecTf-Buffer
+    Distance" band - the distance to the nearest SpecTf cloud pixel, 0 on the cloud and -1
+    beyond the product's own cap of about 20 pixels - and drops cells at or inside the distance
+    given. `None` (the default) reads nothing; 0 is the flag itself."""
 
     space = "map"
     required_roles = ("mask",)
@@ -72,14 +84,22 @@ class L2AStandard:
         "water": "Water flag",
         "spacecraft": "Spacecraft Flag",
         "dilated_cloud": "Dilated Cloud Flag",
+        "spectf_cloud": "SpecTf-Cloud Flag",
     }
+    #: the band `spectf_buffer` thresholds
+    BUFFER_BAND = "SpecTf-Buffer Distance"
 
-    def __init__(self, flags: tuple[str, ...] = ("cloud", "cirrus", "water", "spacecraft")) -> None:
+    def __init__(self, flags: tuple[str, ...] = ("cloud", "cirrus", "water", "spacecraft"),
+                 spectf_buffer: float | None = None) -> None:
         unknown = [f for f in flags if f not in self.BANDS]
         if unknown:
             raise ValueError(f"L2AStandard: unknown flag(s) {unknown}; choose from "
                              f"{sorted(self.BANDS)}")
+        if spectf_buffer is not None and not float(spectf_buffer) >= 0:
+            raise ValueError(f"L2AStandard: spectf_buffer is a distance in pixels, 0 or more; "
+                             f"got {spectf_buffer}")
         self.flags = tuple(flags)
+        self.spectf_buffer = None if spectf_buffer is None else float(spectf_buffer)
 
     def band_indices(self, names: list[str]) -> dict[str, int]:
         lowered = [str(n).strip().lower() for n in names]
@@ -103,6 +123,14 @@ class L2AStandard:
         ok = np.ones(mask.shape[:2], dtype=bool)
         for index in self.band_indices(names).values():
             ok &= ~(mask[..., index] > 0)
+        if self.spectf_buffer is not None:
+            lowered = [str(n).strip().lower() for n in names]
+            if self.BUFFER_BAND.lower() not in lowered:
+                raise KeyError(f"L2AStandard: spectf_buffer needs a band named "
+                               f"{self.BUFFER_BAND!r}; bands are {names}")
+            distance = mask[..., lowered.index(self.BUFFER_BAND.lower())]
+            # -1 is "no cloud within the product's cap", so it is never inside the buffer
+            ok &= ~((distance >= 0) & (distance <= self.spectf_buffer))
         return ok
 
 

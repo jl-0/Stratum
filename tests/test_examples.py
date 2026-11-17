@@ -251,3 +251,32 @@ def test_yearly_deliver_the_scorers_emit10_answer() -> None:
     names = {n for g in (1, 2) for n in schema[f"emit10_{g}"].classes.entries.column("name").to_pylist()}
     assert names - {"none"} <= set(colours)
     assert colours["Hematite.02+Quartz.98 GDS76 W1R1Ha"] == (235, 0, 180)
+
+
+# ------------------------------------------------------------------- CONUS 2023
+def test_the_conus_run_is_the_demo_sites_run_over_a_larger_area() -> None:
+    """`emit-conus-2023/manifest.yaml` is what `manifest-demo-sites.yaml` checks first, so the
+    two may differ only in where they run: the area, the land-cover tiles that cover it, the
+    index scoped to it, and the budget that admits it."""
+    conus = ROOT / "examples" / "emit-conus-2023"
+    demo = yaml.safe_load((conus / "manifest-demo-sites.yaml").read_text())
+    full = yaml.safe_load((conus / "manifest.yaml").read_text())
+    for doc in (demo, full):
+        for key in ("run_id", "description", "aoi", "budget"):
+            doc.pop(key)
+        doc["inputs"].pop("index_location")
+        assert len(doc["aux"]["landcover"].pop("uri")) >= 5
+    assert demo == full
+
+
+def test_the_conus_scorer_is_contender_c() -> None:
+    """The reprocessed-archive manifests change what contender C READS, never how it selects."""
+    c = _raw("assistant-pick")
+    demo = yaml.safe_load((ROOT / "examples" / "emit-conus-2023"
+                           / "manifest-demo-sites.yaml").read_text())
+    assert demo["scorer"] == c["scorer"]
+    assert demo["grid"] == c["grid"] and demo["aoi"] == c["aoi"]
+    assert demo["granule_filter"] == c["granule_filter"]
+    assert {k: v["aggregate"] for k, v in demo["snapshot"]["layers"].items()} == \
+           {k: v["aggregate"] for k, v in c["snapshot"]["layers"].items()}
+

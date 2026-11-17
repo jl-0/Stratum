@@ -229,7 +229,7 @@ def run_stage(run_dir: Path | str, stage: str, workers: int | None = None, *,
         # THROTTLE_DEADLINE) and its items fail
         width = min(concurrency(workers), pool_ceiling(cli, name) or len(items), len(items))
         with (ThreadPoolExecutor(max_workers=width) as pool,
-              console.progress(stage, len(items)) as advance):
+              console.progress(stage, len(items), lines=True) as advance):
             futures = {pool.submit(invoke, cli, name, {**base, "index": i}): i
                        for i in range(len(items))}
             for fut in as_completed(futures):

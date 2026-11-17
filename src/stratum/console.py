@@ -170,8 +170,16 @@ def configure_logging(plain: bool = False, verbose: bool = False) -> None:
     root.addHandler(handler)
 
 
-def progress(description: str, total: int):
+#: Plain output reports a stage's progress at most this often, and always at its last item.
+PLAIN_PROGRESS_SECONDS = 30.0
+
+
+def progress(description: str, total: int, *, lines: bool = False):
     """A progress bar over one stage's work items, or a no-op when output is plain.
+
+    `lines=True` replaces the no-op with occasional plain lines on stderr. The executors ask for
+    it: in a log, a pipe or a detached run a bar would be noise, but a stage of thousands of
+    items otherwise says nothing between its start and its end.
 
     Returns a context manager yielding `advance()`. The executors call it as each item finishes,
     which is the difference between a silent three-minute fan-out and a visible one.
@@ -181,11 +189,30 @@ def progress(description: str, total: int):
     away the one record of how long a stage took and how many items it covered.
     """
     import contextlib
-    if not styled() or total <= 0:
+    if total <= 0 or (not styled() and not lines):
         @contextlib.contextmanager
         def _noop():
             yield lambda: None
         return _noop()
+    if not styled():
+        @contextlib.contextmanager
+        def _lines():
+            import sys
+            import time
+            done, started = 0, time.monotonic()
+            last = started
+
+            def advance() -> None:
+                nonlocal done, last
+                done += 1
+                now = time.monotonic()
+                if done == total or now - last >= PLAIN_PROGRESS_SECONDS:
+                    last = now
+                    # stderr: stdout may be a document (`plan --json`) that a line would corrupt
+                    print(f"{description}: {done}/{total} items, {now - started:.0f} s",
+                          file=sys.stderr, flush=True)
+            yield advance
+        return _lines()
 
     from rich.progress import (
         BarColumn,
