@@ -280,3 +280,22 @@ def test_the_conus_scorer_is_contender_c() -> None:
     assert {k: v["aggregate"] for k, v in demo["snapshot"]["layers"].items()} == \
            {k: v["aggregate"] for k, v in c["snapshot"]["layers"].items()}
 
+
+def test_the_conus_manifests_name_only_files_a_detached_run_stages() -> None:
+    """`make cloud-run-detached` stages the manifest's own directory and the plain files of the
+    directory above it, nothing else. A manifest here that reaches into a sibling directory
+    plans on a laptop and fails in the task, on the first file it cannot find."""
+    import re
+
+    conus = ROOT / "examples" / "emit-conus-2023"
+    for path in sorted(conus.glob("manifest*.yaml")):
+        if path.name.endswith(".cloud.yaml"):
+            continue
+        text = path.read_text()
+        named = re.findall(r'"@ref:([^"]+)"', text) + re.findall(r"^\s*registry:\s*(\S+)", text,
+                                                                 flags=re.M)
+        for rel in named:
+            target = (conus / rel).resolve()
+            assert target.is_file(), f"{path.name}: {rel} does not exist"
+            assert target.parent in (conus, conus.parent), \
+                f"{path.name}: {rel} is outside what a detached run stages"
