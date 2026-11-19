@@ -27,6 +27,7 @@ case "$*" in
   *"output -raw viewer_image_uri"*) printf 'repo@sha256:abc' ;;
   *"output -raw run_task_definition"*) printf '{RUN_ARN}' ;;
   *"output -raw storage_root"*) printf 's3://stratum-test-bucket/' ;;
+  *"output -raw function_name"*) printf 'stratum-test-worker' ;;
   *"output -json viewer_network"*)
     printf '{{"subnets":["s-1"],"security_groups":["sg-1"],"assign_public_ip":"DISABLED","port":8000}}' ;;
 esac
@@ -42,6 +43,7 @@ case "$*" in
   *"ecs list-tasks"*) echo "{VIEWER_TASK}	{MOSAIC_TASK}" ;;
   *"ecs stop-task"*) echo stopped ;;
   *"ecs run-task"*) echo "{RUN_TASK}" ;;
+  *"lambda get-function-concurrency"*) echo 64 ;;
   *"ecs describe-tasks"*) echo eni-1 ;;
   *"ec2 describe-network-interfaces"*) echo 10.0.0.9 ;;
 esac
@@ -109,8 +111,37 @@ def test_run_task_stages_the_manifest_tree_and_starts_a_detached_run(
     assert any("s3 cp" in c and c.rstrip().split()[-2].endswith("/zones.yaml") for c in calls)
     started = next(c for c in calls if "ecs run-task" in c)
     assert RUN_ARN in started
-    assert '"stratum", "orchestrate", "--bundle", "s3://stratum-test-bucket/bundles/manifest-' \
-        in started
-    assert '"-m", "site/manifest.cloud.yaml", "--workers", "40"' in started
+    assert "stratum orchestrate --bundle s3://stratum-test-bucket/bundles/manifest-" in started
+    assert "-m site/manifest.cloud.yaml --workers 40;" in started
     assert RUN_TASK in done.stdout and "no longer needs this machine" in done.stdout
     assert not any("describe-tasks" in c for c in calls), "the script waited for the run"
+
+
+def _launch(stubbed: dict[str, str], tmp_path: Path, *args: str) -> str:
+    site = tmp_path / "examples" / "site"
+    site.mkdir(parents=True)
+    (site / "manifest.yaml").write_text("outputs:\n  bucket: ./out\n")
+    done = subprocess.run(["bash", str(SCRIPTS / "run-task.sh"), str(site / "manifest.yaml"),
+                           *args], env=stubbed, capture_output=True, text=True, timeout=60,
+                          check=False)
+    assert done.returncode == 0, done.stderr
+    return next(c for c in _calls(stubbed) if "ecs run-task" in c)
+
+
+def test_run_task_retries_the_whole_run_and_dispatches_at_the_reservation(
+        stubbed: dict[str, str], tmp_path: Path) -> None:
+    """One upstream outage fails a stage, and so a run, hours in. The task therefore runs the
+    run up to three times - a shell loop in the command, not code in the image, so it changes
+    nothing a cache key is made from - and never retries a refused budget (exit 2). With no
+    --workers the dispatcher is given the function's reserved concurrency."""
+    started = _launch(stubbed, tmp_path)
+    assert '"bash", "-c", "n=1; until stratum orchestrate --bundle ' in started
+    assert "--workers 64; do rc=$?" in started
+    assert '[ \\"$rc\\" -eq 2 ] || [ \\"$n\\" -ge 3 ]' in started
+
+
+def test_run_task_runs_once_when_asked(stubbed: dict[str, str], tmp_path: Path) -> None:
+    started = _launch(stubbed, tmp_path, "--attempts", "1", "--workers", "8", "--dry-run")
+    assert '["stratum", "orchestrate", "--bundle"' in started and "until" not in started
+    assert '"--workers", "8", "--dry-run"]' in started
+    assert "get-function-concurrency" not in "\n".join(_calls(stubbed))

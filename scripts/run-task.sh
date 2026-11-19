@@ -1,11 +1,21 @@
 #!/usr/bin/env bash
 # Run a manifest in AWS without this machine: `stratum orchestrate` as a Fargate task.
 #
-#   ./scripts/run-task.sh <manifest.yaml> [--workers N] [--dry-run]
+#   ./scripts/run-task.sh <manifest.yaml> [--attempts N] [--workers N] [--dry-run]
 #
 # Writes the manifest's cloud variant, stages it and the files beside it in the bucket, starts
 # the task (terraform/run.tf) and RETURNS. The run carries on with the laptop closed; follow it
 # in the log this prints. Interrupting or re-running is safe: finished items are cache hits.
+#
+# Two things are decided here rather than in the image, so neither needs a rebuild:
+#
+#   --attempts N   the task runs the whole run up to N times (default 3), stopping at the first
+#                  that succeeds. A stage is all-or-nothing, so one upstream outage - a burst of
+#                  502s from the archive - fails a run hours in; the next attempt finds
+#                  everything that finished in the cache and redoes only what did not. A refused
+#                  budget (exit 2) is never retried.
+#   --workers N    invocations in flight. When not given, the worker function's reserved
+#                  concurrency, which is the most the dispatcher will use anyway.
 #
 # What is staged: the manifest's own directory (minus out/), and the plain files of the
 # directory above it, which is where the examples keep a shared zone registry. A manifest that
@@ -13,9 +23,21 @@
 set -euo pipefail
 . "$(dirname "$0")/common.sh"
 
-SRC="${1:?usage: $(basename "$0") <manifest.yaml> [--workers N] [--dry-run]}"
+SRC="${1:?usage: $(basename "$0") <manifest.yaml> [--attempts N] [--workers N] [--dry-run]}"
 shift
 [ -f "$SRC" ] || { echo "no such manifest: $SRC" >&2; exit 1; }
+
+ATTEMPTS=3
+PASS=()
+HAS_WORKERS=0
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --attempts) ATTEMPTS="${2:?--attempts needs a number}"; shift 2 ;;
+    --workers)  HAS_WORKERS=1; PASS+=("$1" "${2:?--workers needs a number}"); shift 2 ;;
+    *)          PASS+=("$1"); shift ;;
+  esac
+done
+case "$ATTEMPTS" in ''|*[!0-9]*|0) echo "--attempts must be a positive integer" >&2; exit 64 ;; esac
 
 AWS=(aws --profile "$AWS_PROFILE" --region "$AWS_REGION")
 TF=(terraform -chdir="$REPO_ROOT/terraform")
@@ -58,9 +80,26 @@ print(json.dumps({"awsvpcConfiguration": {
     "assignPublicIp": n["assign_public_ip"]}}))
 PY
 )"
-OVERRIDES="$(python3 - "$BUNDLE/" "$NAME/$(basename "$CLOUD")" "$@" <<'PY'
-import json, sys
-command = ["stratum", "orchestrate", "--bundle", sys.argv[1], "-m", sys.argv[2], *sys.argv[3:]]
+if [ "$HAS_WORKERS" = 0 ]; then
+  FUNCTION="$(tf_output function_name)"
+  RESERVED="$("${AWS[@]}" lambda get-function-concurrency --function-name "$FUNCTION" \
+              --query ReservedConcurrentExecutions --output text 2>/dev/null || true)"
+  case "$RESERVED" in ''|*[!0-9]*) ;; *) PASS+=(--workers "$RESERVED") ;; esac
+fi
+
+# The retry is a shell loop around the command, not code in the image: it re-runs the whole run,
+# which is cheap because every finished item is a cache hit, and it changes nothing a cache key
+# is made from.
+OVERRIDES="$(python3 - "$ATTEMPTS" "$BUNDLE/" "$NAME/$(basename "$CLOUD")" ${PASS[@]+"${PASS[@]}"} <<'PY'
+import json, shlex, sys
+attempts = int(sys.argv[1])
+run = shlex.join(["stratum", "orchestrate", "--bundle", sys.argv[2], "-m", sys.argv[3],
+                  *sys.argv[4:]])
+loop = (f"n=1; until {run}; do rc=$?; "
+        f'if [ "$rc" -eq 2 ] || [ "$n" -ge {attempts} ]; then exit "$rc"; fi; '
+        f'echo "attempt $n of {attempts} failed (exit $rc); starting attempt $((n+1)) in 60 s" >&2; '
+        "n=$((n+1)); sleep 60; done")
+command = ["bash", "-c", loop] if attempts > 1 else shlex.split(run)
 print(json.dumps({"containerOverrides": [{"name": "run", "command": command}]}))
 PY
 )"

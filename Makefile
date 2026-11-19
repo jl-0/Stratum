@@ -57,7 +57,8 @@ cloud-run: env-check
 	  ./scripts/stratum.sh run -m $(MANIFEST:.yaml=.cloud.yaml) --executor aws $(ARGS)
 
 # The same run, started and left: the dispatch loop runs in a Fargate task (terraform/run.tf)
-# instead of in this shell. ARGS reaches `stratum orchestrate`, e.g. ARGS="--workers 200".
+# instead of in this shell. The task tries the whole run up to three times (ARGS="--attempts 1"
+# for once) and dispatches at the function's reserved concurrency unless ARGS names --workers.
 cloud-run-detached: env-check ; ./scripts/run-task.sh $(MANIFEST) $(ARGS)
 
 # After a cloud run: one web-mercator COG per layer, which is what the viewer and MMGIS read
