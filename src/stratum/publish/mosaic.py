@@ -24,9 +24,10 @@ uploaded and dropped from the mirror.
 from __future__ import annotations
 
 import logging
+import multiprocessing
 import tempfile
 from collections.abc import Iterable, Mapping, Sequence
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -207,7 +208,10 @@ def run_mosaics(products: Products, run_id: str, *, layers: Sequence[str] | None
     A mosaic already present is skipped unless `force`: a run id names its manifest, so a
     published run's tiles do not change under it. Returns `(job, "built" | "present")` per job.
     Layers build `workers` at a time; each one also uses every core inside GDAL, so more than a
-    couple mostly buys contention.
+    couple mostly buys contention. Each layer is built in a process of its own that exits when
+    the layer is done: GDAL's block cache, open-dataset pool and allocator arenas are per
+    process and are not handed back between layers, so one long-lived process grows until a
+    run with many layers is killed for memory.
     """
     ws = products.workspace
     jobs = plan_mosaics(run_id, products.items(run_id), layers=layers, periods=periods)
@@ -217,13 +221,16 @@ def run_mosaics(products: Products, run_id: str, *, layers: Sequence[str] | None
         if not force and (dest.is_file() or ws.exists(dest)):
             return job, "present"
         log.info("mosaic %s: %d tile(s)", job.rel, len(job.sources))
-        build_mosaic([ws.gdal_path(products.resolve(s)) for s in job.sources], dest,
-                     nearest=job.nearest, config=ws.gdal_config())
+        builders.submit(build_mosaic, [ws.gdal_path(products.resolve(s)) for s in job.sources],
+                        dest, nearest=job.nearest, config=dict(ws.gdal_config())).result()
         ws.push_file(dest)
         ws.drop_mirror(dest)          # a bucket root keeps it there; the mirror copy is spent
         return job, "built"
 
-    with ThreadPoolExecutor(max_workers=max(1, workers)) as pool:
+    n = max(1, workers)
+    with ProcessPoolExecutor(max_workers=n, max_tasks_per_child=1,
+                             mp_context=multiprocessing.get_context("spawn")) as builders, \
+            ThreadPoolExecutor(max_workers=n) as pool:
         results = list(pool.map(one, jobs))
 
     # Re-read the collection from the root, never from a mirror copy an earlier session left:

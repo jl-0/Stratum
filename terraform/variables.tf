@@ -180,9 +180,9 @@ variable "mosaic_cpu" {
 }
 
 variable "mosaic_memory_mb" {
-  description = "Fargate memory for `stratum mosaic`. Must be a valid pairing with mosaic_cpu."
+  description = "Fargate memory for `stratum mosaic`. Must be a valid pairing with mosaic_cpu (4 vCPU allows up to 30720). 16 GB was not enough for a 3,020-tile run with two layers at once."
   type        = number
-  default     = 16384
+  default     = 30720
 }
 
 variable "mosaic_storage_gib" {
