@@ -12,7 +12,7 @@ from typing import Any
 import numpy as np
 
 from stratum.reduce.bands import resolve_class_names
-from stratum.types import AuxAccessor, BandSpec, ObsWindow
+from stratum.types import ACQUIRED_UNITS, AuxAccessor, BandSpec, ObsWindow, acquired_seconds
 
 #: metric -> (default weight, default bounds, better, default aliases). Weights and bounds are
 #: the external tiled aggregator's defaults (`DEFAULT_W_*` and its CLI bound defaults); metrics
@@ -43,6 +43,9 @@ VOTE_WEIGHTS = ("count", "score")
 NONDETECT = ("abstain", "vote")
 BELOW_MIN_COUNT = ("nodata", "none")
 GROUPS = ("g1", "g2")
+SELECT = ("cell", "group")
+#: the metrics that read one band per group; under `select: group` each group is ranked on its own
+GROUP_METRICS = ("bd_unc", "fit", "banddepth")
 
 #: the per-cell (and one per-observation) diagnostics this scorer can deliver (04 section 4)
 OUTPUTS = (
@@ -203,6 +206,38 @@ def lexical_rank(keys: Sequence[np.ndarray], cand: np.ndarray) -> np.ndarray:
     return np.where(cand, rank, np.inf)
 
 
+def _group_outputs(k: int) -> tuple[BandSpec, ...]:
+    g, nan = f"g{k}", float("nan")
+    return (
+        BandSpec(f"{g}_depth", "float32", f"group {k}: band depth of the look selected for this "
+                 "group (NaN when banddepth has no weight)", nodata=nan),
+        BandSpec(f"{g}_fit", "float32", f"group {k}: fit of that look; NaN where the group's "
+                 "answer is none, or fit has no weight", nodata=nan),
+        BandSpec(f"{g}_unc", "float32", f"group {k}: band-depth uncertainty of that look; NaN "
+                 "where the answer is none, or bd_unc has no weight", nodata=nan),
+        BandSpec(f"{g}_acquired", "float64", f"group {k}: acquisition start of that look, which "
+                 "names its granule", units=ACQUIRED_UNITS, nodata=nan),
+        BandSpec(f"{g}_penalty", "float32", f"group {k}: that look's weighted penalty, 0 best",
+                 units="fraction", nodata=nan),
+        BandSpec(f"{g}_cloud_prob", "float32", f"group {k}: cloud probability of that look (NaN "
+                 "when the scorer reads no cloud probability)", units="fraction", nodata=nan),
+        BandSpec(f"{g}_count", "float32", f"group {k}: looks holding the group's mode",
+                 units="count", nodata=nan),
+        BandSpec(f"{g}_votes", "float32", f"group {k}: weighted votes of the mode",
+                 units="votes", nodata=nan),
+        BandSpec(f"{g}_voters", "float32", f"group {k}: valid looks that voted in this group",
+                 units="count", nodata=nan),
+        BandSpec(f"{g}_vote_share", "float32", f"group {k}: the mode's weighted votes over all "
+                 "weighted votes cast in this group", units="fraction", nodata=nan),
+        BandSpec(f"{g}_runner_up", "float32", f"group {k}: looks holding the most common class "
+                 "other than the mode", units="count", nodata=nan),
+    )
+
+
+#: what `select: group` delivers on top of OUTPUTS: each group's own selected look and vote
+GROUP_OUTPUTS = _group_outputs(1) + _group_outputs(2)
+
+
 class ModeGatedSelect:
     """Pick, per cell, the best look among those that agree with the cell's mineral consensus.
 
@@ -294,6 +329,16 @@ class ModeGatedSelect:
       scores the metric 1.0, so the mode can differ. `weights: {bare: 0}` restores its voter
       set for the cover fraction (the metric and its band are then not read at all).
 
+    **`select: group`** (needs `key: independent`, `combine: weighted`) lets each group pick its
+    OWN look, so a cell's two groups may come from different scenes. Per group, `bd_unc`, `fit`
+    and `banddepth` read that group's band alone; the vote and its tie-break use that penalty;
+    and the group's look is the lowest-penalty valid look holding the group's answer (its mode,
+    or `none` with no voter). The gate is unused. The framework's one look per cell is group
+    1's, so gathered layers and `acquired` are that look's; each group's own values come from
+    the `g1_*` / `g2_*` outputs (GROUP_OUTPUTS), `g?_acquired` being float64 in the `acquired`
+    units. **`cloud_vote_power`** > 0 scales every vote by (1 - cloud probability) to that
+    power, under any key or select, and makes the cloud-probability band required.
+
     Metrics and the names they read (override with `aliases`): `bd_unc` [mineral_unc,
     mineral_2_unc], `fit` [mineral_fit, mineral_2_fit], `banddepth` [mineral_depth,
     mineral_2_depth], `cloud_prob` [cloud_prob], `bare` [frcov], `sza` [solar_zenith], `vza`
@@ -337,6 +382,8 @@ class ModeGatedSelect:
                  below_min_count: str = "nodata",
                  normalize: str = "fixed",
                  combine: str = "weighted",
+                 select: str = "cell",
+                 cloud_vote_power: float = 0.0,
                  weights: Mapping[str, float] | None = None,
                  bounds: Mapping[str, Sequence[float]] | None = None,
                  aliases: Mapping[str, str | Sequence[str]] | None = None) -> None:
@@ -351,12 +398,20 @@ class ModeGatedSelect:
                                       ("combine", combine, COMBINE),
                                       ("vote_weight", vote_weight, VOTE_WEIGHTS),
                                       ("nondetect", nondetect, NONDETECT),
-                                      ("below_min_count", below_min_count, BELOW_MIN_COUNT)):
+                                      ("below_min_count", below_min_count, BELOW_MIN_COUNT),
+                                      ("select", select, SELECT)):
             if value not in allowed:
                 raise ValueError(f"{name}: {label} must be one of {list(allowed)}; got {value!r}")
         if combine != "weighted" and gate != "hard":
             raise ValueError(f"{name}: combine: {combine} ranks only the looks that pass the "
                              f"gate, so it needs gate: hard; got gate: {gate}")
+        if select == "group" and (key != "independent" or combine != "weighted"):
+            raise ValueError(f"{name}: select: group picks a look per group, so it needs key: "
+                             f"independent and combine: weighted; got key: {key}, combine: "
+                             f"{combine}")
+        if not float(cloud_vote_power) >= 0:
+            raise ValueError(f"{name}: cloud_vote_power must be 0 or more; "
+                             f"got {cloud_vote_power}")
         ignore = dict(ignore or {})
         bad = [g for g in ignore if g not in GROUPS]
         if bad:
@@ -422,9 +477,14 @@ class ModeGatedSelect:
         self.weights = {m: v / total for m, v in w.items() if v > 0}
         self.bounds = b
         self.aliases = a
-        self.required_roles = _roles_for(self.weights, a)
+        self.select = select
+        self.cloud_vote_power = float(cloud_vote_power)
+        roles = _roles_for(self.weights, a)
+        if self.cloud_vote_power > 0 and a["cloud_prob"][0] not in roles:
+            roles = (*roles, a["cloud_prob"][0])
+        self.required_roles = roles
         self.required_layers = layers
-        self.outputs = OUTPUTS
+        self.outputs = OUTPUTS + GROUP_OUTPUTS if select == "group" else OUTPUTS
         self._memo: tuple[int, dict[str, np.ndarray]] | None = None
         self._ids: dict[str, np.ndarray] = {}
 
@@ -441,8 +501,10 @@ class ModeGatedSelect:
         return self._ids[cache]
 
     # ----------------------------------------------------------------------------- metrics
-    def _raw(self, metric: str, o: ObsWindow, g1: np.ndarray, g2: np.ndarray) -> np.ndarray:
-        """One look's raw value of `metric`, (H, W) float32, NaN where missing."""
+    def _raw(self, metric: str, o: ObsWindow, g1: np.ndarray, g2: np.ndarray,
+             group: int | None = None) -> np.ndarray:
+        """One look's raw value of `metric`, (H, W) float32, NaN where missing. `group` (0 or
+        1) makes a per-group metric that group's band alone, not the mean of the two."""
         names = self.aliases[metric]
         if metric == "scene_cloudiness":
             cf = o.granule.cloud_fraction if o.granule is not None else None
@@ -453,6 +515,8 @@ class ModeGatedSelect:
                 # MINUNCERT writes 0, not fill, where a group detected nothing
                 a = np.where(g1 > 0, a, np.nan)
                 b = np.where(g2 > 0, b, np.nan)
+            if group is not None:
+                return np.clip((a, b)[group], 0.0, 1.0)
             return np.clip(_mean2(a, b), 0.0, 1.0)
         if metric in ("cloud_prob", "bare"):
             return np.clip(_float(o[names[0]]), 0.0, 1.0)
@@ -466,14 +530,16 @@ class ModeGatedSelect:
             return (1.0 / mu0 + 1.0 / muv).astype(np.float32)
         return _float(o[names[0]])                       # sza, path_length
 
-    def penalties(self, obs: ObsWindow, g1: np.ndarray, g2: np.ndarray
+    def penalties(self, obs: ObsWindow, g1: np.ndarray, g2: np.ndarray, *,
+                  group: int | None = None, metrics: Sequence[str] | None = None
                   ) -> dict[str, np.ndarray]:
         """Each weighted metric's (N, H, W) penalty in [0, 1], 0 best and 1.0 where missing.
-        Raw values are computed one look at a time (`for i, o in enumerate(obs)`)."""
+        Raw values are computed one look at a time (`for i, o in enumerate(obs)`). `metrics`
+        narrows it to some of the weighted metrics; `group` is passed to `_raw`."""
         out: dict[str, np.ndarray] = {}
         valid = np.asarray(obs.valid, dtype=bool)
-        for metric in self.weights:
-            raw = np.stack([self._raw(metric, o, g1[i], g2[i]) for i, o in enumerate(obs)])
+        for metric in (self.weights if metrics is None else metrics):
+            raw = self._stack(metric, obs, g1, g2, group)
             better = METRICS[metric][2]
             lo, hi = self.bounds[metric]
             feasible = valid & np.isfinite(raw)
@@ -485,6 +551,10 @@ class ModeGatedSelect:
             pen = s if better == "low" else 1.0 - s
             out[metric] = np.where(feasible, pen, 1.0).astype(np.float32)
         return out
+
+    def _stack(self, metric: str, obs: ObsWindow, g1: np.ndarray, g2: np.ndarray,
+               group: int | None = None) -> np.ndarray:
+        return np.stack([self._raw(metric, o, g1[i], g2[i], group) for i, o in enumerate(obs)])
 
     def penalty(self, obs: ObsWindow, g1: np.ndarray, g2: np.ndarray) -> np.ndarray:
         """The combined (N, H, W) penalty: sum of weight x metric penalty, in [0, 1]."""
@@ -574,15 +644,34 @@ class ModeGatedSelect:
                                                            if n != "none"]))
         ignored = ignored1 | ignored2
         detect1, detect2 = g1 > 0, g2 > 0
-        pens = self.penalties(obs, g1, g2)
-        P = self._weighted(pens, valid.shape)
-        ballots = list(pens.values())
+        by_group = self.select == "group"
+        if by_group:
+            # one penalty per group: the shared metrics once, the per-group ones from that
+            # group's own band
+            shared = self.penalties(obs, g1, g2, metrics=[m for m in self.weights
+                                                          if m not in GROUP_METRICS])
+            own = [m for m in self.weights if m in GROUP_METRICS]
+            Pg = [self._weighted(shared | self.penalties(obs, g1, g2, group=k, metrics=own),
+                                 valid.shape) for k in (0, 1)]
+            P, ballots = Pg[0], []
+        else:
+            pens = self.penalties(obs, g1, g2)
+            P = self._weighted(pens, valid.shape)
+            ballots = list(pens.values())
+            Pg = [P, P]
 
         def tie_order(tie_score: np.ndarray) -> Callable[[np.ndarray], np.ndarray]:
             return lambda top: self.order(ballots, top, tie_score)
         # a look's vote: 1, or its quality (penalty is in [0, 1], 0 best)
-        quality = (1.0 - P).astype(np.float64) ** self.vote_power \
-            if self.vote_weight == "score" else np.ones(P.shape)
+        # ... scaled, under cloud_vote_power, by how clear the look's own cell is
+        cloud = self._stack("cloud_prob", obs, g1, g2) \
+            if self.cloud_vote_power > 0 or (by_group and "cloud_prob" in self.weights) else None
+        clear = 1.0 if cloud is None or self.cloud_vote_power <= 0 else \
+            np.where(np.isfinite(cloud), 1.0 - cloud, 1.0).astype(np.float64) \
+            ** self.cloud_vote_power
+        Qg = [((1.0 - p).astype(np.float64) ** self.vote_power
+               if self.vote_weight == "score" else np.ones(p.shape)) * clear for p in Pg]
+        quality = Qg[0]
         n_valid = valid.sum(axis=0).astype(np.float32)
 
         votes_none = self.nondetect == "vote"
@@ -607,11 +696,14 @@ class ModeGatedSelect:
             has = np.zeros(valid.shape[1:], dtype=bool)
             voters_any = np.zeros(valid.shape, dtype=bool)
             modes = []
-            for g, det, ign in ((g1, detect1, ignored1), (g2, detect2, ignored2)):
+            per_group = []
+            for k, (g, det, ign) in enumerate(((g1, detect1, ignored1),
+                                               (g2, detect2, ignored2))):
                 # an ignored class abstains in its own group; the look's other group still votes
                 voters = valid & (det | votes_none) & ~ign
                 voters_any |= voters
-                m = self._mode(g, quality, voters, P, tie_order(P))
+                m = self._mode(g, Qg[k], voters, Pg[k], tie_order(Pg[k]))
+                per_group.append((g, ign, voters, m))
                 # a suppressed mode (min_count, a refused tie) is no mode: it gates nothing
                 match &= (g == m["mode"][None]) | ~m["has"][None] | m["drop"][None]
                 has |= m["has"]
@@ -626,7 +718,18 @@ class ModeGatedSelect:
             mode_votes = mode_count
             runner_up = np.full(n_valid.shape, np.nan, dtype=np.float32)
 
-        if self.combine != "weighted":
+        extra: dict[str, np.ndarray] = {}
+        if by_group:
+            first = None
+            for k, (g, ign, voters, m) in enumerate(per_group):
+                # the looks holding this group's answer - its mode, or `none` without one
+                target = np.where(m["has"], m["mode"], 0)
+                cand = valid & (g == target[None]) & ~ign & ~m["drop"][None]
+                first = cand if first is None else first
+                extra |= self._group_emit(k, obs, g1, g2, cand, Pg[k], Qg[k], voters, m, cloud)
+            # the framework's one look per cell is group 1's; any other valid look after it
+            s = np.where(first, -P, -(P + np.float32(self.soft_penalty)))
+        elif self.combine != "weighted":
             cand = valid & match & ~drop[None]
             s = np.where(cand, -self.order(ballots, cand, P), np.nan)
         elif self.gate == "hard":
@@ -653,8 +756,45 @@ class ModeGatedSelect:
             "selection_penalty": P,
             "mode_1": answer(mode1, has1, drop1),
             "mode_2": answer(mode2, has2, drop2),
-        })
+        } | extra)
         return s
+
+    def _group_emit(self, k: int, obs: ObsWindow, g1: np.ndarray, g2: np.ndarray,
+                    cand: np.ndarray, P: np.ndarray, Q: np.ndarray, voters: np.ndarray,
+                    m: Mapping[str, np.ndarray], cloud: np.ndarray | None
+                    ) -> dict[str, np.ndarray]:
+        """Group k's (0 or 1) outputs under `select: group`: the best of the looks holding its
+        answer (`cand`), that look's values, and the group's own vote."""
+        any_ = cand.any(axis=0)
+        pick = np.argmin(np.where(cand, P, np.inf), axis=0)[None]
+
+        def at(stack: np.ndarray | None, dtype: type = np.float32) -> np.ndarray:
+            if stack is None:
+                return np.full(any_.shape, np.nan, dtype=dtype)
+            v = np.take_along_axis(np.asarray(stack, dtype=dtype), pick, axis=0)[0]
+            return np.where(any_, v, np.nan).astype(dtype)
+
+        def band(metric: str) -> np.ndarray | None:
+            return self._stack(metric, obs, g1, g2, k) if metric in self.weights else None
+        when = np.array([acquired_seconds(g.datetime) for g in obs.granules], np.float64)
+        cast = np.where(voters, Q, 0.0).sum(axis=0)
+        with np.errstate(invalid="ignore", divide="ignore"):
+            share = np.where(cast > 0, m["votes"] / cast, np.nan)
+        g = f"g{k + 1}"
+        f32 = np.float32
+        return {
+            f"{g}_depth": at(band("banddepth")),
+            f"{g}_fit": at(band("fit")),
+            f"{g}_unc": at(band("bd_unc")),
+            f"{g}_acquired": at(np.broadcast_to(when[:, None, None], cand.shape), np.float64),
+            f"{g}_penalty": at(P),
+            f"{g}_cloud_prob": at(cloud),
+            f"{g}_count": np.where(m["has"], m["count"], 0.0).astype(f32),
+            f"{g}_votes": np.asarray(m["votes"], dtype=f32),
+            f"{g}_voters": voters.sum(axis=0).astype(f32),
+            f"{g}_vote_share": share.astype(f32),
+            f"{g}_runner_up": np.where(m["has"], m["runner_up"], 0.0).astype(f32),
+        }
 
     def emit(self, obs: ObsWindow, aux: AuxAccessor) -> dict[str, np.ndarray]:
         """The diagnostics `score` computed for this same `obs` (04 section 4: emit runs right
@@ -667,5 +807,5 @@ class ModeGatedSelect:
         return out
 
 
-__all__ = ["METRICS", "ModeGatedSelect", "borda_points", "copeland_points", "lexical_rank",
-           "rank_penalty", "tally"]
+__all__ = ["GROUP_OUTPUTS", "METRICS", "ModeGatedSelect", "borda_points", "copeland_points",
+           "lexical_rank", "rank_penalty", "tally"]

@@ -763,3 +763,111 @@ def test_mode_gated_independent_ignore_is_per_group() -> None:
     joint = ModeGatedSelect(weights=VZ_ONLY, ignore={"g2": ["Dry vegetation"]})
     joint.score(obs, None)
     assert joint.emit(obs, None)["n_voters"][0, 0] == 1
+
+
+# ------------------------------------------------------------------- select: group
+GROUP_W = {m: 0.0 for m in METRICS} | {"fit": 1.0, "banddepth": 1.0, "bd_unc": 1.0}
+GROUP_BANDS = {
+    #                 look 0  look 1  look 2
+    "mineral_fit":    [0.40, 0.10, 0.20],
+    "mineral_2_fit":  [0.10, 0.45, 0.20],
+    "mineral_depth":  [0.30, 0.05, 0.10],
+    "mineral_2_depth": [0.02, 0.25, 0.10],
+    "mineral_unc":    [0.001, 0.02, 0.01],
+    "mineral_2_unc":  [0.02, 0.001, 0.01],
+}
+
+
+def test_mode_gated_select_group_picks_a_look_per_group() -> None:
+    """Look 0 is the best hematite, look 1 the best kaolinite: each group delivers its own."""
+    s = ModeGatedSelect(key="independent", select="group", weights=GROUP_W)
+    assert {b.name for b in s.outputs} >= {"g1_depth", "g2_acquired", "g2_vote_share"}
+    assert next(b for b in s.outputs if b.name == "g1_acquired").dtype == "float64"
+    obs = stack([(HEM, KAO), (HEM, KAO), (GOE, KAO)], bands=GROUP_BANDS)
+    assert winner(s, obs) == 0                         # the framework's look is group 1's
+    out = s.emit(obs, None)
+    assert out["mode_1"].item() == HEM and out["mode_2"].item() == KAO
+    assert out["g1_depth"].item() == pytest.approx(0.30)
+    assert out["g2_depth"].item() == pytest.approx(0.25)
+    assert out["g1_fit"].item() == pytest.approx(0.40)
+    assert out["g2_fit"].item() == pytest.approx(0.45)
+    assert out["g1_acquired"].dtype == np.float64
+    assert out["g1_acquired"].item() == acquired_seconds(granule(0).datetime)
+    assert out["g2_acquired"].item() == acquired_seconds(granule(1).datetime)
+    assert out["g1_count"].item() == 2 and out["g1_runner_up"].item() == 1
+    assert out["g1_vote_share"].item() == pytest.approx(2 / 3)
+    assert out["g2_count"].item() == 3 and out["g2_vote_share"].item() == pytest.approx(1.0)
+    assert np.isnan(out["g1_cloud_prob"].item())       # no cloud probability is read
+
+
+def test_mode_gated_select_group_none_and_one_sided_cells() -> None:
+    """A group nobody detected answers `none` from its best look; the other is unaffected."""
+    s = ModeGatedSelect(key="independent", select="group", weights=GROUP_W)
+    obs = stack([(HEM, 0), (HEM, 0)], bands=GROUP_BANDS | {
+        k: v[:2] for k, v in GROUP_BANDS.items()})
+    s.score(obs, None)
+    out = s.emit(obs, None)
+    assert out["mode_1"].item() == HEM and out["mode_2"].item() == 0
+    assert out["g1_depth"].item() == pytest.approx(0.30)
+    assert out["g2_count"].item() == 0 and out["g2_voters"].item() == 0
+    assert np.isnan(out["g2_fit"].item()) and np.isnan(out["g2_vote_share"].item())
+    assert np.isfinite(out["g2_acquired"].item())      # a look still stands behind `none`
+    # nothing valid: every per-group value is NaN
+    dead = stack([(HEM, KAO)], bands={k: v[:1] for k, v in GROUP_BANDS.items()}, valid=[False])
+    s.score(dead, None)
+    out = s.emit(dead, None)
+    assert np.isnan(out["g1_depth"].item()) and np.isnan(out["g1_acquired"].item())
+
+
+def test_mode_gated_select_group_needs_independent_weighted() -> None:
+    for bad in ({"select": "group"}, {"select": "group", "key": "independent",
+                                      "combine": "borda"}, {"select": "both"},
+                {"cloud_vote_power": -1}):
+        with pytest.raises(ValueError):
+            ModeGatedSelect(**bad)
+    assert ModeGatedSelect().outputs == ModeGatedSelect(select="cell").outputs
+
+
+def test_mode_gated_cloud_vote_power_deweights_cloudy_looks() -> None:
+    """Two likely-cloudy goethite looks lose to one clear hematite look once clouds weigh."""
+    pairs = [(HEM, 0), (GOE, 0), (GOE, 0)]
+    bands = {"view_zenith": [5.0, 5.0, 5.0], "cloud_prob": [0.0, 0.7, 0.7]}
+    plain = ModeGatedSelect(key="independent", weights=VZ_ONLY)
+    assert "cloud_prob" not in plain.required_roles
+    plain.score(stack(pairs, bands=bands), None)
+    assert plain.emit(stack(pairs, bands=bands), None)["mode_1"].item() == GOE
+    s = ModeGatedSelect(key="independent", select="group", weights=VZ_ONLY,
+                        cloud_vote_power=1.0)
+    assert "cloud_prob" in s.required_roles
+    obs = stack(pairs, bands=bands)
+    s.score(obs, None)
+    out = s.emit(obs, None)
+    assert out["mode_1"].item() == HEM
+    assert out["g1_votes"].item() == pytest.approx(1.0)
+    assert out["g1_vote_share"].item() == pytest.approx(1.0 / 1.6)
+    assert out["g1_cloud_prob"].item() == pytest.approx(0.0)
+    assert out["g1_count"].item() == 1 and out["g1_runner_up"].item() == 2
+
+
+def test_mode_gated_select_group_runs_through_resolve(tmp_path: Path) -> None:
+    """The per-group scene is a float64 layer in the snapshot, exact to the second."""
+    sevens = np.full((10, 10), 7, np.int16)
+    a = make_observation("A", datetime(2026, 6, 5, 0, 0, 7, tzinfo=UTC), r0=0, c0=0, rows=10,
+                         cols=10, view_zenith=2.0, class_ids=sevens, fill_row=False)
+    b = make_observation("B", datetime(2026, 6, 5, 0, 0, 19, tzinfo=UTC), r0=0, c0=5, rows=10,
+                         cols=10, view_zenith=20.0, class_ids=sevens, fill_row=False)
+    scorer = ModeGatedSelect(layers=("mineral", "mineral_b"), key="independent",
+                             select="group", weights=VZ_ONLY)
+    schema = _two_layer_schema("mode_1", "g1_count", "g2_vote_share")
+    schema = SnapshotSchema(name="mg", layers=[
+        *schema.layers,
+        LayerSpec(name="g2_acquired", kind="continuous", source="scorer.g2_acquired",
+                  aggregate=Aggregation("none"), dtype="float64")])
+    plan = build_plan(tmp_path, [a, b], scorer=scorer, snapshot_schema=schema)
+    snap = read_snapshot(resolve_block(item(TILE, EPOCH, 0, 0), plan).path)
+    t_a = acquired_seconds(a.ref.datetime)
+    assert snap["g2_acquired"].dtype == np.float64
+    assert (snap["g2_acquired"] == t_a).all()          # nadir A wins wherever it reaches
+    assert (snap["acquired"] == snap["g2_acquired"]).all()
+    assert (snap["g1_count"][:, :5] == 1).all() and (snap["g1_count"][:, 5:] == 2).all()
+    assert snap["g2_vote_share"] == pytest.approx(1.0)

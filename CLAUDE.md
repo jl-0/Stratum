@@ -363,7 +363,8 @@ tile list - and exists to exercise multi-tile fan-out, publish and STAC (719 wor
 mask's SpecTf cloud flag with a two-pixel buffer, calendar 2023: `manifest-demo-sites.yaml` over
 the four demonstration sites, and `manifest.yaml`, the same configuration over a CONUS box (5,184
 tiles, 157 WorldCover tiles), which `tests/test_examples.py` pins to differ only in area, aux
-tiles, index and budget.
+tiles, index and budget. `manifest-groups*.yaml` are the same inputs with `select: group`: each
+mineral group picks its own look and delivers its own depth, fit, scene and vote.
 `examples/emit-cm-demo-sites/` holds the contending configurations over the four demonstration
 sites (A `low_vegetation_nadir` weekly then vote, B `mode_gated_select` at the external tool's defaults,
 C a variant of B), and the current **yearly** set (`manifest-yearly-*.yaml`): one P1Y epoch, the

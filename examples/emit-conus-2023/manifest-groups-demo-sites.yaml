@@ -1,0 +1,298 @@
+# CONUS 2023 with the two mineral groups treated INDEPENDENTLY (the four demonstration sites).
+#
+#     pixi run stratum validate -m examples/emit-conus-2023/manifest-groups-demo-sites.yaml
+#     make cloud-run-detached MANIFEST=examples/emit-conus-2023/manifest-groups-demo-sites.yaml
+#
+# Same inputs, grid, masks and year as manifest-demo-sites.yaml beside it. What differs is the scorer:
+#
+#   select: group       each group picks its OWN look - the best of the looks holding that
+#                       group's consensus - so group 1 and group 2 of one cell may come from
+#                       different scenes. There is no gate between the groups.
+#   vote_weight: score  a look's vote is its quality (1 - its penalty), not 1
+#   per-group ranking   band depth, fit and uncertainty rank a look by THAT group's band alone
+#   delivered           per group: class, depth, fit, uncertainty, scene, penalty, cloud
+#                       probability, and the vote (count, weighted votes, voters, share, runner-up)
+
+run_id: cm-groups-demo-sites-2023
+description: Demonstration sites 2023 on V002 inputs, one annual epoch, groups 1 and 2 selected independently
+
+grid:                               # the EMIT L3 gridded-reflectance lattice
+  crs: EPSG:4326
+  resolution: [0.00055, -0.00055]
+  origin: [-0.000275, -0.000275]
+  tile_size: 0.55
+  block_size: 500                   # the memory knob for a stack scorer: resolve keeps every look's
+                                    #   block window. `stratum plan` prints the estimate.
+  regrid_method: kdtree
+
+aoi:
+  zones: [cuprite-nv, mountain-pass-ca, bingham-canyon-amd, mojave-l2b-tutorial]
+  registry: ../zones.yaml
+
+time:
+  start: 2023-01-01
+  end:   2024-01-01
+  epoch: P1Y                        # ONE epoch: the consensus is over every look of the year
+  deliver: P1Y
+
+inputs:
+  index_location: ./index-demo-sites
+  source:
+    kind: cmr
+    provider: LPCLOUD
+    prefer: https
+    patterns:                       # the reprocessed archive: every product at V002, and the
+      EMITL2BMIN:                   #   mask one version ahead at V003. Each collection also
+        version: "002"              #   publishes the older version, so the version is pinned
+        assets:                     #   here and the catalogue search is filtered on it.
+          MIN: "EMIT_L2B_MIN_002_*.nc"
+          MINUNCERT: "EMIT_L2B_MINUNCERT_002_*.nc"
+      EMITL1BRAD:
+        version: "002"
+        assets:
+          OBS: "EMIT_L1B_OBS_002_*.nc"
+      EMITL2AMASK:
+        version: "003"
+        assets:
+          MASK: "EMIT_L2A_MASK_003_*.nc"
+      EMITL2BFRCOV:
+        version: "002"
+        assets:
+          FRCOVBARE: "EMIT_L2B_FRCOVBARE_002_*.tif"
+          FRCOVPV: "EMIT_L2B_FRCOVPV_002_*.tif"
+          FRCOVNPV: "EMIT_L2B_FRCOVNPV_002_*.tif"
+  roles:
+    geometry: {collection: EMITL1BRAD, asset: OBS, var: obs}
+    mineral_1:
+      collection: EMITL2BMIN
+      var: group_1_mineral_id
+      class_table:
+        source: embedded
+        path: /mineral_metadata
+        key: index
+        attributes: [name, record, library, group]
+        identity: [collection_version, build_version]
+    depth_1: {collection: EMITL2BMIN, var: group_1_band_depth}
+    mineral_2:
+      collection: EMITL2BMIN
+      var: group_2_mineral_id
+      class_table:
+        source: embedded
+        path: /mineral_metadata
+        key: index
+        attributes: [name, record, library, group]
+        identity: [collection_version, build_version]
+    depth_2: {collection: EMITL2BMIN, var: group_2_band_depth}
+    mineral_unc:   {collection: EMITL2BMIN, asset: MINUNCERT, var: group_1_band_depth_unc}
+    mineral_2_unc: {collection: EMITL2BMIN, asset: MINUNCERT, var: group_2_band_depth_unc}
+    mineral_fit:   {collection: EMITL2BMIN, asset: MINUNCERT, var: group_1_fit}
+    mineral_2_fit: {collection: EMITL2BMIN, asset: MINUNCERT, var: group_2_fit}
+    mask: {collection: EMITL2AMASK, var: mask}
+    frcov: {collection: EMITL2BFRCOV, asset: FRCOVBARE, var: EMIT_L2B_FRCOVBARE, resampling: nearest}
+    pv:    {collection: EMITL2BFRCOV, asset: FRCOVPV,   var: EMIT_L2B_FRCOVPV,   resampling: nearest}
+    npv:   {collection: EMITL2BFRCOV, asset: FRCOVNPV,  var: EMIT_L2B_FRCOVNPV,  resampling: nearest}
+  band_aliases:
+    view_zenith:  {role: geometry, band: 2}
+    solar_zenith: {role: geometry, band: 4}
+    path_length:  {role: geometry, band: 0}
+    cos_i:        {role: geometry, band: 8}
+    cloud_prob:   {role: mask, match: {name: "SpecTf-Cloud Probability"}}   # by NAME: band 4 of
+                                          #   the seven V003 carries, band 8 of V002's eleven
+
+aux:
+  landcover:
+    uri:
+      - https://esa-worldcover.s3.eu-central-1.amazonaws.com/v200/2021/map/ESA_WorldCover_10m_2021_v200_N33W120_Map.tif
+      - https://esa-worldcover.s3.eu-central-1.amazonaws.com/v200/2021/map/ESA_WorldCover_10m_2021_v200_N33W117_Map.tif
+      - https://esa-worldcover.s3.eu-central-1.amazonaws.com/v200/2021/map/ESA_WorldCover_10m_2021_v200_N36W120_Map.tif
+      - https://esa-worldcover.s3.eu-central-1.amazonaws.com/v200/2021/map/ESA_WorldCover_10m_2021_v200_N36W117_Map.tif
+      - https://esa-worldcover.s3.eu-central-1.amazonaws.com/v200/2021/map/ESA_WorldCover_10m_2021_v200_N39W114_Map.tif
+    kind: categorical
+    resampling: mode
+
+granule_filter:
+  - {max_cloud_fraction: 0.8, on_missing: fail}
+  - {max_solar_zenith: 70}
+
+pixel_mask:
+  - {ref: edge_trim, columns: 7}
+  # Cloud is the SpecTf classifier's flag, not `cloud` + `dilated_cloud`: the dilated flag is a
+  # fixed several-kilometre buffer and removes clear ground beside any cloud. `spectf_buffer`
+  # trims the cloud's own margin instead, in sensor pixels; keep it at 3 or below. V003 carries
+  # no spacecraft flag. If SpecTf proves too aggressive over bright ground, list `cloud` beside
+  # `spectf_cloud` for the union of the two.
+  - {ref: l2a_standard, flags: [spectf_cloud, cirrus, water], spectf_buffer: 2}
+  - {ref: landcover, exclude: [water, built-up]}
+  - {ref: cos_i, min_cos_i: 0.3}
+
+scorer:
+  ref: mode_gated_select
+  params:
+    layers: [look_1, look_2]        # what is voted on: each look's native Tetracorder class
+    key: independent                # each group is voted on its own ...
+    select: group                   # ... and picks its own look
+    ignore: {g1: [], g2: []}
+    g2_mask_classes: []
+    min_count: 1
+    tie_break: weighted
+    vote_weight: score              # a vote is the look's quality, 1 - penalty
+    vote_power: 1.0
+    cloud_vote_power: 0.0           # > 0 also scales a vote by (1 - cloud probability)^power
+    normalize: rank                 # each metric is the look's rank in its cell; `bounds` unused
+    weights: {bd_unc: 0.2, fit: 0.2, banddepth: 0.2, cloud_prob: 0.2, scene_cloudiness: 0.2,
+              bare: 0.2, sza: 0.2, vza: 0.2, path_length: 0.2, airmass: 0.2}
+    aliases: {banddepth: [depth_1, depth_2]}   # this directory's role names; the rest are the defaults
+
+snapshot:
+  name: cm-groups-v002-v1
+  layers:
+    # the product: each group's consensus class, decided by the scorer
+    mineral_1:
+      kind: categorical
+      source: scorer.mode_1
+      classes: "layer:look_1"
+      aggregate: {method: vote, min_count: 1, ignore: []}
+    mineral_2:
+      kind: categorical
+      source: scorer.mode_2
+      classes: "layer:look_2"
+      aggregate: {method: vote, min_count: 1, ignore: []}
+    # what the scorer votes on. Delivered as the class of group 1's selected look
+    look_1:
+      kind: categorical
+      source: mineral_1
+      classes: source
+      aggregate: {method: vote, min_count: 1, ignore: []}
+    look_2:
+      kind: categorical
+      source: mineral_2
+      classes: source
+      aggregate: {method: vote, min_count: 1, ignore: []}
+    # group 1: the look selected for it, and its vote
+    depth_1:
+      kind: continuous
+      source: scorer.g1_depth
+      aggregate: {method: best}
+    fit_1:
+      kind: continuous
+      source: scorer.g1_fit
+      aggregate: {method: best}
+    unc_1:
+      kind: continuous
+      source: scorer.g1_unc
+      aggregate: {method: best}
+    acquired_1:
+      kind: continuous
+      source: scorer.g1_acquired
+      aggregate: {method: best}
+    penalty_1:
+      kind: continuous
+      source: scorer.g1_penalty
+      aggregate: {method: best}
+    cloud_prob_1:
+      kind: continuous
+      source: scorer.g1_cloud_prob
+      aggregate: {method: best}
+    count_1:
+      kind: continuous
+      source: scorer.g1_count
+      aggregate: {method: best}
+    votes_1:
+      kind: continuous
+      source: scorer.g1_votes
+      aggregate: {method: best}
+    voters_1:
+      kind: continuous
+      source: scorer.g1_voters
+      aggregate: {method: best}
+    vote_share_1:
+      kind: continuous
+      source: scorer.g1_vote_share
+      aggregate: {method: best}
+    runner_up_1:
+      kind: continuous
+      source: scorer.g1_runner_up
+      aggregate: {method: best}
+    # group 2: the look selected for it, and its vote
+    depth_2:
+      kind: continuous
+      source: scorer.g2_depth
+      aggregate: {method: best}
+    fit_2:
+      kind: continuous
+      source: scorer.g2_fit
+      aggregate: {method: best}
+    unc_2:
+      kind: continuous
+      source: scorer.g2_unc
+      aggregate: {method: best}
+    acquired_2:
+      kind: continuous
+      source: scorer.g2_acquired
+      aggregate: {method: best}
+    penalty_2:
+      kind: continuous
+      source: scorer.g2_penalty
+      aggregate: {method: best}
+    cloud_prob_2:
+      kind: continuous
+      source: scorer.g2_cloud_prob
+      aggregate: {method: best}
+    count_2:
+      kind: continuous
+      source: scorer.g2_count
+      aggregate: {method: best}
+    votes_2:
+      kind: continuous
+      source: scorer.g2_votes
+      aggregate: {method: best}
+    voters_2:
+      kind: continuous
+      source: scorer.g2_voters
+      aggregate: {method: best}
+    vote_share_2:
+      kind: continuous
+      source: scorer.g2_vote_share
+      aggregate: {method: best}
+    runner_up_2:
+      kind: continuous
+      source: scorer.g2_runner_up
+      aggregate: {method: best}
+    # shared: valid looks, and the cover fractions of group 1's look
+    n_valid:
+      kind: continuous
+      source: scorer.n_valid
+      aggregate: {method: best}
+    bare:
+      kind: continuous
+      source: frcov
+      aggregate: {method: best}
+    pv:
+      kind: continuous
+      source: pv
+      aggregate: {method: best}
+    npv:
+      kind: continuous
+      source: npv
+      aggregate: {method: best}
+
+outputs:
+  bucket: ./out
+  formats: [cog]
+  stac: true
+  colors: "@ref:colors-usgs-1995.yaml"   # the 1995 USGS Cuprite groups; unnamed classes follow on_unmapped
+  render:
+    mineral_1:
+      mapper: categorical
+      on_unmapped: grey
+      alpha_from: {band: vote_share_1, domain: [0.25, 1.0], range: [60, 255]}
+    mineral_2:
+      mapper: categorical
+      on_unmapped: grey
+      alpha_from: {band: vote_share_2, domain: [0.25, 1.0], range: [60, 255]}
+
+budget:
+  max_tiles: 24
+  max_granules: 200
+  max_vcpu_hours: 40
+  on_exceed: fail
