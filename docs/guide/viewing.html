@@ -193,6 +193,8 @@ band, so outside the run is transparent rather than zero.</td></tr>
 <code>--layer</code> / <code>--period</code> narrow it. Re-run it with <code>--force</code> after
 republishing a run: Finalize rewrites <code>collection.json</code> and drops the mosaic
 assets.</td></tr>
+<tr><td>A tile that cannot be read</td><td>Fails that layer, after retrying the request: a mosaic is
+never written with a tile missing. Layers already built are kept, so run the command again.</td></tr>
 <tr><td>Point readings</td><td>Unchanged: a click still reads the full-resolution per-tile
 files.</td></tr>
 </tbody>

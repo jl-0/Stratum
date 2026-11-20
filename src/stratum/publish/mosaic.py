@@ -149,6 +149,11 @@ def plan_mosaics(run_id: str, items: Sequence[Mapping[str, Any]], *,
             for (period, key), assets in grouped.items()]
 
 
+# A layer reads thousands of tiles over HTTP for many minutes, so a throttled or dropped request
+# (S3 answers 503 under load) is expected; without these GDAL does not retry at all.
+HTTP_RETRY = {"GDAL_HTTP_MAX_RETRY": "8", "GDAL_HTTP_RETRY_DELAY": "2"}
+
+
 def build_mosaic(sources: Sequence[str], dest: Path, *, nearest: bool,
                  config: Mapping[str, str] | None = None) -> Path:
     """Merge `sources` (GDAL paths) into one web-mercator COG at `dest`.
@@ -163,10 +168,12 @@ def build_mosaic(sources: Sequence[str], dest: Path, *, nearest: bool,
     resampling = resampling_for(categorical=nearest)
     dest = Path(dest)
     dest.parent.mkdir(parents=True, exist_ok=True)
-    with gdal.config_options(dict(config or {})), \
+    with gdal.config_options({**HTTP_RETRY, **(config or {})}), \
             tempfile.TemporaryDirectory(dir=dest.parent, prefix=".mosaic-") as tmp:
         vrt = str(Path(tmp) / "sources.vrt")
-        gdal.BuildVRT(vrt, list(sources)).Close()
+        # Strict: a source that will not open fails the layer. The default skips it with a
+        # warning, and the mosaic is then published with that tile missing.
+        gdal.BuildVRT(vrt, list(sources), strict=True).Close()
         staged = Path(tmp) / dest.name
         gdal.Translate(str(staged), vrt, format="COG", creationOptions=[
             "TILING_SCHEME=GoogleMapsCompatible", f"BLOCKSIZE={BLOCKSIZE}",

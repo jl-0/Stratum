@@ -23,6 +23,7 @@ from stratum.publish.mosaic import (
     BLOCKSIZE,
     MosaicJob,
     _summed_classes,
+    build_mosaic,
     plan_mosaics,
     run_mosaics,
 )
@@ -121,6 +122,15 @@ def test_a_mosaic_is_a_web_mercator_cog(products: Products) -> None:
         tile = BLOCKSIZE * src.transform.a
         for offset in (src.transform.c + render.MERCATOR_R, render.MERCATOR_R - src.transform.f):
             assert offset / tile == pytest.approx(round(offset / tile), abs=1e-6)
+
+
+def test_a_source_that_will_not_open_fails_the_layer(products: Products, tmp_path: Path) -> None:
+    """Never a mosaic with a tile quietly missing: GDAL's default is to skip the source."""
+    job = plan_mosaics(RUN, products.items(RUN))[0]
+    sources = [str(products.resolve(s)) for s in job.sources] + [str(tmp_path / "gone.tif")]
+    with pytest.raises(RuntimeError):
+        build_mosaic(sources, tmp_path / "out" / "m.tif", nearest=job.nearest)
+    assert not (tmp_path / "out" / "m.tif").exists()
 
 
 def test_a_categorical_mosaic_holds_only_ids_its_tiles_held(products: Products) -> None:
